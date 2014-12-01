@@ -18,21 +18,23 @@
  */
 package org.languagetool.rules.patterns;
 
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.languagetool.JLanguageTool;
-import org.languagetool.language.Demo;
-import org.languagetool.rules.RuleMatch;
+import static junit.framework.TestCase.assertTrue;
+import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.*;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static junit.framework.TestCase.assertTrue;
-import static org.hamcrest.CoreMatchers.is;
-import static org.junit.Assert.assertThat;
+import org.junit.BeforeClass;
+import org.junit.Ignore;
+import org.junit.Test;
+import org.languagetool.JLanguageTool;
+import org.languagetool.language.Demo;
+import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.patterns.Match.CaseConversion;
+import org.languagetool.rules.patterns.Match.IncludeRange;
 
 public class PatternRuleMatcherTest {
 
@@ -42,7 +44,7 @@ public class PatternRuleMatcherTest {
   public static void setup() throws IOException {
     langTool = new JLanguageTool(new Demo());
   }
-  
+
   @Test
   public void testMatch() throws Exception {
     final PatternRuleMatcher matcher = new PatternRuleMatcher(getPatternRule("my test"), false);
@@ -108,9 +110,8 @@ public class PatternRuleMatcherTest {
     // regex syntax: a? b c? d e
     final PatternRuleMatcher matcher = getMatcher(elementA, makeElement("b"), elementC, makeElement("d"), makeElement("e"));
     final RuleMatch[] matches = getMatches("a b c d e", matcher);
-    assertThat(matches.length, is(2));  // not sure if this is correct, it's not a longest match...
+    assertThat(matches.length, is(1));  // just the longest match...
     assertPosition(matches[0], 0, 9);
-    assertPosition(matches[1], 2, 9);
   }
 
   @Test
@@ -134,12 +135,31 @@ public class PatternRuleMatcherTest {
   }
 
   @Test
+  public void testZeroMinOccurrencesWithSuggestion() throws Exception {
+    final Element elementB = makeElement("b");
+    elementB.setMinOccurrence(0);
+    
+    List<Element> elements = Arrays.asList(makeElement("a"), elementB, makeElement("c"));   // regex: a b? c
+    PatternRule rule = new PatternRule("", new Demo(), elements, "my description", "<suggestion>\\1 \\2 \\3</suggestion>", "short message");
+    PatternRuleMatcher matcher = new PatternRuleMatcher(rule, false);
+    
+    // we need to add this line to trigger proper replacement but I am not sure why :(
+    rule.addSuggestionMatch(new Match(null, null, false, null, null, CaseConversion.NONE, false, false, IncludeRange.NONE));
+    
+    RuleMatch[] matches = getMatches("a b c", matcher);
+    assertEquals(Arrays.asList("a b c"), matches[0].getSuggestedReplacements());
+
+    RuleMatch[] matches2 = getMatches("a c", matcher);
+    assertEquals(Arrays.asList("a c"), matches2[0].getSuggestedReplacements());
+  }
+
+  @Test
   @Ignore("min can only be 0 or 1 so far")
   public void testTwoMinOccurrences() throws Exception {
     final Element elementB = makeElement("b");
     elementB.setMinOccurrence(2);
     elementB.setMaxOccurrence(3);
-    final PatternRuleMatcher matcher = getMatcher(makeElement("a"), elementB, makeElement("c"));  // regex: a b b+ c
+    final PatternRuleMatcher matcher = getMatcher(makeElement("a"), elementB, makeElement("c"));  // regex: a b{2,3} c
     assertCompleteMatch("a b b c", matcher);
     assertCompleteMatch("a b b b c", matcher);
     assertNoMatch("a c", matcher);
@@ -159,7 +179,6 @@ public class PatternRuleMatcherTest {
   }
 
   @Test
-  @Ignore("currently fails")
   public void testTwoMaxOccurrencesWithAnyToken() throws Exception {
     final Element anyElement = makeElement(null);
     anyElement.setMaxOccurrence(2);
@@ -170,7 +189,6 @@ public class PatternRuleMatcherTest {
   }
 
   @Test
-  @Ignore("currently fails")
   public void testThreeMaxOccurrencesWithAnyToken() throws Exception {
     final Element anyElement = makeElement(null);
     anyElement.setMaxOccurrence(3);
@@ -182,7 +200,6 @@ public class PatternRuleMatcherTest {
   }
 
   @Test
-  @Ignore("currently fails")
   public void testZeroMinTwoMaxOccurrencesWithAnyToken() throws Exception {
     final Element anyElement = makeElement(null);
     anyElement.setMinOccurrence(0);
@@ -209,7 +226,7 @@ public class PatternRuleMatcherTest {
     assertPartialMatch("a b c", matcher);
     assertPartialMatch("a b b c", matcher);
     assertPartialMatch("x a b b", matcher);
-    
+
     final RuleMatch[] matches1 = getMatches("a b b b", matcher);
     assertThat(matches1.length, is(1));
     assertPosition(matches1[0], 0, 5);
@@ -230,7 +247,7 @@ public class PatternRuleMatcherTest {
     assertCompleteMatch("a b b", matcher);
     assertCompleteMatch("a b b b", matcher);
     assertPartialMatch("a b b b b", matcher);
-    
+
     final RuleMatch[] matches1 = getMatches("a b b b b", matcher);
     assertThat(matches1.length, is(1));
     assertPosition(matches1[0], 0, 7);
@@ -345,19 +362,16 @@ public class PatternRuleMatcherTest {
     assertNoMatch("a a", matcher);
     assertNoMatch("a x b b b", matcher);
     final RuleMatch[] matches2 = getMatches("a a b", matcher);
-    assertThat(matches2.length , is(2));
+    assertThat(matches2.length , is(1)); // just the longest match
     assertPosition(matches2[0], 0, 5);
-    assertPosition(matches2[1], 2, 5);
 
     final RuleMatch[] matches3 = getMatches("a a b b", matcher);
-    assertThat(matches3.length , is(2));
-    assertPosition(matches3[0], 0, 7);
-    assertPosition(matches3[1], 2, 7);
+    assertThat(matches3.length , is(1));
+    assertPosition(matches3[0], 0, 7); // again, only the longest match
 
     final RuleMatch[] matches4 = getMatches("a a b b b", matcher);
-    assertThat(matches4.length , is(2));
+    assertThat(matches4.length , is(1));
     assertPosition(matches4[0], 0, 9);
-    assertPosition(matches4[1], 2, 9);
   }
 
   @Test
@@ -387,7 +401,7 @@ public class PatternRuleMatcherTest {
     assertCompleteMatch("b x b", matcher);
     assertCompleteMatch("a x x a", matcher);
     assertCompleteMatch("b x x b", matcher);
-    
+
     assertNoMatch("a b", matcher);
     assertNoMatch("b a", matcher);
     assertNoMatch("b x a", matcher);
@@ -401,9 +415,8 @@ public class PatternRuleMatcherTest {
     assertPosition(matches[1], 12, 19);
 
     final RuleMatch[] matches2 = getMatches("xx a b x x x b a", matcher);
-    assertThat(matches2.length , is(2));
+    assertThat(matches2.length , is(1));
     assertPosition(matches2[0], 3, 16);
-    assertPosition(matches2[1], 5, 14);
   }
 
   private RuleMatch[] getMatches(String input, PatternRuleMatcher matcher) throws IOException {
@@ -428,7 +441,7 @@ public class PatternRuleMatcherTest {
     final RuleMatch[] matches = getMatches(input, matcher);
     assertThat(matches.length , is(1));
     assertTrue("Expected partial match, got '" + matches[0] + "' for '" + input + "'",
-            matches[0].getFromPos() > 0 || matches[0].getToPos() < input.length());
+        matches[0].getFromPos() > 0 || matches[0].getToPos() < input.length());
   }
 
   private void assertCompleteMatch(String input, PatternRuleMatcher matcher) throws IOException {

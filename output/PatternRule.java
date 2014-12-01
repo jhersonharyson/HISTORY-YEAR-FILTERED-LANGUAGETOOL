@@ -24,6 +24,7 @@ import java.util.*;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.Language;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.languagetool.tools.StringTools;
 
 /**
@@ -36,49 +37,41 @@ public class PatternRule extends AbstractPatternRule {
 
   private final String shortMessage;
 
-  /**
-   * A list of elements as they appear in XML file (phrases count as single
-   * tokens in case of matches or skipping).
-   */
+  // A list of elements as they appear in XML file (phrases count as single tokens in case of matches or skipping).
   private final List<Integer> elementNo;
 
+  // Tokens used for fast checking whether a rule can ever match.
+  private final Set<String> simpleRuleTokens;
+
+  private final Set<String> inflectedRuleTokens;
+
+  // a list of antipatterns used in the rule.
+  private final List<DisambiguationPatternRule> antiPatterns;
+
+  private RuleFilter filter;
+  private String filterArgs;
   private String message;
   private String suggestionsOutMsg; // extra suggestions outside message
 
-  /** Formatted suggestion elements. **/
   private List<Match> suggestionMatches;
-  
-  /** Formatted suggestion elements outside message. **/
   private List<Match> suggestionMatchesOutMsg;
-
   private Set<String> tokenSet;
+  private Set<String> lemmaSet;
 
-  /**
-   * This property is used for short-circuiting evaluation of the elementNo list
-   * order.
-   */
+  // This property is used for short-circuiting evaluation of the elementNo list order.
   private boolean useList;
 
-  /**
-   * Marks whether the rule is a member of a disjunctive set (in case of OR
-   * operation on phraserefs).
-   **/
+  // Marks whether the rule is a member of a disjunctive set (in case of OR operation on phraserefs).
   private boolean isMemberOfDisjunctiveSet;
 
   /**
-   * @param id
-   *          Id of the Rule. Used in configuration. Should not contain special characters and should
-   *          be stable over time, unless the rule changes completely.
-   * @param language
-   *          Language of the Rule
-   * @param elements
-   *          Element (token) list
-   * @param description
-   *          Description to be shown (name)
-   * @param message
-   *          Message to be displayed to the user
-   * @param shortMessage
-   *          Message to be displayed to the user in the context menu in OpenOffice.org/LibreOffice
+   * @param id Id of the Rule. Used in configuration. Should not contain special characters and should
+   *        be stable over time, unless the rule changes completely.
+   * @param language Language of the Rule
+   * @param elements Element (token) list
+   * @param description Description to be shown (name)
+   * @param message Message to be displayed to the user
+   * @param shortMessage Message to be displayed to the user in the context menu in OpenOffice.org/LibreOffice
    */
   public PatternRule(final String id, final Language language,
       final List<Element> elements, final String description,
@@ -89,7 +82,7 @@ public class PatternRule extends AbstractPatternRule {
     this.elementNo = new ArrayList<>();
     this.suggestionsOutMsg = "";
     String prevName = "";
-    String curName = "";
+    String curName;
     int cnt = 0;
     int loopCnt = 0;
     for (final Element e : patternElements) {
@@ -115,14 +108,18 @@ public class PatternRule extends AbstractPatternRule {
         elementNo.add(1);
         loopCnt++;
       }
-    }    
+    }
+    //don't instantiate a hash for every sentence, simply store it:
+    simpleRuleTokens = getSimpleTokens();
+    inflectedRuleTokens = getInflectedTokens();
+    antiPatterns = new ArrayList<>();
   }  
   
   public PatternRule(final String id, final Language language,
       final List<Element> elements, final String description,
       final String message, final String shortMessage, final String suggestionsOutMsg) {
     this(id, language, elements, description, message, shortMessage);
-    this.suggestionsOutMsg=suggestionsOutMsg;
+    this.suggestionsOutMsg = suggestionsOutMsg;
   }
 
   public PatternRule(final String id, final Language language,
@@ -131,12 +128,22 @@ public class PatternRule extends AbstractPatternRule {
       final boolean isMember) {
     this(id, language, elements, description, message, shortMessage, suggestionsOutMsg);
     this.isMemberOfDisjunctiveSet = isMember;
-  }  
+  }
 
+  /**
+   * Get the message shown to the user if this rule matches.
+   */
   public final String getMessage() {
     return message;
   }
-  
+
+  /**
+   * Set the message shown to the user if this rule matches.
+   */
+  public final void setMessage(final String message) {
+    this.message = message;
+  }
+
   public final String getSuggestionsOutMsg() {
     return suggestionsOutMsg;
   }
@@ -157,7 +164,7 @@ public class PatternRule extends AbstractPatternRule {
   }
 
   /**
-   * Return the pattern as a string.
+   * Return the pattern as a string, using toString() on the pattern elements.
    * 
    * @since 0.9.2
    */
@@ -183,30 +190,28 @@ public class PatternRule extends AbstractPatternRule {
     }
   }
 
-  public final void setMessage(final String message) {
-    this.message = message;
-  }
-
   @Override
-  public final RuleMatch[] match(final AnalyzedSentence text) throws IOException {
+  public final RuleMatch[] match(final AnalyzedSentence sentence) throws IOException {
     try {
       final PatternRuleMatcher matcher = new PatternRuleMatcher(this, useList);
-      return matcher.match(text);
+      return matcher.match(getSentenceWithImmunization(sentence));
     } catch (IOException e) {
-      throw new IOException("Error analyzing sentence: '" + text + "'", e);
+      throw new IOException("Error analyzing sentence: '" + sentence + "'", e);
     } catch (Exception e) {
-      throw new RuntimeException("Error analyzing sentence: '" + text + "'", e);
+      throw new RuntimeException("Error analyzing sentence: '" + sentence + "'", e);
     }
   }
 
+  /** Add formatted suggestion elements. */
   public final void addSuggestionMatch(final Match m) {
     if (suggestionMatches == null) {
       suggestionMatches = new ArrayList<>();
     }
     suggestionMatches.add(m);
   }
-  
-  public final void addSuggestionMatchOutMsg (final Match m) {
+
+  /** Add formatted suggestion elements outside message. */
+  public final void addSuggestionMatchOutMsg(final Match m) {
     if (suggestionMatchesOutMsg == null) {
       suggestionMatchesOutMsg = new ArrayList<>();
     }
@@ -221,21 +226,20 @@ public class PatternRule extends AbstractPatternRule {
   }
 
   /**
+   * For testing only.
+   */
+  final List<DisambiguationPatternRule> getAntiPatterns() {
+    return antiPatterns;
+  }
+
+  /**
    * A fast check whether this rule can be ignored for the given sentence
    * because it can never match. Used internally for performance optimization.
    * @since 2.4
    */
   public boolean canBeIgnoredFor(AnalyzedSentence sentence) {
-    Set<String> simpleRuleTokens = getSimpleTokens();
-    if (simpleRuleTokens.isEmpty()) {
-      // this is one of the rules too complicated for this pre-check
-      return false;
-    }
-    if (!sentence.getTokenSet().containsAll(simpleRuleTokens)) {
-      // this rule can never match for the given sentence
-      return true;
-    }
-    return false;
+    return (!simpleRuleTokens.isEmpty() && !sentence.getTokenSet().containsAll(simpleRuleTokens))
+            || (!inflectedRuleTokens.isEmpty() && !sentence.getLemmaSet().containsAll(inflectedRuleTokens));
   }
 
   // tokens that just refer to a word - no regex, no inflection etc.
@@ -246,13 +250,30 @@ public class PatternRule extends AbstractPatternRule {
         if (!element.getNegation() && !element.isRegularExpression() 
                 && !element.isReferenceElement() && !element.isInflected() && element.getMinOccurrence() > 0) {
           String str = element.getString();
-          if (!str.isEmpty()) {
+          if (!StringTools.isEmpty(str)) {
             tokenSet.add(str.toLowerCase());
           }
         }
       }
     }
     return tokenSet;
+  }
+
+  // tokens that just refer to a lemma - no regex etc.
+  private synchronized Set<String> getInflectedTokens() {
+    if (lemmaSet == null) {
+      lemmaSet = new HashSet<>();
+      for (Element element : patternElements) {
+        if (!element.getNegation() && !element.isRegularExpression()
+                && !element.isReferenceElement() && element.isInflected() && element.getMinOccurrence() > 0) {
+          String str = element.getString();
+          if (!StringTools.isEmpty(str)) {
+            lemmaSet.add(str.toLowerCase());
+          }
+        }
+      }
+    }
+    return lemmaSet;
   }
 
   List<Integer> getElementNo() {
@@ -269,6 +290,49 @@ public class PatternRule extends AbstractPatternRule {
   
   List<Match> getSuggestionMatchesOutMsg() {
     return suggestionMatchesOutMsg;
+  }
+
+  /** @since 2.7 */
+  void setFilter(RuleFilter filter) {
+    this.filter = filter;
+  }
+
+  /** @since 2.7 */
+  RuleFilter getFilter() {
+    return filter;
+  }
+
+  /** @since 2.7 */
+  void setFilterArguments(String filterArgs) {
+    this.filterArgs = filterArgs;
+  }
+
+  /** @since 2.7 */
+  String getFilterArguments() {
+    return filterArgs;
+  }
+
+  /**
+   * Set up the list of antipatterns used to immunize tokens, i.e., make them
+   * non-matchable by the current rule. Useful for multi-word complex exceptions,
+   * such as multi-word idiomatic expressions
+   * @param antiPatterns A list of antiPatterns, implemented as {@code DisambiguationPatternRule}.
+   * @since 2.5
+   */
+  public void setAntiPatterns(List<DisambiguationPatternRule> antiPatterns) {
+    this.antiPatterns.addAll(antiPatterns);
+  }
+
+  private AnalyzedSentence getSentenceWithImmunization(AnalyzedSentence sentence) throws IOException {
+    if (antiPatterns != null && !antiPatterns.isEmpty()) {
+      //we need a copy of the sentence, not reference to the old one
+      AnalyzedSentence immunizedSentence = sentence.copy(sentence);
+      for (final DisambiguationPatternRule patternRule : antiPatterns) {
+        immunizedSentence = patternRule.replace(immunizedSentence);
+      }
+      return immunizedSentence;
+    }
+    return sentence;
   }
 
 }

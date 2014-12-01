@@ -21,8 +21,7 @@ package org.languagetool.gui;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.Desktop;
-import java.awt.Dimension;
+import java.awt.ComponentOrientation;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -35,30 +34,33 @@ import java.awt.event.MouseListener;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.net.URL;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.ResourceBundle;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.swing.BorderFactory;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
-import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
-import javax.swing.JTextPane;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.EventListenerList;
-import javax.swing.event.HyperlinkEvent;
-import javax.swing.event.HyperlinkListener;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 import javax.swing.text.AbstractDocument;
@@ -71,14 +73,13 @@ import javax.swing.text.Position;
 import javax.swing.text.View;
 
 import org.apache.commons.lang.StringUtils;
-import org.apache.tika.language.LanguageIdentifier;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.MultiThreadedJLanguageTool;
-import org.languagetool.rules.IncorrectExample;
+import org.languagetool.language.LanguageIdentifier;
+import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
-import org.languagetool.tools.LanguageIdentifierTools;
 
 /**
  * Support for associating a LanguageTool instance and a JTextComponent
@@ -88,39 +89,58 @@ import org.languagetool.tools.LanguageIdentifierTools;
  */
 class LanguageToolSupport {
 
-  private static final String CONFIG_FILE = ".languagetool.cfg";
+  static final String CONFIG_FILE = ".languagetool.cfg";
 
+  //maximum entries in the activate rule menu.
+  //If entries' number is bigger, create per category submenus
+  //can set to 0 to always create category submenus
+  private static final int MAX_RULES_NO_CATEGORY_MENU = 12;
+  //maximum rule menu entries, if more create a More submenu
+  private static final int MAX_RULES_PER_MENU = 12;
+  //maximum category menu entries, if more create a More submenu
+  private static final int MAX_CATEGORIES_PER_MENU = 12;
+
+  private final UndoRedoSupport undo;
+  private final LanguageIdentifier langIdentifier;
   private final JFrame frame;
   private final JTextComponent textComponent;
   private final EventListenerList listenerList = new EventListenerList();
   private final ResourceBundle messages;
   private final Map<Language, ConfigurationDialog> configDialogs = new HashMap<>();
+  private final List<RuleMatch> ruleMatches;
+  private final List<Span> documentSpans;
 
   private JLanguageTool languageTool;
-  // a red color highlight painter for marking spelling errors
-  private HighlightPainter redPainter;
-  // a blue color highlight painter for marking grammar errors
-  private HighlightPainter bluePainter;
-  private List<RuleMatch> ruleMatches;
-  private List<Span> documentSpans;
   private ScheduledExecutorService checkExecutor;
   private MouseListener mouseListener;
   private ActionListener actionListener;
-  private int millisecondDelay = 1500;//ms
+  private int millisecondDelay = 1500;
   private AtomicInteger check;
   private boolean popupMenuEnabled = true;
   private boolean backgroundCheckEnabled = true;
   private Configuration config;
-  private Language currentLanguage;
   private boolean mustDetectLanguage = false;
 
   /**
    * LanguageTool support for a JTextComponent
    */
   public LanguageToolSupport(JFrame frame, JTextComponent textComponent) {
+    this(frame, textComponent, null);
+  }
+
+  /**
+   * LanguageTool support for a JTextComponent
+   * 
+   * @since 2.7
+   */
+  public LanguageToolSupport(JFrame frame, JTextComponent textComponent, UndoRedoSupport support) {
     this.frame = frame;
     this.textComponent = textComponent;
     this.messages = JLanguageTool.getMessageBundle();
+    ruleMatches = new ArrayList<>();
+    documentSpans = new ArrayList<>();    
+    this.undo = support;
+    this.langIdentifier = new LanguageIdentifier();
     init();
   }
 
@@ -154,88 +174,144 @@ class LanguageToolSupport {
     return this.ruleMatches;
   }
 
-  private Language getDefaultLanguage() {
-    if (config.getLanguage() != null) {
-      return config.getLanguage();
-    } else {
-      return Language.getLanguageForLocale(Locale.getDefault());
-    }
-  }
-
-  /**
-   * Warm-up: we have a lot of lazy init in LT, which causes the first check to
-   * be very slow (several seconds) for languages with a lot of data and a lot of
-   * rules. We just assume that the default language is the language that the user
-   * often uses and init the LT object for that now, not just when it's first used.
-   * This makes the first check feel much faster:
-   */
-  private void warmUpChecker() {
-    getCurrentLanguageTool();
-  }
-
   ConfigurationDialog getCurrentConfigDialog() {
-    Language language = this.currentLanguage;
+    Language language = this.languageTool.getLanguage();
     final ConfigurationDialog configDialog;
     if (configDialogs.containsKey(language)) {
       configDialog = configDialogs.get(language);
     } else {
-      configDialog = new ConfigurationDialog(frame, false);
-      configDialog.setMotherTongue(config.getMotherTongue());
-      configDialog.setDisabledRules(config.getDisabledRuleIds());
-      configDialog.setEnabledRules(config.getEnabledRuleIds());
-      configDialog.setDisabledCategories(config.getDisabledCategoryNames());
-      configDialog.setRunServer(config.getRunServer());
-      configDialog.setServerPort(config.getServerPort());
-      configDialog.setUseGUIConfig(config.getUseGUIConfig());
+      configDialog = new ConfigurationDialog(frame, false, config);
       configDialogs.put(language, configDialog);
     }
     return configDialog;
   }
 
-  private void getCurrentLanguageTool() {
+  void reloadConfig() {
+    //FIXME
+    //if mother tongue changes then create new JLanguageTool instance
+
+    boolean update = false;
+  
+    Set<String> disabledRules = config.getDisabledRuleIds();
+    if (disabledRules == null) {
+      disabledRules = Collections.emptySet();
+    }
+
+    Set<String> common = new HashSet<>(disabledRules);
+    common.retainAll(languageTool.getDisabledRules());
+    Set<String> toDisable = new HashSet<>(disabledRules);
+    toDisable.removeAll(common);
+    Set<String> toEnable = new HashSet<>(languageTool.getDisabledRules());
+    toEnable.removeAll(common);
+    
+    for (final String ruleId : toDisable) {
+      languageTool.disableRule(ruleId);
+      update = true;
+    }
+    for (final String ruleId : toEnable) {
+      languageTool.enableRule(ruleId);
+      update = true;
+    }
+
+    Set<String> disabledCategories = config.getDisabledCategoryNames();
+    if (disabledCategories == null) {
+      disabledCategories = Collections.emptySet();
+    }
+    common = new HashSet<>(disabledCategories);
+    common.retainAll(languageTool.getDisabledCategories());
+    toDisable = new HashSet<>(disabledCategories);
+    toDisable.removeAll(common);
+    toEnable = new HashSet<>(languageTool.getDisabledCategories());
+    toEnable.removeAll(common);
+
+    if(!toDisable.isEmpty()) {
+      languageTool.getDisabledCategories().addAll(toDisable);
+      // ugly hack to trigger reInitSpellCheckIgnoreWords()
+      languageTool.disableRules(new ArrayList<String>());
+      update = true;
+    }
+    if(!toEnable.isEmpty()) {
+      languageTool.getDisabledCategories().removeAll(toEnable);
+      // ugly hack to trigger reInitSpellCheckIgnoreWords()
+      languageTool.disableRules(new ArrayList<String>());
+      update = true;
+    }
+
+    Set<String> enabledRules = config.getEnabledRuleIds();
+    if (enabledRules == null) {
+      enabledRules = Collections.emptySet();
+    }
+    for (String ruleName : enabledRules) {
+      languageTool.enableDefaultOffRule(ruleName);
+      languageTool.enableRule(ruleName);
+    }
+
+    if(update) {
+      //FIXME
+      //we could skip a full check if the user disabled but didn't enable rules
+      checkImmediately(null);
+      fireEvent(LanguageToolEvent.Type.RULE_ENABLED, null);
+    }
+  }
+
+  private void loadConfig() {
+    final Set<String> disabledRules = config.getDisabledRuleIds();
+    if (disabledRules != null) {
+      for (final String ruleId : disabledRules) {
+        languageTool.disableRule(ruleId);
+      }
+    }
+    final Set<String> disabledCategories = config.getDisabledCategoryNames();
+    if (disabledCategories != null) {
+      for (final String categoryName : disabledCategories) {
+        languageTool.disableCategory(categoryName);
+      }
+    }
+    final Set<String> enabledRules = config.getEnabledRuleIds();
+    if (enabledRules != null) {
+      for (String ruleName : enabledRules) {
+        languageTool.enableDefaultOffRule(ruleName);
+        languageTool.enableRule(ruleName);
+      }
+    }
+  }
+
+  private void reloadLanguageTool(Language language) {
     try {
-      config = new Configuration(new File(System.getProperty("user.home")), CONFIG_FILE, currentLanguage);
-      final ConfigurationDialog configDialog = getCurrentConfigDialog();
-      languageTool = new MultiThreadedJLanguageTool(currentLanguage, configDialog.getMotherTongue());
+      //FIXME
+      //no need to read again the file
+      config = new Configuration(new File(System.getProperty("user.home")), CONFIG_FILE, language);
+      //config still contains old language, update it
+      this.config.setLanguage(language);
+      languageTool = new MultiThreadedJLanguageTool(language, config.getMotherTongue());
       languageTool.activateDefaultPatternRules();
       languageTool.activateDefaultFalseFriendRules();
-      final Set<String> disabledRules = configDialog.getDisabledRuleIds();
-      if (disabledRules != null) {
-        for (final String ruleId : disabledRules) {
-          languageTool.disableRule(ruleId);
-        }
-      }
-      final Set<String> disabledCategories = configDialog.getDisabledCategoryNames();
-      if (disabledCategories != null) {
-        for (final String categoryName : disabledCategories) {
-          languageTool.disableCategory(categoryName);
-        }
-      }
-      final Set<String> enabledRules = configDialog.getEnabledRuleIds();
-      if (enabledRules != null) {
-        for (String ruleName : enabledRules) {
-          languageTool.enableDefaultOffRule(ruleName);
-          languageTool.enableRule(ruleName);
-        }
-      }
+      loadConfig();
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }
 
   private void init() {
-    LanguageIdentifierTools.addLtProfiles();
     try {
       config = new Configuration(new File(System.getProperty("user.home")), CONFIG_FILE, null);
     } catch (IOException ex) {
       throw new RuntimeException("Could not load configuration", ex);
     }
-    currentLanguage = getDefaultLanguage();
-    warmUpChecker();
-    redPainter = new HighlightPainter(Color.red);
-    bluePainter = new HighlightPainter(Color.blue);
-    ruleMatches = new ArrayList<>();
-    documentSpans = new ArrayList<>();
+
+    Language defaultLanguage = config.getLanguage();
+    if(defaultLanguage == null) {
+        defaultLanguage = Language.getLanguageForLocale(Locale.getDefault());
+    }
+
+    /**
+     * Warm-up: we have a lot of lazy init in LT, which causes the first check to
+     * be very slow (several seconds) for languages with a lot of data and a lot of
+     * rules. We just assume that the default language is the language that the user
+     * often uses and init the LT object for that now, not just when it's first used.
+     * This makes the first check feel much faster:
+     */    
+    reloadLanguageTool(defaultLanguage);
 
     checkExecutor = new ScheduledThreadPoolExecutor(1, new ThreadFactory() {
       @Override
@@ -284,7 +360,7 @@ class LanguageToolSupport {
       }
     });
 
-    this.textComponent.addMouseListener(mouseListener = new MouseListener() {
+    mouseListener = new MouseListener() {
       @Override
       public void mouseClicked(MouseEvent me) {
       }
@@ -307,7 +383,8 @@ class LanguageToolSupport {
       public void mouseEntered(MouseEvent me) {}
       @Override
       public void mouseExited(MouseEvent me) {}
-    });
+    };
+    this.textComponent.addMouseListener(mouseListener);
 
     actionListener = new ActionListener() {
       @Override
@@ -364,31 +441,56 @@ class LanguageToolSupport {
   }
 
   public void setLanguage(Language language) {
-    this.currentLanguage = language;
-    getCurrentLanguageTool();
+    reloadLanguageTool(language);
     if (backgroundCheckEnabled) {
       checkImmediately(null);
     }
+  }
+
+  Language getLanguage() {
+      return this.languageTool.getLanguage();
   }
 
   public Configuration getConfig() {
     return config;
   }
 
-  public JLanguageTool getLanguageTool() {
+  // called from Main.showOptions() and Main.tagTextAndDisplayResults()
+  JLanguageTool getLanguageTool() {
     return languageTool;
   }
 
-  void disableRule(String rule) {
-    config.getDisabledRuleIds().add(rule);
-    languageTool.disableRule(rule);
-    updateHighlights(rule);
+  void disableRule(String ruleId) {
+    Rule rule = this.getRuleForId(ruleId);
+    if(rule == null) {
+      //System.err.println("No rule with id: <"+ruleId+">");
+      return;
+    }
+    if(rule.isDefaultOff()) {
+      config.getEnabledRuleIds().remove(ruleId);
+    }
+    else {
+      config.getDisabledRuleIds().add(ruleId);
+    }
+    languageTool.disableRule(ruleId);
+    updateHighlights(ruleId);
     fireEvent(LanguageToolEvent.Type.RULE_DISABLED, null);
   }
 
-  void enableRule(String rule) {
-    config.getDisabledRuleIds().remove(rule);
-    languageTool.enableRule(rule);
+  void enableRule(String ruleId) {
+    Rule rule = this.getRuleForId(ruleId);
+    if(rule == null) {
+      //System.err.println("No rule with id: <"+ruleId+">");
+      return;
+    }
+    if(rule.isDefaultOff()) {
+      config.getEnabledRuleIds().add(ruleId);
+      languageTool.enableDefaultOffRule(ruleId);
+    }
+    else {
+      config.getDisabledRuleIds().remove(ruleId);
+    }
+    languageTool.enableRule(ruleId);
     fireEvent(LanguageToolEvent.Type.RULE_ENABLED, null);
     checkImmediately(null);
   }
@@ -413,10 +515,10 @@ class LanguageToolSupport {
     JPopupMenu popup = new JPopupMenu("Grammar Menu");
     if (span != null) {
       JLabel msgItem = new JLabel("<html>"
-          + span.msg.replace("<suggestion>", "<b>").replace("</suggestion>", "</b>")
-          + "</html>");
+              + span.msg.replace("<suggestion>", "<b>").replace("</suggestion>", "</b>")
+              + "</html>");
       msgItem.setToolTipText(
-          span.desc.replace("<suggestion>", "").replace("</suggestion>", ""));
+              span.desc.replace("<suggestion>", "").replace("</suggestion>", ""));
       msgItem.setBorder(new JMenuItem().getBorder());
       popup.add(msgItem);
 
@@ -439,7 +541,7 @@ class LanguageToolSupport {
       });
       popup.add(moreItem);
 
-      JMenuItem ignoreItem = new JMenuItem(messages.getString("guiOOoIgnoreButton"));
+      JMenuItem ignoreItem = new JMenuItem(messages.getString("guiTurnOffRule"));
       ignoreItem.addActionListener(new ActionListener() {
         @Override
         public void actionPerformed(ActionEvent e) {
@@ -447,6 +549,8 @@ class LanguageToolSupport {
         }
       });
       popup.add(ignoreItem);
+      popup.applyComponentOrientation(
+        ComponentOrientation.getOrientation(Locale.getDefault()));
     }
 
     List<Rule> disabledRules = getDisabledRules();
@@ -500,7 +604,48 @@ class LanguageToolSupport {
   }
 
   private void addDisabledRulesToMenu(List<Rule> disabledRules, JMenu menu) {
+    if (disabledRules.size() <= MAX_RULES_NO_CATEGORY_MENU) {
+      createRulesMenu(menu, disabledRules);
+      return;
+    }
+
+    TreeMap<String, ArrayList<Rule>> categories = new TreeMap<>();
     for (Rule rule : disabledRules) {
+      if (!categories.containsKey(rule.getCategory().getName())) {
+        categories.put(rule.getCategory().getName(), new ArrayList<Rule>());
+      }
+      categories.get(rule.getCategory().getName()).add(rule);
+    }
+
+    JMenu parent = menu;
+    int count = 0;
+    for (String category : categories.keySet()) {
+      count++;
+      JMenu submenu = new JMenu(category);
+      parent.add(submenu);
+      createRulesMenu(submenu, categories.get(category));
+
+      if(categories.keySet().size() <= MAX_CATEGORIES_PER_MENU) {
+        continue;
+      }
+
+      //if menu contains MAX_CATEGORIES_PER_MENU-1, add a `more` menu
+      //but only if the remain entries are more than one
+      if ((count % (MAX_CATEGORIES_PER_MENU - 1) == 0)
+              && (categories.keySet().size() - count > 1)) {
+        JMenu more = new JMenu(messages.getString("guiActivateRuleMoreCategories"));
+        parent.add(more);
+        parent = more;
+      }
+    }
+  }
+
+  private void createRulesMenu(JMenu parent, List<Rule> rules) {
+    JMenu menu = parent;
+    int count = 0;
+
+    for (Rule rule : rules) {
+      count++;
       final String id = rule.getId();
       JMenuItem ruleItem = new JMenuItem(rule.getDescription());
       ruleItem.addActionListener(new ActionListener() {
@@ -510,6 +655,19 @@ class LanguageToolSupport {
         }
       });
       menu.add(ruleItem);
+
+      if(rules.size() <= MAX_RULES_PER_MENU) {
+        continue;
+      }
+
+      //if menu contains MAX_RULES_PER_MENU-1, add a `more` menu
+      //but only if the remain entries are more than one
+      if((count % (MAX_RULES_PER_MENU - 1) == 0)
+              && (rules.size() - count > 1)) {
+        JMenu more = new JMenu(messages.getString("guiActivateRuleMoreRules"));
+        menu.add(more);
+        menu = more;
+      }
     }
   }
 
@@ -537,6 +695,9 @@ class LanguageToolSupport {
     Document doc = this.textComponent.getDocument();
     if (doc != null) {
       try {
+        if(this.undo != null) {
+          this.undo.startCompoundEdit();
+        }
         if (doc instanceof AbstractDocument) {
           ((AbstractDocument) doc).replace(start, end - start, str, null);
         } else {
@@ -545,6 +706,10 @@ class LanguageToolSupport {
         }
       } catch (BadLocationException e) {
         throw new IllegalArgumentException(e);
+      } finally {
+        if(this.undo != null) {
+          this.undo.endCompoundEdit();
+        }
       }
     }
   }
@@ -568,11 +733,8 @@ class LanguageToolSupport {
   }
 
   Language autoDetectLanguage(String text) {
-    final LanguageIdentifier langIdentifier = new LanguageIdentifier(text);
-    Language lang;
-    try {
-      lang = Language.getLanguageForShortName(langIdentifier.getLanguage());
-    } catch (IllegalArgumentException e) {
+    Language lang = langIdentifier.detectLanguage(text);
+    if (lang == null) {
       lang = Language.getLanguageForLocale(Locale.getDefault());
     }
     if (lang.hasVariant()) {
@@ -587,9 +749,8 @@ class LanguageToolSupport {
       mustDetectLanguage = false;
       if (!this.textComponent.getText().isEmpty()) {
         Language detectedLanguage = autoDetectLanguage(this.textComponent.getText());
-        if (!detectedLanguage.equals(this.currentLanguage)) {
-          this.currentLanguage = detectedLanguage;
-          getCurrentLanguageTool();
+        if (!detectedLanguage.equals(this.languageTool.getLanguage())) {
+          reloadLanguageTool(detectedLanguage);
           if (SwingUtilities.isEventDispatchThread()) {
             fireEvent(LanguageToolEvent.Type.LANGUAGE_CHANGED, caller);
           } else {
@@ -646,7 +807,7 @@ class LanguageToolSupport {
 
   private void removeHighlights() {
     for (Highlighter.Highlight hl : textComponent.getHighlighter().getHighlights()) {
-      if (hl.getPainter() == redPainter || hl.getPainter() == bluePainter) {
+      if (hl.getPainter() instanceof HighlightPainter) {
         textComponent.getHighlighter().removeHighlight(hl);
       }
     }
@@ -691,7 +852,7 @@ class LanguageToolSupport {
         continue;
       }
       matches.add(match);
-      createSpan(spans, match);
+      spans.add(new Span(match));
     }
     prepareUpdateHighlights(matches, spans);
   }
@@ -699,7 +860,7 @@ class LanguageToolSupport {
   private void updateHighlights(List<RuleMatch> matches) {
     List<Span> spans = new ArrayList<>();
     for (RuleMatch match : matches) {
-      createSpan(spans, match);
+      spans.add(new Span(match));
     }
     prepareUpdateHighlights(matches, spans);
   }
@@ -716,115 +877,28 @@ class LanguageToolSupport {
     removeHighlights();
 
     Highlighter h = textComponent.getHighlighter();
-    List<Span> spellErrors = new ArrayList<>();
-    List<Span> grammarErrors = new ArrayList<>();
 
     for (Span span : documentSpans) {
       if (span.start == span.end) {
         continue;
       }
-      if (span.rule.isSpellingRule()) {
-        spellErrors.add(span);
-      } else {
-        grammarErrors.add(span);
-      }
-    }
-
-    for (Span span : grammarErrors) {
       try {
         if (span.start < span.end) { //to avoid the BadLocationException
-          h.addHighlight(span.start, span.end, bluePainter);
+          ITSIssueType issueType = span.rule.getLocQualityIssueType();
+          Color colorForIssueType = getConfig().getErrorColors().get(issueType);
+          Color bgColor = colorForIssueType != null ? colorForIssueType : null;
+          Color underlineColor = ITSIssueType.Misspelling.equals(span.rule.getLocQualityIssueType()) ? Color.red : Color.blue;
+          HighlightPainter painter = new HighlightPainter(bgColor, underlineColor);
+          h.addHighlight(span.start, span.end, painter);
         }
       } catch (BadLocationException ex) {
         ex.printStackTrace();
       }
     }
-    for (Span span : spellErrors) {
-      try {
-        if (span.start < span.end) { //to avoid the BadLocationException
-          h.addHighlight(span.start, span.end, redPainter);
-        }
-      } catch (BadLocationException ex) {
-        ex.printStackTrace();
-      }
-    }
-  }
-
-  private void createSpan(List<Span> spans, RuleMatch match) {
-    Span span = new Span();
-    span.start = match.getFromPos();
-    span.end = match.getToPos();
-    span.msg = StringUtils.isNotEmpty(match.getShortMessage()) ? match.getShortMessage() : match.getMessage();
-    span.msg = Tools.shortenComment(span.msg);
-    span.desc = match.getMessage();
-    span.replacement = new ArrayList<>();
-    span.replacement.addAll(match.getSuggestedReplacements());
-    span.rule = match.getRule();
-    spans.add(span);
   }
 
   private void showDialog(Component parent, String title, String message, Rule rule) {
-    int dialogWidth = 320;
-    JTextPane textPane = new JTextPane();
-    textPane.setEditable(false);
-    textPane.setContentType("text/html");
-    textPane.setBorder(BorderFactory.createEmptyBorder());
-    textPane.setOpaque(false);
-    textPane.setBackground(new Color(0, 0, 0, 0));
-    textPane.addHyperlinkListener(new HyperlinkListener() {
-      @Override
-      public void hyperlinkUpdate(HyperlinkEvent e) {
-        if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
-          if (Desktop.isDesktopSupported()) {
-            try {
-              Desktop.getDesktop().browse(e.getURL().toURI());
-            } catch (Exception ex) {
-              Tools.showError(ex);
-            }
-          }
-        }
-      }
-    });
-    textPane.setSize(dialogWidth, Short.MAX_VALUE);
-    String messageWithBold = message.replaceAll("<suggestion>", "<b>").replaceAll("</suggestion>", "</b>");
-    String exampleSentences = getExampleSentences(rule);
-    textPane.setText("<html>" + messageWithBold + exampleSentences + formatURL(rule.getUrl()) + "</html>");
-    JScrollPane scrollPane = new JScrollPane(textPane);
-    scrollPane.setPreferredSize(
-        new Dimension(dialogWidth, textPane.getPreferredSize().height));
-    scrollPane.setBorder(BorderFactory.createEmptyBorder());
-
-    String cleanTitle = title.replace("<suggestion>", "'").replace("</suggestion>", "'");
-    JOptionPane.showMessageDialog(parent, scrollPane, cleanTitle,
-        JOptionPane.INFORMATION_MESSAGE);
-  }
-
-  private String getExampleSentences(Rule rule) {
-    StringBuilder examples = new StringBuilder();
-    List<IncorrectExample> incorrectExamples = rule.getIncorrectExamples();
-    if (incorrectExamples.size() > 0) {
-      String incorrectExample = incorrectExamples.iterator().next().getExample();
-      String sentence = incorrectExample.replace("<marker>", "<span style='color:red'>").replace("</marker>", "</span>");
-      examples.append("<br/>").append(sentence).append("&nbsp;<span style='color:red;font-style:italic;font-weight:bold'>x</span>");
-    }
-    List<String> correctExamples = rule.getCorrectExamples();
-    if (correctExamples.size() > 0) {
-      String correctExample = correctExamples.iterator().next();
-      String sentence = correctExample.replace("<marker>", "<span style='color:green'>").replace("</marker>", "</span>");
-      examples.append("<br/>").append(sentence).append("&nbsp;<span style='color:green'>✓</span>");
-    }
-    if (examples.length() > 0) {
-      examples.insert(0, "<br/><br/>" + messages.getString("guiExamples"));
-    }
-    return examples.toString();
-  }
-
-  private static String formatURL(URL url) {
-    if (url == null) {
-      return "";
-    }
-    return String.format("<br/><br/><a href=\"%s\">%s</a>",
-        url.toExternalForm(), StringUtils.abbreviate(url.toString(), 50));
+    Tools.showRuleInfoDialog(parent, title, message, rule, messages, languageTool.getLanguage().getShortNameWithCountryAndVariant());
   }
 
   private static class HighlightPainter extends DefaultHighlighter.DefaultHighlightPainter {
@@ -834,12 +908,20 @@ class LanguageToolSupport {
     private static final BasicStroke OO_STROKE3 = new BasicStroke(1.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10.0f, new float[]{3.0f, 5.0f}, 6);
     private static final BasicStroke ZIGZAG_STROKE1 = new BasicStroke(1.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10.0f, new float[]{1.0f, 1.0f}, 0);
 
-    public HighlightPainter(Color color) {
-      super(color);
+    private final Color underlineColor;
+    private final Color backgroundColor;
+
+    private HighlightPainter(Color backgroundColor, Color underlineColor) {
+      super(backgroundColor);
+      this.backgroundColor = backgroundColor;
+      this.underlineColor = underlineColor;
     }
 
     @Override
     public Shape paintLayer(Graphics g, int offs0, int offs1, Shape bounds, JTextComponent c, View view) {
+      if (backgroundColor != null) {
+        super.paintLayer(g, offs0, offs1, bounds, c, view);
+      }
       Rectangle rect;
 
       if (offs0 == view.getStartOffset() && offs1 == view.getEndOffset()) {
@@ -858,7 +940,7 @@ class LanguageToolSupport {
       }
 
       if (rect != null) {
-        Color color = getColor();
+        Color color = underlineColor;
 
         if (color == null) {
           g.setColor(c.getSelectionColor());
@@ -917,19 +999,34 @@ class LanguageToolSupport {
   }
 
   private static class Span {
+
     private int start;
     private int end;
-    private String msg;
-    private String desc;
-    private List<String> replacement;
-    private Rule rule;
+    private final String msg;
+    private final String desc;
+    private final List<String> replacement;
+    private final Rule rule;
+
+    private Span(RuleMatch match) {
+      start = match.getFromPos();
+      end = match.getToPos();
+      String tmp = match.getShortMessage();
+      if (StringUtils.isEmpty(tmp)) {
+        tmp = match.getMessage();
+      }
+      msg = Tools.shortenComment(tmp);
+      desc = match.getMessage();
+      replacement = new ArrayList<>();
+      replacement.addAll(match.getSuggestedReplacements());
+      rule = match.getRule();
+    }
   }
 
   private class RunnableImpl implements Runnable {
 
     private final Object caller;
 
-    public RunnableImpl(Object caller) {
+    private RunnableImpl(Object caller) {
       this.caller = caller;
     }
 
@@ -941,8 +1038,8 @@ class LanguageToolSupport {
       }
       try {
         checkText(caller);
-      } catch (IOException ex) {
-        ex.printStackTrace();
+      } catch (Exception ex) {
+        Tools.showError(ex);
       }
     }
   }

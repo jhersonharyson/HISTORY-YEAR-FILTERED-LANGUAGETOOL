@@ -47,7 +47,7 @@ public class ValencianCatalan extends Catalan {
   public List<String> getDefaultEnabledRulesForVariant() {
     List<String> rules = Arrays.asList("EXIGEIX_VERBS_VALENCIANS",
         "EXIGEIX_ACCENTUACIO_VALENCIANA", "EXIGEIX_POSSESSIUS_U",
-        "EXIGEIX_VERBS_EIX", "EXIGEIX_VERBS_ISC");
+        "EXIGEIX_VERBS_EIX", "EXIGEIX_VERBS_ISC", "SERVIR_PER_TALLAR");
     return rules;
   }
 
@@ -55,7 +55,7 @@ public class ValencianCatalan extends Catalan {
   public List<String> getDefaultDisabledRulesForVariant() {
     List<String> rules = Arrays.asList("EXIGEIX_VERBS_CENTRAL",
         "EXIGEIX_ACCENTUACIO_GENERAL", "EXIGEIX_POSSESSIUS_V",
-        "EVITA_PRONOMS_VALENCIANS");
+        "EVITA_PRONOMS_VALENCIANS", "EVITA_DEMOSTRATIUS_EIXE", "VOCABULARI_VALENCIA");
     return rules;
   }
   

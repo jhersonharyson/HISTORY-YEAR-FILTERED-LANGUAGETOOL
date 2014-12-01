@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
 
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.Language;
+import org.languagetool.rules.Example;
 import org.languagetool.rules.WordRepeatRule;
 
 /**
@@ -33,10 +34,12 @@ import org.languagetool.rules.WordRepeatRule;
  */
 public class GermanWordRepeatRule extends WordRepeatRule {
 
-  private static final Pattern PREPOSITIONS = Pattern.compile("ab|an|auf|bei|für|in|mit|nach|ohne|über|zu");
+  private static final Pattern PREPOSITIONS = Pattern.compile("ab|an|auf|bei|durch|für|in|mit|nach|ohne|über|von|zu");
 
   public GermanWordRepeatRule(final ResourceBundle messages, final Language language) {
     super(messages, language);
+    addExamplePair(Example.wrong("In diesem Satz <marker>ist ist</marker> ein Wort doppelt."),
+                   Example.fixed("In diesem Satz <marker>ist</marker> ein Wort doppelt."));
   }
 
   @Override

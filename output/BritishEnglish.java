@@ -19,8 +19,10 @@
 
 package org.languagetool.language;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.ResourceBundle;
 
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.en.BritishReplaceRule;
@@ -29,7 +31,7 @@ import org.languagetool.rules.en.MorfologikBritishSpellerRule;
 public class BritishEnglish extends English {
 
   @Override
-  public final String[] getCountries() {
+  public String[] getCountries() {
     return new String[]{"GB"};
   }
 
@@ -39,12 +41,12 @@ public class BritishEnglish extends English {
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
-    final List<Class<? extends Rule>> rules = new ArrayList<>();
-    rules.addAll(super.getRelevantRules());    
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
+    List<Rule> rules = new ArrayList<>();
+    rules.addAll(super.getRelevantRules(messages));
     // specific to British English:
-    rules.add(BritishReplaceRule.class);
-    rules.add(MorfologikBritishSpellerRule.class);
+    rules.add(new BritishReplaceRule(messages));
+    rules.add(new MorfologikBritishSpellerRule(messages, this));
     return rules;
   }
 }

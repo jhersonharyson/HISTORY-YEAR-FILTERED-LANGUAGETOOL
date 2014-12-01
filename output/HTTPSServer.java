@@ -35,8 +35,7 @@ import java.net.InetSocketAddress;
 import java.security.KeyStore;
 import java.util.ResourceBundle;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 import static org.languagetool.server.HTTPServerConfig.DEFAULT_HOST;
 
@@ -70,11 +69,18 @@ public class HTTPSServer extends Server {
       final HttpsConfigurator configurator = getConfigurator(sslContext);
       ((HttpsServer)server).setHttpsConfigurator(configurator);
       final RequestLimiter limiter = getRequestLimiterOrNull(config);
-      final LanguageToolHttpHandler httpHandler = new LanguageToolHttpHandler(config.isVerbose(), allowedIps, runInternally, limiter);
+      final LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>();
+      httpHandler = new LanguageToolHttpHandler(config.isVerbose(), allowedIps, runInternally, limiter, workQueue);
       httpHandler.setMaxTextLength(config.getMaxTextLength());
       httpHandler.setAllowOriginUrl(config.getAllowOriginUrl());
+      httpHandler.setMaxCheckTimeMillis(config.getMaxCheckTimeMillis());
+      httpHandler.setTrustXForwardForHeader(config.getTrustXForwardForHeader());
+      if (config.getMode() == HTTPServerConfig.Mode.AfterTheDeadline) {
+        httpHandler.setAfterTheDeadlineMode(config.getAfterTheDeadlineLanguage());
+      }
+      httpHandler.setLanguageModel(config.getLanguageModelDir());
       server.createContext("/", httpHandler);
-      executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+      executorService = getExecutorService(workQueue, config);
       server.setExecutor(executorService);
     } catch (BindException e) {
       final ResourceBundle messages = JLanguageTool.getMessageBundle();
@@ -85,15 +91,6 @@ public class HTTPSServer extends Server {
       final String message = Tools.makeTexti18n(messages, "https_server_start_failed_unknown_reason", host, Integer.toString(port));
       throw new RuntimeException(message, e);
     }
-  }
-
-  private RequestLimiter getRequestLimiterOrNull(HTTPSServerConfig config) {
-    final int requestLimit = config.getRequestLimit();
-    final int requestLimitPeriodInSeconds = config.getRequestLimitPeriodInSeconds();
-    if (requestLimit > 0 || requestLimitPeriodInSeconds > 0) {
-      return new RequestLimiter(requestLimit, requestLimitPeriodInSeconds);
-    }
-    return null;
   }
 
   private SSLContext getSslContext(File keyStoreFile, String passPhrase) {
@@ -133,15 +130,15 @@ public class HTTPSServer extends Server {
   }
 
   public static void main(String[] args) {
-    if (args.length > 7 || usageRequested(args)) {
+    if (args.length == 0 || args.length > 7 || usageRequested(args)) {
       System.out.println("Usage: " + HTTPSServer.class.getSimpleName()
               + " --config propertyFile [--port|-p port] [--public]");
       System.out.println("  --config file  a Java property file with values for:");
       System.out.println("                 'keystore' - a Java keystore with an SSL certificate");
       System.out.println("                 'password' - the keystore's password");
-      System.out.println("                 'maxTextLength' - maximum text length, longer texts will cause an error (optional)");
-      System.out.println("                 'requestLimit' - maximum number of requests (optional)");
-      System.out.println("                 'requestLimitPeriodInSeconds' - time period to which requestLimit applies (optional)");
+      System.out.println("                 'mode' - 'LanguageTool' or 'AfterTheDeadline' for emulation of After the Deadline output (optional, experimental)");
+      System.out.println("                 'afterTheDeadlineLanguage' - language code like 'en' or 'en-GB' (required if mode is 'AfterTheDeadline')");
+      printCommonConfigFileOptions();
       printCommonOptions();
       System.exit(1);
     }

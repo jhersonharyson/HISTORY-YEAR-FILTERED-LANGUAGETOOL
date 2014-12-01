@@ -38,9 +38,9 @@ import java.util.List;
  */
 public class SentenceSourceIndexer extends DefaultHandler implements AutoCloseable {
 
-  private static final String MAX_DOC_COUNT_VALUE = "maxDocCountValue";
-  private static final String MAX_DOC_COUNT_FIELD = "maxDocCount";
-  private static final String MAX_DOC_COUNT_FIELD_VAL = "1";
+  public static final String MAX_DOC_COUNT_VALUE = "maxDocCountValue";
+  public static final String MAX_DOC_COUNT_FIELD = "maxDocCount";
+  public static final String MAX_DOC_COUNT_FIELD_VAL = "1";
 
   private final Indexer indexer;
   private final int maxSentences;
@@ -61,13 +61,13 @@ public class SentenceSourceIndexer extends DefaultHandler implements AutoCloseab
     MixingSentenceSource mixingSource = MixingSentenceSource.create(dumpFileNames, language);
     while (mixingSource.hasNext()) {
       Sentence sentence = mixingSource.next();
-      if (sentenceCount % 100 == 0) {
-        System.out.println("Indexing sentence #" + sentenceCount + ":");
-        System.out.println("  " + sentence);
+      if (sentenceCount % 1000 == 0) {
+        System.out.println("Indexing sentence #" + sentenceCount + " (" + mixingSource.getSourceDistribution() + "):");
+        System.out.println("  [" +  sentence.getSource() + "] " + sentence);
       }
-      indexer.index(sentence.getText(), sentence.getSource(), true, sentenceCount);
+      indexer.indexSentence(sentence, sentenceCount);
       sentenceCount++;
-      if (sentenceCount >= maxSentences) {
+      if (maxSentences > 0 && sentenceCount >= maxSentences) {
         throw new DocumentLimitReachedException(maxSentences);
       }
     }
@@ -83,7 +83,7 @@ public class SentenceSourceIndexer extends DefaultHandler implements AutoCloseab
   public static void main(String... args) throws Exception {
     if (args.length != 4) {
       System.out.println("Usage: " + SentenceSourceIndexer.class.getSimpleName() + " <dataFile...> <indexDir> <languageCode> <maxSentences>");
-      System.out.println("\t<dataFiles> comma-separated list of a Wikipedia XML dumps (*.xml) and/or Tatoeba files (tatoeba-*)");
+      System.out.println("\t<dataFiles> comma-separated list of a Wikipedia XML dump (*.xml) and/or Tatoeba files (tatoeba-*)");
       System.out.println("\t<indexDir> directory where Lucene index will be written to, existing index content will be removed");
       System.out.println("\t<languageCode> short code like en for English, de for German etc");
       System.out.println("\t<maxSentences> maximum number of sentences to be indexed, use 0 for no limit");

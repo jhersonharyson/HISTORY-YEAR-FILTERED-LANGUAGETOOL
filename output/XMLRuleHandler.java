@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2006 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
@@ -18,7 +18,11 @@
  */
 package org.languagetool.rules.patterns;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import org.apache.commons.lang.ObjectUtils;
 import org.languagetool.Language;
@@ -39,9 +43,12 @@ import org.xml.sax.helpers.DefaultHandler;
  */
 public class XMLRuleHandler extends DefaultHandler {
 
+  public static final String ID = "id";
+  public static final String NAME = "name";
+  
   protected List<PatternRule> rules = new ArrayList<>();
   protected Language language;
-  
+
   protected StringBuilder correctExample = new StringBuilder();
   protected StringBuilder incorrectExample = new StringBuilder();
   protected StringBuilder exampleCorrection = new StringBuilder();
@@ -79,6 +86,9 @@ public class XMLRuleHandler extends DefaultHandler {
   protected boolean tokenNegated;
   protected boolean tokenInflected;
 
+  protected boolean tokenLevelCaseSensitive;
+  protected boolean tokenLevelCaseSet;
+
   protected String exceptionPosToken;
   protected boolean exceptionStringRegExp;
   protected boolean exceptionStringNegation;
@@ -91,9 +101,12 @@ public class XMLRuleHandler extends DefaultHandler {
   protected boolean exceptionSpaceBefore;
   protected boolean exceptionSpaceBeforeSet;
 
+  protected boolean exceptionLevelCaseSensitive;
+  protected boolean exceptionLevelCaseSet;
+
   /** List of elements as specified by tokens. **/
   protected List<Element> elementList;
-  
+
   /** true when phraseref is the last element in the rule. **/
   protected boolean lastPhrase;
 
@@ -129,15 +142,21 @@ public class XMLRuleHandler extends DefaultHandler {
   protected int andGroupCounter;
   protected int orGroupCounter;
 
-  protected StringBuilder shortMessage = new StringBuilder();
-  protected StringBuilder url = new StringBuilder();
-  protected boolean inShortMessage;
   protected boolean inUrl;
+  protected boolean inUrlForRuleGroup;
+  protected StringBuilder url = new StringBuilder();
+  protected StringBuilder urlForRuleGroup = new StringBuilder();
+
+  protected boolean inShortMessage;
+  protected boolean inShortMessageForRuleGroup;
+  protected StringBuilder shortMessage = new StringBuilder();
+  protected StringBuilder shortMessageForRuleGroup = new StringBuilder();
 
   protected boolean inUnification;
   protected boolean inMarker;
   protected boolean inUnificationDef;
   protected boolean uniNegation;
+  protected boolean inUnificationNeutral;
 
   protected String uFeature;
   protected String uType = "";
@@ -148,6 +167,8 @@ public class XMLRuleHandler extends DefaultHandler {
 
   /** Definitions of values in XML files. */
   protected static final String YES = "yes";
+  protected static final String OFF = "off";
+  protected static final String ON = "on";
   protected static final String POSTAG = "postag";
   protected static final String CHUNKTAG = "chunk";
   protected static final String POSTAG_REGEXP = "postag_regexp";
@@ -168,11 +189,13 @@ public class XMLRuleHandler extends DefaultHandler {
   protected static final String TOKEN = "token";
   protected static final String FEATURE = "feature";
   protected static final String UNIFY = "unify";
+  protected static final String UNIFY_IGNORE = "unify-ignore";
   protected static final String AND = "and";
   protected static final String OR = "or";
   protected static final String EXCEPTION = "exception";
   protected static final String CASE_SENSITIVE = "case_sensitive";
   protected static final String PATTERN = "pattern";
+  protected static final String ANTIPATTERN = "antipattern";
   protected static final String MATCH = "match";
   protected static final String UNIFICATION = "unification";
   protected static final String RULE = "rule";
@@ -207,7 +230,7 @@ public class XMLRuleHandler extends DefaultHandler {
     pLocator = locator;
     super.setDocumentLocator(locator);
   }
-  
+
   protected void resetToken() {
     posNegation = false;
     posRegExp = false;
@@ -238,7 +261,7 @@ public class XMLRuleHandler extends DefaultHandler {
       phraseElementList = new ArrayList<>();
     }
   }
-  
+
   protected void preparePhrase(final Attributes attrs) {
     phraseIdRef = attrs.getValue("idref");
     if (phraseMap.containsKey(phraseIdRef)) {
@@ -253,7 +276,7 @@ public class XMLRuleHandler extends DefaultHandler {
         if (elementList.isEmpty()) {
           phraseElementList.add(new ArrayList<>(copy));
         } else {
-          final ArrayList<Element> prevList = new ArrayList<>(elementList);
+          final List<Element> prevList = new ArrayList<>(elementList);
           prevList.addAll(copy);
           phraseElementList.add(new ArrayList<>(prevList));
           prevList.clear();
@@ -275,23 +298,23 @@ public class XMLRuleHandler extends DefaultHandler {
     if (phraseElementList.isEmpty()) {
       phraseElementList.add(new ArrayList<>(elementList));
     } else {
-      for (final ArrayList<Element> ph : phraseElementList) {
+      for (List<Element> ph : phraseElementList) {
         ph.addAll(new ArrayList<>(elementList));
       }
     }
-    
+
     phraseMap.put(phraseId, new ArrayList<List<Element>>(phraseElementList));
     elementList.clear();
 
     phraseElementList.clear();
   }
-  
+
   protected void startPattern(final Attributes attrs) throws SAXException {
     tokenCounter = 0;
     inPattern = true;
     caseSensitive = YES.equals(attrs.getValue(CASE_SENSITIVE));
-  }  
-  
+  }
+
   /**
    * Calculates the offset of the match reference (if any) in case the match
    * element has been used in the group.
@@ -301,15 +324,13 @@ public class XMLRuleHandler extends DefaultHandler {
   protected void processElement(final List<Element> elList) {
     int counter = 0;
     for (final Element elTest : elList) {
-      if (elTest.getPhraseName() != null && counter > 0) {
-        if (elTest.isReferenceElement()) {
-          final int tokRef = elTest.getMatch().getTokenRef();
-          elTest.getMatch().setTokenRef(tokRef + counter - 1);
-          final String offsetToken = elTest.getString().replace("\\" + tokRef,
-              "\\" + (tokRef + counter - 1));
-          elTest.setStringElement(offsetToken);
+        if (elTest.getPhraseName() != null && counter > 0 && elTest.isReferenceElement()) {
+            final int tokRef = elTest.getMatch().getTokenRef();
+            elTest.getMatch().setTokenRef(tokRef + counter - 1);
+            final String offsetToken = elTest.getString().replace("\\" + tokRef,
+                    "\\" + (tokRef + counter - 1));
+            elTest.setStringElement(offsetToken);
         }
-      }
       counter++;
     }
   }
@@ -327,8 +348,8 @@ public class XMLRuleHandler extends DefaultHandler {
       includeRange = Match.IncludeRange.valueOf(attrs
           .getValue("include_skipped").toUpperCase(Locale.ENGLISH));
     }
-    final Match mWorker = new Match(attrs.getValue(POSTAG), attrs.getValue("postag_replace"), 
-        YES.equals(attrs.getValue(POSTAG_REGEXP)), 
+    final Match mWorker = new Match(attrs.getValue(POSTAG), attrs.getValue("postag_replace"),
+        YES.equals(attrs.getValue(POSTAG_REGEXP)),
         attrs.getValue("regexp_match"), attrs.getValue("regexp_replace"),
         caseConversion, YES.equals(attrs.getValue("setpos")),
         YES.equals(attrs.getValue("suppress_misspelled")),
@@ -343,12 +364,12 @@ public class XMLRuleHandler extends DefaultHandler {
       message.append("\u0001\\");
       message.append(attrs.getValue("no"));
       checkNumber(attrs);
-    } else if (inSuggestion && !inMessage) {
+    } else if (inSuggestion) {
       if (suggestionMatchesOutMsg == null) {
         suggestionMatchesOutMsg = new ArrayList<>();
       }
       suggestionMatchesOutMsg.add(mWorker);
-      // add incorrect XML character for simplicity     
+      // add incorrect XML character for simplicity
       suggestionsOutMsg.append("\u0001\\");
       suggestionsOutMsg.append(attrs.getValue("no"));
       checkNumber(attrs);
@@ -377,8 +398,8 @@ public class XMLRuleHandler extends DefaultHandler {
   private void checkRefNumber(int refNumber) throws SAXException {
     if (refNumber > elementList.size()) {
       throw new SAXException("Only backward references in match elements are possible, tried to specify token "
-                      + refNumber + "\n" + "Line: " + pLocator.getLineNumber()
-                      + ", column: " + pLocator.getColumnNumber() + ".");
+          + refNumber + "\n" + "Line: " + pLocator.getLineNumber()
+          + ", column: " + pLocator.getColumnNumber() + ".");
     }
   }
 
@@ -387,36 +408,52 @@ public class XMLRuleHandler extends DefaultHandler {
     exceptions = new StringBuilder();
     resetException();
 
-    exceptionStringNegation = YES.equals(attrs.getValue(NEGATE));      
+    exceptionStringNegation = YES.equals(attrs.getValue(NEGATE));
     exceptionValidNext = "next".equals(attrs.getValue(SCOPE));
-    exceptionValidPrev = "previous".equals(attrs.getValue(SCOPE));      
+    exceptionValidPrev = "previous".equals(attrs.getValue(SCOPE));
     exceptionStringInflected = YES.equals(attrs.getValue(INFLECTED));
 
     if (attrs.getValue(POSTAG) != null) {
       exceptionPosToken = attrs.getValue(POSTAG);
       exceptionPosRegExp = YES.equals(attrs.getValue(POSTAG_REGEXP));
-      exceptionPosNegation = YES.equals(attrs.getValue(NEGATE_POS));        
+      exceptionPosNegation = YES.equals(attrs.getValue(NEGATE_POS));
     }
     exceptionStringRegExp = YES.equals(attrs.getValue(REGEXP));
     if (attrs.getValue(SPACEBEFORE) != null) {
       exceptionSpaceBefore = YES.equals(attrs.getValue(SPACEBEFORE));
       exceptionSpaceBeforeSet = !IGNORE.equals(attrs.getValue(SPACEBEFORE));
     }
+
+    if (attrs.getValue(CASE_SENSITIVE) != null) {
+      exceptionLevelCaseSet = true;
+      exceptionLevelCaseSensitive = YES.equals(attrs.getValue(CASE_SENSITIVE));
+    } else {
+      exceptionLevelCaseSet = false;
+    }
   }
 
   protected void finalizeExceptions() {
     inException = false;
     if (!exceptionSet) {
-      tokenElement = new Element(StringTools.trimWhitespace(elements
-          .toString()), caseSensitive, regExpression, tokenInflected);
+      boolean tokenCase = caseSensitive;
+      if (tokenLevelCaseSet) {
+        tokenCase = tokenLevelCaseSensitive;
+      }
+      tokenElement = new Element(elements
+          .toString(), tokenCase, regExpression, tokenInflected);
       exceptionSet = true;
     }
     tokenElement.setNegation(tokenNegated);
     if (!StringTools.isEmpty(exceptions.toString()) || exceptionPosToken != null) {
-      tokenElement.setStringPosException(StringTools.trimWhitespace(exceptions
-          .toString()), exceptionStringRegExp, exceptionStringInflected,
-          exceptionStringNegation, exceptionValidNext, exceptionValidPrev,
-          exceptionPosToken, exceptionPosRegExp, exceptionPosNegation);
+      if (exceptionLevelCaseSet) {
+        tokenElement.setStringPosException(exceptions.toString(), exceptionStringRegExp,
+            exceptionStringInflected, exceptionStringNegation, exceptionValidNext, exceptionValidPrev,
+            exceptionPosToken, exceptionPosRegExp, exceptionPosNegation, exceptionLevelCaseSensitive);
+      } else {
+        tokenElement.setStringPosException(exceptions.toString(), exceptionStringRegExp,
+            exceptionStringInflected, exceptionStringNegation, exceptionValidNext, exceptionValidPrev,
+            exceptionPosToken, exceptionPosRegExp, exceptionPosNegation);
+      }
       exceptionPosToken = null;
     }
     if (exceptionSpaceBeforeSet) {
@@ -434,7 +471,7 @@ public class XMLRuleHandler extends DefaultHandler {
 
     lastPhrase = false;
     tokenNegated = YES.equals(attrs.getValue(NEGATE));
-    tokenInflected = YES.equals(attrs.getValue(INFLECTED));      
+    tokenInflected = YES.equals(attrs.getValue(INFLECTED));
     if (attrs.getValue(SKIP) != null) {
       skipPos = Integer.parseInt(attrs.getValue(SKIP));
     }
@@ -449,26 +486,33 @@ public class XMLRuleHandler extends DefaultHandler {
     if (attrs.getValue(POSTAG) != null) {
       posToken = attrs.getValue(POSTAG);
       posRegExp = YES.equals(attrs.getValue(POSTAG_REGEXP));
-      posNegation = YES.equals(attrs.getValue(NEGATE_POS));       
+      posNegation = YES.equals(attrs.getValue(NEGATE_POS));
     }
     if (attrs.getValue(CHUNKTAG) != null) {
       chunkTag = new ChunkTag(attrs.getValue(CHUNKTAG));
     }
     regExpression = YES.equals(attrs.getValue(REGEXP));
-    
+
     if (attrs.getValue(SPACEBEFORE) != null) {
       tokenSpaceBefore = YES.equals(attrs.getValue(SPACEBEFORE));
       tokenSpaceBeforeSet = !IGNORE.equals(attrs.getValue(SPACEBEFORE));
     }
 
-   if (!inAndGroup && !inOrGroup) {
-     tokenCounter++;
-   }
+    if (!inAndGroup && !inOrGroup) {
+      tokenCounter++;
+    }
+
+    if (attrs.getValue(CASE_SENSITIVE) != null) {
+      tokenLevelCaseSet = true;
+      tokenLevelCaseSensitive = YES.equals(attrs.getValue(CASE_SENSITIVE));
+    } else {
+      tokenLevelCaseSet = false;
+    }
   }
-  
+
   /**
    * Adds Match objects for all references to tokens
-   * (including '\1' and the like). 
+   * (including '\1' and the like).
    */
   protected List<Match> addLegacyMatches(final List <Match> existingSugMatches, final String messageStr,
       boolean inMessage) {
@@ -476,57 +520,57 @@ public class XMLRuleHandler extends DefaultHandler {
       return null;
     }
     final List<Match> sugMatch = new ArrayList<>();
-    //final String messageStr = message.toString();
     int pos = 0;
     int ind = 0;
     int matchCounter = 0;
     while (pos != -1) {
       pos = messageStr.indexOf('\\', ind + 1);
-      if (pos != -1 && messageStr.length() > pos)              {
-        if (Character.isDigit(messageStr.charAt(pos + 1))) {
-          if (pos == 0 || messageStr.charAt(pos - 1) != '\u0001') {
-            final Match mWorker = new Match(null, null, false, null, 
-                null, Match.CaseConversion.NONE, false, false, Match.IncludeRange.NONE);
-            mWorker.setInMessageOnly(true);
-            sugMatch.add(mWorker);
-          } else if (messageStr.charAt(pos - 1) == '\u0001') { // real suggestion marker
-            sugMatch.add(existingSugMatches.get(matchCounter));
-            if (inMessage) {
-              message.deleteCharAt(pos - 1 - matchCounter);
-            }
-            else {
-              suggestionsOutMsg.deleteCharAt(pos - 1 - matchCounter);
-            }
-            matchCounter++;
+      if (pos != -1 && messageStr.length() > pos && Character.isDigit(messageStr.charAt(pos + 1))) {
+        if (pos == 0 || messageStr.charAt(pos - 1) != '\u0001') {
+          final Match mWorker = new Match(null, null, false, null,
+              null, Match.CaseConversion.NONE, false, false, Match.IncludeRange.NONE);
+          mWorker.setInMessageOnly(true);
+          sugMatch.add(mWorker);
+        } else if (messageStr.charAt(pos - 1) == '\u0001') { // real suggestion marker
+          sugMatch.add(existingSugMatches.get(matchCounter));
+          if (inMessage) {
+            message.deleteCharAt(pos - 1 - matchCounter);
+          } else {
+            suggestionsOutMsg.deleteCharAt(pos - 1 - matchCounter);
           }
+          matchCounter++;
         }
       }
       ind = pos;
     }
-            
+
     if (sugMatch.isEmpty()) {
       return existingSugMatches;
     }
     return sugMatch;
   }
 
-  protected void finalizeTokens() {
+  protected void finalizeTokens() throws SAXException {
     if (!exceptionSet || tokenElement == null) {
-      tokenElement = new Element(StringTools.trimWhitespace(elements
-          .toString()), caseSensitive, regExpression, tokenInflected);
+      boolean tokenCase = caseSensitive;
+      if (tokenLevelCaseSet) {
+        tokenCase = tokenLevelCaseSensitive;
+      }
+      tokenElement = new Element(elements.toString(),
+          tokenCase, regExpression, tokenInflected);
       tokenElement.setNegation(tokenNegated);
     } else {
-      tokenElement.setStringElement(StringTools.trimWhitespace(elements
-          .toString()));
+      tokenElement.setStringElement(elements
+          .toString());
     }
 
     if (skipPos != 0) {
       tokenElement.setSkipNext(skipPos);
       skipPos = 0;
     }
-    if (minOccurrence != 1) {
-      tokenElement.setMinOccurrence(minOccurrence);
-      minOccurrence = 1;
+
+    if (minOccurrence == 0) {
+      tokenElement.setMinOccurrence(0);
     }
     if (maxOccurrence != 1) {
       tokenElement.setMaxOccurrence(maxOccurrence);
@@ -547,10 +591,23 @@ public class XMLRuleHandler extends DefaultHandler {
 
     if (inAndGroup && andGroupCounter > 0) {
       elementList.get(elementList.size() - 1).setAndGroupElement(tokenElement);
+        if (minOccurrence !=1 || maxOccurrence !=1) {
+            throw new SAXException("Please set min and max attributes on the " +
+                    "first token in the AND group.\n You attempted to set these " +
+                    "attributes on the token no. " + (andGroupCounter + 1) + "." + "\n Line: "
+                    + pLocator.getLineNumber() + ", column: "
+                    + pLocator.getColumnNumber() + ".");
+        }
     } else if (inOrGroup && orGroupCounter > 0) {
       elementList.get(elementList.size() - 1).setOrGroupElement(tokenElement);
     } else {
-      elementList.add(tokenElement);
+      if (minOccurrence < 1) {
+        elementList.add(tokenElement);
+      }
+      for (int i = 1; i <= minOccurrence; i ++) {
+        elementList.add(tokenElement);
+      }
+      minOccurrence = 1;
     }
     if (inAndGroup) {
       andGroupCounter++;
@@ -561,6 +618,10 @@ public class XMLRuleHandler extends DefaultHandler {
 
     if (inUnification) {
       tokenElement.setUnification(equivalenceFeatures);
+    }
+
+    if (inUnificationNeutral) {
+      tokenElement.setUnificationNeutral();
     }
 
     tokenElement.setInsideMarker(inMarker);

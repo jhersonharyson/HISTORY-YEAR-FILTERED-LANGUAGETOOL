@@ -18,16 +18,13 @@
  */
 package org.languagetool.language;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ResourceBundle;
 
 import org.languagetool.Language;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.DoublePunctuationRule;
-import org.languagetool.rules.LongSentenceRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.WhitespaceRule;
+import org.languagetool.rules.*;
 import org.languagetool.rules.ca.AccentuationCheckRule;
 import org.languagetool.rules.ca.CatalanUnpairedBracketsRule;
 import org.languagetool.rules.ca.CatalanUnpairedExclamationMarksRule;
@@ -38,6 +35,7 @@ import org.languagetool.rules.ca.ComplexAdjectiveConcordanceRule;
 import org.languagetool.rules.ca.MorfologikCatalanSpellerRule;
 import org.languagetool.rules.ca.ReflexiveVerbsRule;
 import org.languagetool.rules.ca.SimpleReplaceRule;
+import org.languagetool.rules.ca.SimpleReplaceVerbsRule;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.ca.CatalanSynthesizer;
 import org.languagetool.tagging.Tagger;
@@ -56,12 +54,18 @@ public class Catalan extends Language {
   private Tokenizer wordTokenizer;
   private Synthesizer synthesizer;
   private Disambiguator disambiguator;
+  private String name = "Catalan";
 
   private static final Language GENERAL_CATALAN = new GeneralCatalan();
   
   @Override
   public String getName() {
-    return "Catalan";
+    return name;
+  }
+
+  @Override
+  public void setName(String name) {
+    this.name = name;
   }
 
   @Override
@@ -81,35 +85,36 @@ public class Catalan extends Language {
   
   @Override
   public Contributor[] getMaintainers() {
-    return new Contributor[] {new Contributor("Ricard Roca"), new Contributor("Jaume Ortolà") };
+    return new Contributor[] { new Contributor("Ricard Roca"), new Contributor("Jaume Ortolà") };
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            DoublePunctuationRule.class,
-            CatalanUnpairedBracketsRule.class,
-            UppercaseSentenceStartRule.class,
-            WhitespaceRule.class,            
-            LongSentenceRule.class,
+            new CommaWhitespaceRule(messages),
+            new DoublePunctuationRule(messages),
+            new CatalanUnpairedBracketsRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),
+            new MultipleWhitespaceRule(messages, this),
+            new LongSentenceRule(messages),
             // specific to Catalan:
-            CatalanWordRepeatRule.class,
-            MorfologikCatalanSpellerRule.class,
-            CatalanUnpairedQuestionMarksRule.class,
-            CatalanUnpairedExclamationMarksRule.class,
-            AccentuationCheckRule.class,
-            ComplexAdjectiveConcordanceRule.class,
-            CatalanWrongWordInContextRule.class,
-            ReflexiveVerbsRule.class,
-            SimpleReplaceRule.class
-            //CastellanismesReplaceRule.class,
-            //AccentuacioReplaceRule.class
+            new CatalanWordRepeatRule(messages, this),
+            new MorfologikCatalanSpellerRule(messages, this),
+            new CatalanUnpairedQuestionMarksRule(messages, this),
+            new CatalanUnpairedExclamationMarksRule(messages, this),
+            new AccentuationCheckRule(messages),
+            new ComplexAdjectiveConcordanceRule(messages),
+            new CatalanWrongWordInContextRule(messages),
+            new ReflexiveVerbsRule(messages),
+            new SimpleReplaceVerbsRule(messages),
+            new SimpleReplaceRule(messages)
+            //new CastellanismesReplaceRule(messages),
+            //new AccentuacioReplaceRule(messages)
     );
   }
 
   @Override
-  public final Tagger getTagger() {
+  public Tagger getTagger() {
     if (tagger == null) {
       tagger = new CatalanTagger();
     }
@@ -117,7 +122,7 @@ public class Catalan extends Language {
   }
 
   @Override
-  public final Synthesizer getSynthesizer() {
+  public Synthesizer getSynthesizer() {
     if (synthesizer == null) {
       synthesizer = new CatalanSynthesizer();
     }
@@ -125,7 +130,7 @@ public class Catalan extends Language {
   }
 
   @Override
-  public final SentenceTokenizer getSentenceTokenizer() {
+  public SentenceTokenizer getSentenceTokenizer() {
     if (sentenceTokenizer == null) {
       sentenceTokenizer = new SRXSentenceTokenizer(this);
     }
@@ -141,7 +146,7 @@ public class Catalan extends Language {
   }  
   
   @Override
-  public final Tokenizer getWordTokenizer() {
+  public Tokenizer getWordTokenizer() {
     if (wordTokenizer == null) {
       wordTokenizer = new CatalanWordTokenizer();
     }

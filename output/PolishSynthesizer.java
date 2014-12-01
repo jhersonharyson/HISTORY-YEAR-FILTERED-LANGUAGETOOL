@@ -45,7 +45,6 @@ import org.languagetool.synthesis.SynthesizerTools;
 public class PolishSynthesizer implements Synthesizer {
 
   private static final String RESOURCE_FILENAME = "/pl/polish_synth.dict";
-
   private static final String TAGS_FILE_NAME = "/pl/polish_tags.txt";
 
   private static final String POTENTIAL_NEGATION_TAG = ":aff";
@@ -53,20 +52,21 @@ public class PolishSynthesizer implements Synthesizer {
   private static final String COMP_TAG = "com";
   private static final String SUP_TAG = "sup";
 
-  private Dictionary dictionary;
+  private volatile Dictionary dictionary;
   private List<String> possibleTags;
-  
-  protected Dictionary getDictionary() throws IOException {
-    if (this.dictionary == null) {
+
+  private Dictionary getDictionary() throws IOException {
+    Dictionary result = this.dictionary;
+    if (result == null) {
       synchronized (this) {
-        if (this.dictionary == null) {
+        result = this.dictionary;
+        if (result == null) {
           final URL url = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(RESOURCE_FILENAME);
-          this.dictionary = Dictionary.read(url);
+          this.dictionary = result = Dictionary.read(url);
         }
       }
     }
-    
-    return this.dictionary;
+    return result;
   }
   
   @Override
@@ -102,7 +102,7 @@ public class PolishSynthesizer implements Synthesizer {
             getFromResourceDirAsStream(TAGS_FILE_NAME));
       }
       final IStemmer synthesizer = new DictionaryLookup(getDictionary());
-      final ArrayList<String> results = new ArrayList<>();
+      final List<String> results = new ArrayList<>();
 
       boolean isNegated = false;
       if (token.getPOSTag() != null) {

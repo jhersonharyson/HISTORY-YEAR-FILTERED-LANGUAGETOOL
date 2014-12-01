@@ -18,16 +18,13 @@
  */
 package org.languagetool.language;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ResourceBundle;
 
 import org.languagetool.Language;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.DoublePunctuationRule;
-import org.languagetool.rules.GenericUnpairedBracketsRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.WhitespaceRule;
+import org.languagetool.rules.*;
 import org.languagetool.rules.gl.CastWordsRule;
 import org.languagetool.rules.gl.SimpleReplaceRule;
 import org.languagetool.rules.spelling.hunspell.HunspellRule;
@@ -49,9 +46,10 @@ public class Galician extends Language {
   private SentenceTokenizer sentenceTokenizer;
   private Synthesizer synthesizer;
   private Disambiguator disambiguator;
+  private String name = "Galician";
 
   @Override
-  public final SentenceTokenizer getSentenceTokenizer() {
+  public SentenceTokenizer getSentenceTokenizer() {
     if (sentenceTokenizer == null) {
       sentenceTokenizer = new SRXSentenceTokenizer(this);
     }
@@ -59,17 +57,22 @@ public class Galician extends Language {
   }
   
   @Override
-  public final String getName() {
-    return "Galician";
+  public String getName() {
+    return name;
   }
 
   @Override
-  public final String getShortName() {
+  public void setName(String name) {
+    this.name = name;
+  }
+
+  @Override
+  public String getShortName() {
     return "gl";
   }
 
   @Override
-  public final String[] getCountries() {
+  public String[] getCountries() {
     return new String[]{"ES"};
   }
   
@@ -84,7 +87,7 @@ public class Galician extends Language {
   }
   
   @Override
-  public final Tagger getTagger() {
+  public Tagger getTagger() {
     if (tagger == null) {
       tagger = new GalicianTagger();
     }
@@ -92,7 +95,7 @@ public class Galician extends Language {
   }
 
   @Override
-  public final Tokenizer getWordTokenizer() {
+  public Tokenizer getWordTokenizer() {
     if (wordTokenizer == null) {
       wordTokenizer = new GalicianWordTokenizer();
     }
@@ -100,7 +103,7 @@ public class Galician extends Language {
   }
 
   @Override
-  public final Synthesizer getSynthesizer() {
+  public Synthesizer getSynthesizer() {
     if (synthesizer == null) {
       synthesizer = new GalicianSynthesizer();
     }
@@ -108,7 +111,7 @@ public class Galician extends Language {
   }
   
   @Override
-  public final Disambiguator getDisambiguator() {
+  public Disambiguator getDisambiguator() {
     if (disambiguator == null) {
       disambiguator = new XmlRuleDisambiguator(new Galician());
     }
@@ -121,18 +124,17 @@ public class Galician extends Language {
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            DoublePunctuationRule.class,
-            GenericUnpairedBracketsRule.class,
-            HunspellRule.class,
-            UppercaseSentenceStartRule.class,
-            // WordRepeatRule.class,
-            WhitespaceRule.class,
-            // Specific to Galician
-            SimpleReplaceRule.class,
-            CastWordsRule.class
+            new CommaWhitespaceRule(messages),
+            new DoublePunctuationRule(messages),
+            new GenericUnpairedBracketsRule(messages, this),
+            new HunspellRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),
+            new MultipleWhitespaceRule(messages, this),
+            // Specific to Galician:
+            new SimpleReplaceRule(messages),
+            new CastWordsRule(messages)
     );
   }
 

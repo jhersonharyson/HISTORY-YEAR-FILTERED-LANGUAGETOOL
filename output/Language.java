@@ -18,11 +18,14 @@
  */
 package org.languagetool;
 
+import org.apache.commons.lang.StringUtils;
 import org.languagetool.chunking.Chunker;
 import org.languagetool.databroker.ResourceDataBroker;
 import org.languagetool.language.Contributor;
-import org.languagetool.language.Demo;
+import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.rules.Rule;
+import org.languagetool.rules.patterns.PatternRule;
+import org.languagetool.rules.patterns.PatternRuleLoader;
 import org.languagetool.rules.patterns.Unifier;
 import org.languagetool.rules.patterns.UnifierConfiguration;
 import org.languagetool.synthesis.Synthesizer;
@@ -30,13 +33,11 @@ import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tagging.disambiguation.xx.DemoDisambiguator;
 import org.languagetool.tagging.xx.DemoTagger;
-import org.languagetool.tokenizers.RegexSentenceTokenizer;
-import org.languagetool.tokenizers.SentenceTokenizer;
-import org.languagetool.tokenizers.Tokenizer;
-import org.languagetool.tokenizers.WordTokenizer;
+import org.languagetool.tokenizers.*;
 import org.languagetool.tools.MultiKeyProperties;
 import org.languagetool.tools.StringTools;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Constructor;
@@ -53,19 +54,22 @@ import java.util.*;
  */
 public abstract class Language {
 
-  public static final Language DEMO = new Demo();
-  
   private static final String PROPERTIES_PATH = "META-INF/org/languagetool/language-module.properties";
   private static final String PROPERTIES_KEY = "languageClasses";
   
   private static List<Language> externalLanguages = new ArrayList<>();
+
+  private boolean isExternalLanguage = false;
+
+  private List<String> externalRuleFiles = new ArrayList<>();
+  private List<PatternRule> patternRules;
   
   /**
    * All languages supported by LanguageTool. This includes at least a "demo" language
    * for testing.
    */
   public static Language[] LANGUAGES = getLanguages();
-  
+
   private static Language[] getLanguages() {
     final List<Language> languages = new ArrayList<>();
     final Set<String> languageClassNames = new HashSet<>();
@@ -99,7 +103,6 @@ public abstract class Language {
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
-    languages.add(DEMO);
     return languages.toArray(new Language[languages.size()]);
   }
 
@@ -118,22 +121,29 @@ public abstract class Language {
   /**
    * All languages supported by LanguageTool, but without the demo language.
    */
-  public static final Language[] REAL_LANGUAGES = new Language[LANGUAGES.length-1];
-  static {
-    int i = 0;
-    for (final Language lang : LANGUAGES) {
-      if (!lang.getShortName().equals(Demo.SHORT_NAME)) {
-        REAL_LANGUAGES[i] = lang;
-        i++;
+  public static final Language[] REAL_LANGUAGES = getRealLanguages();
+
+  /**
+   * Returns all languages supported by LanguageTool but without the demo language.
+   * In contrast to Language.REAL_LANGUAGES contains external languages as well.
+   * @return All supported languages.
+   * @since 2.6
+   */
+  public static Language[] getRealLanguages() {
+    List<Language> result = new ArrayList<>();
+    for (Language lang : LANGUAGES) {
+      if (!"xx".equals(lang.getShortName())) {  // skip demo language
+        result.add(lang);
       }
     }
+    return result.toArray(new Language[result.size()]);
   }
 
   private static final Language[] BUILTIN_LANGUAGES = LANGUAGES;
 
   private static final Disambiguator DEMO_DISAMBIGUATOR = new DemoDisambiguator();
   private static final Tagger DEMO_TAGGER = new DemoTagger();
-  private static final SentenceTokenizer SENTENCE_TOKENIZER = new RegexSentenceTokenizer();
+  private static final SentenceTokenizer SENTENCE_TOKENIZER = new SimpleSentenceTokenizer();
   private static final WordTokenizer WORD_TOKENIZER = new WordTokenizer();
   
   private UnifierConfiguration unifierConfiguration = new UnifierConfiguration();
@@ -154,6 +164,12 @@ public abstract class Language {
    * @return language name
    */
   public abstract String getName();
+
+  /**
+   * Set this language's name in English.
+   * @since 2.6
+   */
+  public abstract void setName(final String name);
   
   /**
    * Get this language's country options , e.g. <code>US</code> (as in <code>en-US</code>) or
@@ -199,11 +215,29 @@ public abstract class Language {
 
   /**
    * Get the rules classes that should run for texts in this language.
-   * @since 1.4
+   * @since 1.4 (signature modified in 2.7)
    */
-  public abstract List<Class<? extends Rule>> getRelevantRules();
+  public abstract List<Rule> getRelevantRules(ResourceBundle messages) throws IOException;
 
   // -------------------------------------------------------------------------
+
+  /**
+   * @param indexDir directory with a '3grams' sub directory which contains a Lucene index with 3gram occurrence counts
+   * @return a LanguageModel or {@code null} if this language doesn't support one
+   * @since 2.7
+   */
+  public LanguageModel getLanguageModel(File indexDir) throws IOException {
+    return null;
+  }
+
+  /**
+   * Get a list of rules that require a {@link LanguageModel}. Returns an empty list for
+   * languages that don't have such rules.
+   * @since 2.7
+   */
+  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+    return Collections.emptyList();
+  }
 
   /**
    * Get this language's Java locale, not considering the country code.
@@ -230,18 +264,11 @@ public abstract class Language {
   }
 
   /**
-   * Get the location of the rule file(s).
-   * @deprecated use {@link #getRuleFileNames()} instead (deprecated since 2.3)
-   */
-  public List<String> getRuleFileName() {
-    return getRuleFileNames();
-  }
-
-  /**
-   * Get the location of the rule file(s).
+   * Get the location of the rule file(s) in a form like {@code /org/languagetool/rules/de/grammar.xml}.
    */
   public List<String> getRuleFileNames() {
     final List<String> ruleFiles = new ArrayList<>();
+    ruleFiles.addAll(getExternalRuleFiles());
     final ResourceDataBroker dataBroker = JLanguageTool.getDataBroker();
     ruleFiles.add(dataBroker.getRulesDir()
             + "/" + getShortName() + "/" + JLanguageTool.PATTERN_FILE);
@@ -255,6 +282,26 @@ public abstract class Language {
     }
     return ruleFiles;
   }
+
+  /**
+   * @since 2.6
+   */
+  public List<String> getExternalRuleFiles() {
+    return externalRuleFiles;
+  }
+
+  /**
+   * Adds an external rule file to the language. After running this method,
+   * one has to run JLanguageTool.activateDefaultPatternRules() to make sure
+   * that all external rules are activated.
+   *
+   * @param externalRuleFile Absolute file path to rules.
+   * @since 2.6
+   */
+  public void addExternalRuleFile(String externalRuleFile) {
+    externalRuleFiles.add(externalRuleFile);
+  }
+
 
   /**
    * Languages that have country variants need to overwrite this to select their most common variant.
@@ -379,17 +426,40 @@ public abstract class Language {
    * Start symbols used by {@link org.languagetool.rules.GenericUnpairedBracketsRule}.
    * Note that the array must be of equal length as {@link #getUnpairedRuleEndSymbols()} and the sequence of
    * starting symbols must match exactly the sequence of ending symbols.
+   * @deprecated will be moved to GenericUnpairedBracketsRule (deprecated since 2.8)
    */
+  @Deprecated
   public String[] getUnpairedRuleStartSymbols() {
     return new String[]{ "[", "(", "{", "\"", "'" };
   }
 
   /**
    * End symbols used by {@link org.languagetool.rules.GenericUnpairedBracketsRule}.
+   * @deprecated will be moved to GenericUnpairedBracketsRule (deprecated since 2.8)
    * @see #getUnpairedRuleStartSymbols()
    */
+  @Deprecated
   public String[] getUnpairedRuleEndSymbols() {
     return new String[]{ "]", ")", "}", "\"", "'" };
+  }
+  
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get the pattern rules as defined in the files returned by {@link #getRuleFileNames()}.
+   * @since 2.7
+   */
+  @Experimental
+  List<PatternRule> getPatternRules() throws IOException {
+    if (patternRules == null) {
+      patternRules = new ArrayList<>();
+      PatternRuleLoader ruleLoader = new PatternRuleLoader();
+      for (String fileName : getRuleFileNames()) {
+        InputStream is = this.getClass().getResourceAsStream(fileName);
+        patternRules.addAll(ruleLoader.getRules(is, fileName));
+      }
+    }
+    return patternRules;
   }
   
   // -------------------------------------------------------------------------
@@ -451,11 +521,14 @@ public abstract class Language {
   public static Language getLanguageForShortName(final String langCode) {
     final Language language = getLanguageForShortNameOrNull(langCode);
     if (language == null) {
-      final StringBuilder sb = new StringBuilder();
+      final List<String> codes = new ArrayList<>();
       for (Language realLanguage : LANGUAGES) {
-        sb.append(" ").append(realLanguage.getShortNameWithCountryAndVariant());
+        codes.add(realLanguage.getShortNameWithCountryAndVariant());
       }
-      throw new IllegalArgumentException("'" + langCode + "' is not a language code known to LanguageTool. Supported language codes are:" + sb.toString());
+      Collections.sort(codes);
+      throw new IllegalArgumentException("'" + langCode + "' is not a language code known to LanguageTool." +
+              " Supported language codes are: " + StringUtils.join(codes, ", ") + ". The list of languages is read from " + PROPERTIES_PATH +
+              " in the Java classpath. See http://wiki.languagetool.org/java-api for details.");
     }
     return language;
   }
@@ -579,35 +652,6 @@ public abstract class Language {
   public final String toString() {
     return getName();
   }
-  
-  /**
-   * Get sorted info about all maintainers (without country variants) to be used in the About dialog.
-   * @param messages {{@link ResourceBundle} language bundle to translate the info
-   * @return A list of maintainers, sorted by name of language.
-   * @since 0.9.9
-   */
-  public static String getAllMaintainers(final ResourceBundle messages) {
-    final StringBuilder maintainersInfo = new StringBuilder();
-    final List<String> toSort = new ArrayList<>();
-    for (final Language lang : Language.REAL_LANGUAGES) {
-      if (!lang.isVariant()) {
-        if (lang.getMaintainers() != null) {
-          final List<String> names = new ArrayList<>();
-          for (Contributor contributor : lang.getMaintainers()) {
-            names.add(contributor.getName());
-          }
-          toSort.add(messages.getString(lang.getShortName()) +
-              ": " + listToStringWithLineBreaks(names));
-        }
-      }            
-    }    
-    Collections.sort(toSort);
-    for (final String lElem : toSort) {
-      maintainersInfo.append(lElem);
-      maintainersInfo.append('\n');
-    }
-    return maintainersInfo.toString();
-  }
 
   /**
    * Whether this is a country variant of another language, i.e. whether it doesn't
@@ -639,7 +683,16 @@ public abstract class Language {
   }
 
   public boolean isExternal() {
-    return false;
+    return isExternalLanguage;
+  }
+
+  /**
+   * Sets the language as external. Useful for
+   * making a copy of an existing language.
+   * @since 2.6
+   */
+  public void makeExternal() {
+    isExternalLanguage = true;
   }
 
   /**
@@ -652,10 +705,8 @@ public abstract class Language {
     if (getShortName().equals(otherLanguage.getShortName())) {
       final boolean thisHasCountry = hasCountry();
       final boolean otherHasCountry = otherLanguage.hasCountry();
-      if (thisHasCountry && otherHasCountry) {
-        return getShortNameWithCountryAndVariant().equals(otherLanguage.getShortNameWithCountryAndVariant());
-      }
-      return true;
+      return !(thisHasCountry && otherHasCountry) ||
+              getShortNameWithCountryAndVariant().equals(otherLanguage.getShortNameWithCountryAndVariant());
     } else {
       return false;
     }
@@ -663,24 +714,6 @@ public abstract class Language {
 
   private boolean hasCountry() {
     return getCountries().length == 1;
-  }
-
-  private static String listToStringWithLineBreaks(final Collection<String> l) {
-    final StringBuilder sb = new StringBuilder();
-    int i = 0;
-    for (final Iterator<String> iter = l.iterator(); iter.hasNext();) {
-      final String str = iter.next();
-      sb.append(str);
-      if (iter.hasNext()) {
-        if (i > 0 && i % 3 == 0) {
-          sb.append(",\n    ");
-        } else {
-          sb.append(", ");
-        }
-      }
-      i++;
-    }
-    return sb.toString();
   }
 
 }

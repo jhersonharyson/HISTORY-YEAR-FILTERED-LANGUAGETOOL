@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2005 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
@@ -18,15 +18,31 @@
  */
 package org.languagetool.dev.index;
 
+import static org.languagetool.dev.dumpcheck.SentenceSourceIndexer.MAX_DOC_COUNT_FIELD;
+import static org.languagetool.dev.dumpcheck.SentenceSourceIndexer.MAX_DOC_COUNT_FIELD_VAL;
+import static org.languagetool.dev.dumpcheck.SentenceSourceIndexer.MAX_DOC_COUNT_VALUE;
+import static org.languagetool.dev.index.PatternRuleQueryBuilder.FIELD_NAME;
+import static org.languagetool.dev.index.PatternRuleQueryBuilder.FIELD_NAME_LOWERCASE;
+import static org.languagetool.dev.index.PatternRuleQueryBuilder.SOURCE_FIELD_NAME;
+
 import java.io.File;
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.search.*;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TimeLimitingCollector;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.SimpleFSDirectory;
 import org.apache.lucene.util.Counter;
@@ -36,12 +52,7 @@ import org.languagetool.Language;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.patterns.PatternRule;
-import org.languagetool.rules.patterns.PatternRuleLoader;
-
-import static org.languagetool.dev.index.PatternRuleQueryBuilder.*;
-import static org.languagetool.dev.wikipedia.WikipediaIndexHandler.MAX_DOC_COUNT_FIELD;
-import static org.languagetool.dev.wikipedia.WikipediaIndexHandler.MAX_DOC_COUNT_FIELD_VAL;
-import static org.languagetool.dev.wikipedia.WikipediaIndexHandler.MAX_DOC_COUNT_VALUE;
+import org.languagetool.tools.ContextTools;
 
 /**
  * A class with a main() method that takes a rule id  and the location of the
@@ -54,15 +65,17 @@ import static org.languagetool.dev.wikipedia.WikipediaIndexHandler.MAX_DOC_COUNT
  */
 public class Searcher {
 
+  private static boolean WIKITEXT_OUTPUT = false;
+  
+  private final Directory directory;
+
   private int maxHits = 1000;
   private int maxSearchTimeMillis = 5000;
-  
-  private Directory directory;
   private IndexSearcher indexSearcher;
   private DirectoryReader reader;
+  private boolean limitSearch = true;
 
-  public Searcher(Directory directory) throws IOException {
-    //openIndex(directory);
+  public Searcher(Directory directory) {
     this.directory = directory;
   }
 
@@ -77,7 +90,7 @@ public class Searcher {
       reader.close();
     }
   }
-  
+
   public int getDocCount() throws IOException {
     try (DirectoryReader reader = DirectoryReader.open(directory)) {
       final IndexSearcher indexSearcher = new IndexSearcher(reader);
@@ -122,14 +135,19 @@ public class Searcher {
       if (query == null) {
         throw new NullPointerException("Cannot search on null query for rule: " + rule.getId());
       }
-  
+
+      System.out.println("Running query: " + query.toString(FIELD_NAME_LOWERCASE));
       final SearchRunnable runnable = new SearchRunnable(indexSearcher, query, language, rule);
       final Thread searchThread = new Thread(runnable);
       searchThread.start();
       try {
         // using a TimeLimitingCollector is not enough, as it doesn't cover all time required to
         // search for a complicated regex, so interrupt the whole thread instead:
-        searchThread.join(maxSearchTimeMillis);
+        if (limitSearch) { //FIXME: I don't know a simpler way to achieve this
+          searchThread.join(maxSearchTimeMillis);
+        } else {
+          searchThread.join(Integer.MAX_VALUE);
+        }
         searchThread.interrupt();
       } catch (InterruptedException e) {
         throw new RuntimeException("Search thread got interrupted for query " + query, e);
@@ -144,11 +162,12 @@ public class Searcher {
         }
         throw new RuntimeException("Exception during search for query " + query + " on rule " + rule.getId(), exception);
       }
-  
+
       final List<MatchingSentence> matchingSentences = runnable.getMatchingSentences();
       final int sentencesChecked = getSentenceCheckCount(query, indexSearcher);
       final SearcherResult searcherResult = new SearcherResult(matchingSentences, sentencesChecked, query);
       searcherResult.setHasTooManyLuceneMatches(runnable.hasTooManyLuceneMatches());
+      searcherResult.setLuceneMatchCount(runnable.getLuceneMatchCount());
       if (runnable.hasTooManyLuceneMatches()) {
         // more potential matches than we can check in an acceptable time :-(
         searcherResult.setDocCount(maxHits);
@@ -191,7 +210,7 @@ public class Searcher {
     };
     counterThread.setName("LuceneSearchTimeoutThread");
     counterThread.start();
-    
+
     boolean timeLimitActivated = false;
     try {
       indexSearcher.search(query, collector);
@@ -201,15 +220,20 @@ public class Searcher {
     return new PossiblyLimitedTopDocs(topCollector.topDocs(), timeLimitActivated);
   }
 
-  PatternRule getRuleById(String ruleId, File xmlRuleFile) throws IOException {
-    final PatternRuleLoader ruleLoader = new PatternRuleLoader();
-    final List<PatternRule> rules = ruleLoader.getRules(xmlRuleFile);
-    for (PatternRule rule : rules) {
-      if (rule.getId().equals(ruleId)) {
-        return rule;
+  List<PatternRule> getRuleById(String ruleId, Language language) throws IOException {
+    List<PatternRule> rules = new ArrayList<>();
+    JLanguageTool langTool = new JLanguageTool(language);
+    langTool.activateDefaultPatternRules();
+    for (Rule rule : langTool.getAllRules()) {
+      if (rule.getId().equals(ruleId) && rule instanceof PatternRule) {
+        rules.add((PatternRule) rule);
       }
     }
-    throw new PatternRuleNotFoundException(ruleId, xmlRuleFile);
+    if (rules.size() > 0) {
+      return rules;
+    } else {
+      throw new PatternRuleNotFoundException(ruleId, language);
+    }
   }
 
   private int getSentenceCheckCount(Query query, IndexSearcher indexSearcher) {
@@ -228,20 +252,22 @@ public class Searcher {
       final List<RuleMatch> ruleMatches = languageTool.check(sentence);
       if (ruleMatches.size() > 0) {
         final String source = doc.get(SOURCE_FIELD_NAME);
+        final String title = doc.get(Indexer.TITLE_FIELD_NAME);
         final AnalyzedSentence analyzedSentence = languageTool.getAnalyzedSentence(sentence);
-        final MatchingSentence matchingSentence = new MatchingSentence(sentence, source, analyzedSentence, ruleMatches);
+        final MatchingSentence matchingSentence = new MatchingSentence(sentence, source, title, analyzedSentence, ruleMatches);
         matchingSentences.add(matchingSentence);
       }
     }
     return matchingSentences;
   }
 
-  private JLanguageTool getLanguageToolWithOneRule(Language lang, PatternRule patternRule) throws IOException {
+  private JLanguageTool getLanguageToolWithOneRule(Language lang, PatternRule patternRule) {
     final JLanguageTool langTool = new JLanguageTool(lang);
     for (Rule rule : langTool.getAllActiveRules()) {
       langTool.disableRule(rule.getId());
     }
     langTool.addRule(patternRule);
+    langTool.enableDefaultOffRule(patternRule.getId()); // rule might be off by default
     return langTool;
   }
 
@@ -256,12 +282,12 @@ public class Searcher {
   }
 
   private static void ensureCorrectUsageOrExit(String[] args) {
-    if (args.length != 4) {
-      System.err.println("Usage: Searcher <ruleId> <ruleXML> <languageCode> <indexDir>");
-      System.err.println("\truleId       Id of the rule to search for");
-      System.err.println("\truleXML      path to a rule file, e.g. en/grammar.xml");
-      System.err.println("\tlanguageCode short language code, e.g. en for English");
+    if (args.length < 3 || (args.length == 4 && !"--no_limit".equals(args[3]))) {
+      System.err.println("Usage: Searcher <ruleId> <languageCode> <indexDir> [--no_limit]");
+      System.err.println("\truleId       Id of the rule to search for (or comma-separated list of ids)");
+      System.err.println("\tlanguageCode short language code, e.g. 'en' for English");
       System.err.println("\tindexDir     path to a directory containing the index");
+      System.err.println("\t--no_limit   do not limit search time");
       System.exit(1);
     }
   }
@@ -276,6 +302,7 @@ public class Searcher {
     private List<MatchingSentence> matchingSentences;
     private Exception exception;
     private boolean tooManyLuceneMatches;
+    private int luceneMatchCount;
 
     SearchRunnable(IndexSearcher indexSearcher, Query query, Language language, PatternRule rule) {
       this.indexSearcher = indexSearcher;
@@ -295,14 +322,11 @@ public class Searcher {
         final PossiblyLimitedTopDocs limitedTopDocs = getTopDocs(query, sort);
         final long luceneTime = System.currentTimeMillis() - t2;
         final long t3 = System.currentTimeMillis();
-        if (limitedTopDocs.topDocs.scoreDocs.length >= maxHits) {
-          tooManyLuceneMatches = true;
-        } else {
-          tooManyLuceneMatches = false;
-        }
+        luceneMatchCount = limitedTopDocs.topDocs.totalHits;
+        tooManyLuceneMatches = limitedTopDocs.topDocs.scoreDocs.length >= maxHits;
         matchingSentences = findMatchingSentences(indexSearcher, limitedTopDocs.topDocs, languageTool);
-        System.out.println("Check done in " + langToolCreationTime + "/" + luceneTime + "/" + (System.currentTimeMillis() - t3) 
-                + "ms (LT creation/Lucene/matching) for " + limitedTopDocs.topDocs.scoreDocs.length + " docs, query " + query.toString(FIELD_NAME_LOWERCASE));
+        System.out.println("Check done in " + langToolCreationTime + "/" + luceneTime + "/" + (System.currentTimeMillis() - t3)
+            + "ms (LT creation/Lucene/matching) for " + limitedTopDocs.topDocs.scoreDocs.length + " docs");
       } catch (Exception e) {
         exception = e;
       }
@@ -320,36 +344,75 @@ public class Searcher {
       return tooManyLuceneMatches;
     }
 
+    int getLuceneMatchCount() {
+      return luceneMatchCount;
+    }
+
     List<MatchingSentence> getMatchingSentences() {
       return matchingSentences;
     }
+  }
+
+  private static ContextTools getContextTools(int contextSize) {
+    final ContextTools contextTools = new ContextTools();
+    contextTools.setEscapeHtml(false);
+    contextTools.setContextSize(contextSize);
+    contextTools.setErrorMarkerStart("**");
+    contextTools.setErrorMarkerEnd("**");
+    return contextTools;
   }
 
   public static void main(String[] args) throws Exception {
     ensureCorrectUsageOrExit(args);
     final long startTime = System.currentTimeMillis();
     final String[] ruleIds = args[0].split(",");
-    final File ruleFile = new File(args[1]);
-    final String languageCode = args[2];
+    final String languageCode = args[1];
     final Language language = Language.getLanguageForShortName(languageCode);
-    final File indexDir = new File(args[3]);
+    final File indexDir = new File(args[2]);
+    final boolean limitSearch = args.length > 3 && "--no_limit".equals(args[3]);
     final Searcher searcher = new Searcher(new SimpleFSDirectory(indexDir));
+    if (!limitSearch) {
+      searcher.setMaxHits(100_000);
+    }
+    searcher.limitSearch = limitSearch;
+    final ContextTools contextTools = getContextTools(140);
+    int totalMatches = 0;
     for (String ruleId : ruleIds) {
       final long ruleStartTime = System.currentTimeMillis();
-      final PatternRule rule = searcher.getRuleById(ruleId, ruleFile);
-      final SearcherResult searcherResult = searcher.findRuleMatchesOnIndex(rule, language);
-      int i = 1;
-      if (searcherResult.getMatchingSentences().size() == 0) {
-        System.out.println("[no matches]");
+      for (PatternRule rule : searcher.getRuleById(ruleId, language)) {
+        System.out.println("===== " + ruleId + "[" + rule.getSubId() + "] =========================================================");
+        final SearcherResult searcherResult = searcher.findRuleMatchesOnIndex(rule, language);
+        int i = 1;
+        if (searcherResult.getMatchingSentences().size() == 0) {
+          System.out.println("[no matches]");
+        }
+        for (MatchingSentence ruleMatch : searcherResult.getMatchingSentences()) {
+          for (RuleMatch match : ruleMatch.getRuleMatches()) {
+            String context = contextTools.getContext(match.getFromPos(), match.getToPos(), ruleMatch.getSentence());
+            if (WIKITEXT_OUTPUT) {
+              ContextTools contextTools2 = getContextTools(0);
+              String coveredText = contextTools2.getContext(match.getFromPos(), match.getToPos(), ruleMatch.getSentence());
+              coveredText = coveredText.replaceFirst("^\\.\\.\\.", "").replaceFirst("\\.\\.\\.$", "");
+              coveredText = coveredText.replaceFirst("^\\*\\*", "").replaceFirst("\\*\\*$", "");
+              String encodedTextWithQuotes = URLEncoder.encode("\"" + coveredText + "\"", "UTF-8");
+              String searchLink = "https://de.wikipedia.org/w/index.php?search=" + encodedTextWithQuotes + "&title=Spezial%3ASuche&go=Artikel";
+              context = context.replaceAll("\\*\\*.*?\\*\\*", "[" + searchLink + " " + coveredText + "]");
+              String encTitle = URLEncoder.encode(ruleMatch.getTitle(), "UTF-8");
+              String encodedText = URLEncoder.encode(coveredText, "UTF-8");
+              System.out.println("# [[" + ruleMatch.getTitle() + "]]: " + context +
+                " ([http://wikipedia.ramselehof.de/wikiblame.php?user_lang=de&lang=de&project=wikipedia&article=" + encTitle +
+                      "&needle=" + encodedText + "&skipversions=0&ignorefirst=0&limit=500&searchmethod=int&order=desc&start=Start WikiBlame])");
+            } else {
+              System.out.println(i + ": " + context + " [" + ruleMatch.getSource() + "]");
+            }
+          }
+          totalMatches += ruleMatch.getRuleMatches().size();
+          i++;
+        }
+        System.out.println("Time: " + (System.currentTimeMillis() - ruleStartTime) + "ms");
       }
-      for (MatchingSentence ruleMatch : searcherResult.getMatchingSentences()) {
-        System.out.println(i + ": " + ruleMatch.getSentence() + " (Source: " + ruleMatch.getSource() + ")");
-        i++;
-      }
-      System.out.println("Time: " + (System.currentTimeMillis() - ruleStartTime) + "ms");
-      System.out.println("==============================================================");
     }
-    System.out.println("Total time: " + (System.currentTimeMillis() - startTime) + "ms");
+    System.out.println("Total time: " + (System.currentTimeMillis() - startTime) + "ms, " + totalMatches + " matches");
   }
 
 }

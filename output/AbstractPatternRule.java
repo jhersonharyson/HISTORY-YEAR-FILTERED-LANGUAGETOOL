@@ -51,8 +51,7 @@ public abstract class AbstractPatternRule extends Rule {
   private final String id;
   private final String description;
   private final boolean getUnified;
-
-  private boolean groupsOrUnification;
+  private final boolean groupsOrUnification;
 
   public AbstractPatternRule(final String id, 
       final String description,
@@ -67,15 +66,22 @@ public abstract class AbstractPatternRule extends Rule {
     testUnification = initUnifier();
     sentStart = patternElements.size() > 0 && patternElements.get(0).isSentenceStart();    
     if (!testUnification) {
+      boolean found = false;
       for (Element elem : patternElements) {
         if (elem.hasAndGroup()) {
-          groupsOrUnification = true;
+          found = true;
           break;
         }
       }
+      groupsOrUnification = found;
     } else {
       groupsOrUnification = true;
     }
+  }
+
+  @Override
+  public boolean supportsLanguage(final Language language) {
+    return language.equalsConsiderVariantsIfSpecified(this.language);
   }
 
   private boolean initUnifier() {
@@ -103,7 +109,7 @@ public abstract class AbstractPatternRule extends Rule {
   }
 
   @Override
-  public RuleMatch[] match(AnalyzedSentence text) throws IOException {
+  public RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
     return null;
   }
 

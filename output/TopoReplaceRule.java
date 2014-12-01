@@ -132,18 +132,17 @@ public class TopoReplaceRule extends Rule {
   /**
    * Load the list of words. <br/>
    * Same as {@link AbstractSimpleReplaceRule#loadWords} but allows multiple words.   
-   * @param file the file to load.
+   * @param stream the stream to load.
    * @return the list of maps containing the error-corrections pairs. <br/>The n-th map contains key strings of (n+1) words.
-   * @throws IOException when the file contains errors.
    * @see #getWordTokenizer
    */
-  private List<Map<String, String>> loadWords(final InputStream file)
+  private List<Map<String, String>> loadWords(final InputStream stream)
           throws IOException {
     final List<Map<String, String>> list = new ArrayList<>();
     InputStreamReader isr = null;
     BufferedReader br = null;
     try {
-      isr = new InputStreamReader(file, getEncoding());
+      isr = new InputStreamReader(stream, getEncoding());
       br = new BufferedReader(isr);
       String line;
 
@@ -201,9 +200,9 @@ public class TopoReplaceRule extends Rule {
   }
 
   @Override
-  public RuleMatch[] match(final AnalyzedSentence text) {
+  public RuleMatch[] match(final AnalyzedSentence sentence) {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = text
+    final AnalyzedTokenReadings[] tokens = sentence
             .getTokensWithoutWhitespace();
 
     final Queue<AnalyzedTokenReadings> prevTokens = new ArrayBlockingQueue<>(wrongWords.size());
@@ -211,7 +210,7 @@ public class TopoReplaceRule extends Rule {
     for (int i = 1; i < tokens.length; i++) {
       addToQueue(tokens[i], prevTokens);
       final StringBuilder sb = new StringBuilder();
-      final ArrayList<String> variants = new ArrayList<>();
+      final List<String> variants = new ArrayList<>();
       final List<AnalyzedTokenReadings> prevTokensList = new ArrayList<>(prevTokens);
       for (int j = prevTokensList.size() - 1; j >= 0; j--) {
         if (j != prevTokensList.size() - 1 && prevTokensList.get(j + 1).isWhitespaceBefore()) {

@@ -24,7 +24,11 @@ import java.util.Locale;
 import java.util.ResourceBundle;
 
 import org.apache.commons.lang.StringUtils;
+import org.languagetool.AnalyzedToken;
+import org.languagetool.AnalyzedTokenReadings;
+import org.languagetool.JLanguageTool;
 import org.languagetool.rules.AbstractSimpleReplaceRule;
+import org.languagetool.tagging.uk.IPOSTag;
 
 /**
  * A rule that matches words which should not be used and suggests correct ones
@@ -39,12 +43,14 @@ public class SimpleReplaceRule extends AbstractSimpleReplaceRule {
 
   private static final String FILE_NAME = "/uk/replace.txt";
 
+  @Override
   public final String getFileName() {
     return FILE_NAME;
   }
 
   public SimpleReplaceRule(final ResourceBundle messages) throws IOException {
     super(messages);
+    setIgnoreTaggedWords();
   }
 
   @Override
@@ -57,6 +63,7 @@ public class SimpleReplaceRule extends AbstractSimpleReplaceRule {
     return "Пошук помилкових слів";
   }
 
+  @Override
   public String getShort() {
     return "Помилка?";
   }
@@ -67,19 +74,30 @@ public class SimpleReplaceRule extends AbstractSimpleReplaceRule {
         + StringUtils.join(replacements, ", ") + ".";
   }
 
-  /**
-   * Indicates if the rule is case-sensitive.
-   * 
-   * @return true if the rule is case-sensitive, false otherwise.
-   */
+  @Override
+  protected boolean isTagged(AnalyzedTokenReadings tokenReadings) {
+    for (AnalyzedToken token: tokenReadings.getReadings()) {
+      String posTag = token.getPOSTag();
+      if (isGoodPosTag(posTag)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  private boolean isGoodPosTag(String posTag) {
+    return posTag != null
+        && ! JLanguageTool.PARAGRAPH_END_TAGNAME.equals(posTag)
+        && ! JLanguageTool.SENTENCE_END_TAGNAME.equals(posTag)
+        && ! posTag.contains(IPOSTag.bad.getText());
+  }
+
+  @Override
   public boolean isCaseSensitive() {
     return false;
   }
 
-  /**
-   * @return the locale used for case conversion when {@link #isCaseSensitive()}
-   *         is set to <code>false</code>.
-   */
+  @Override
   public Locale getLocale() {
     return Locale.getDefault();
   }

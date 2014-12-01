@@ -46,7 +46,7 @@ public class RuleMatch implements Comparable<RuleMatch> {
   private final int fromPos;
   private final int toPos;
   private final String message;
-  private final String shortMessage;   // for OOo/LO context menu
+  private final String shortMessage;   // used e.g. for OOo/LO context menu
 
   private List<String> suggestedReplacements = new ArrayList<>();
 
@@ -85,6 +85,9 @@ public class RuleMatch implements Comparable<RuleMatch> {
   public RuleMatch(Rule rule, int fromPos, int toPos, String message, String shortMessage, 
       boolean startWithUppercase, String suggestionsOutMsg) {
     this.rule = rule;
+    if (toPos <= fromPos) {
+      throw new RuntimeException("fromPos (" + fromPos + ") must be less than toPos (" + toPos + ")");
+    }
     this.fromPos = fromPos;
     this.toPos = toPos;
     this.message = message;
@@ -107,84 +110,84 @@ public class RuleMatch implements Comparable<RuleMatch> {
   }
 
   /**
-   * Set the line number in which the match occurs.
+   * Set the line number in which the match occurs (zero-based).
    */
   public void setLine(final int fromLine) {
     this.fromLine = fromLine;
   }
 
   /**
-   * Get the line number in which the match occurs.
+   * Get the line number in which the match occurs (zero-based).
    */
   public int getLine() {
     return fromLine;
   }
 
   /**
-   * Set the line number in which the match ends.
+   * Set the line number in which the match ends (zero-based).
    */
   public void setEndLine(final int endLine) {
     this.endLine = endLine;
   }
 
   /**
-   * Get the line number in which the match ends.
+   * Get the line number in which the match ends (zero-based).
    */
   public int getEndLine() {
     return endLine;
   }
 
   /**
-   * Set the column number in which the match occurs.
+   * Set the column number in which the match occurs (zero-based).
    */
   public void setColumn(final int column) {
     this.column = column;
   }
 
   /**
-   * Get the column number in which the match occurs.
+   * Get the column number in which the match occurs (zero-based).
    */
   public int getColumn() {
     return column;
   }
 
   /**
-   * Set the column number in which the match ends.
+   * Set the column number in which the match ends (zero-based).
    */
   public void setEndColumn(final int endColumn) {
     this.endColumn = endColumn;
   }
 
   /**
-   * Get the column number in which the match ends.
+   * Get the column number in which the match ends (zero-based).
    */
   public int getEndColumn() {
     return endColumn;
   }
 
   /**
-   * Set the character offset at which the match occurs.
+   * Set the character offset at which the match occurs (zero-based).
    */
   public void setOffset(final int offset) {
     this.offset = offset;
   }
 
   /**
-   * Get the character offset at which the match occurs.
+   * Get the character offset at which the match occurs (zero-based).
    */
   public int getOffset() {
     return offset;
   }
 
   /**
-   * Position of the start of the error (in characters).
+   * Position of the start of the error (in characters, zero-based).
    */
   public int getFromPos() {
     return fromPos;
   }
 
   /**
-   * Position of the end of the error (in characters).
+   * Position of the end of the error (in characters, zero-based).
    */
   public int getToPos() {
     return toPos;
@@ -201,7 +204,8 @@ public class RuleMatch implements Comparable<RuleMatch> {
   }  
 
   /**
-   * A shorter human-readable explanation describing the error.
+   * A shorter human-readable explanation describing the error or an empty string
+   * if no such explanation is available.
    * @see #getMessage()
    */
   public String getShortMessage() {
@@ -243,9 +247,7 @@ public class RuleMatch implements Comparable<RuleMatch> {
   /** Compare by start position. */
   @Override
   public int compareTo(final RuleMatch other) {
-    if (other == null) {
-      throw new NullPointerException();
-    }
+    Objects.requireNonNull(other);
     return Integer.compare(getFromPos(), other.getFromPos());
   }
 

@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2005 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
@@ -38,9 +38,9 @@ public class DisambiguationPatternRule extends AbstractPatternRule {
 
   /** Possible disambiguator actions. **/
   public enum DisambiguatorAction {
-    ADD, FILTER, REMOVE, REPLACE, UNIFY, IMMUNIZE, FILTERALL
+    ADD, FILTER, REMOVE, REPLACE, UNIFY, IMMUNIZE, IGNORE_SPELLING, FILTERALL
   }
-  
+
   private final String disambiguatedPOS;
   private final Match matchElement;
   private final DisambiguatorAction disAction;
@@ -55,12 +55,13 @@ public class DisambiguationPatternRule extends AbstractPatternRule {
    * @param elements Element (token) list
    * @param description Description to be shown (name)
    * @param disambAction the action to be executed on found token(s), one of the
-   *          following: add, filter, remove, replace, unify.
+   *          following: add, filter, filterall, ignore_spelling, immunize, remove, replace, unify.
+   * @since public since 2.5
    */
-  DisambiguationPatternRule(final String id, final String description,
-      final Language language, final List<Element> elements,
-      final String disamb, final Match posSelect,
-      final DisambiguatorAction disambAction) {
+  public DisambiguationPatternRule(final String id, final String description,
+                                   final Language language, final List<Element> elements,
+                                   final String disamb, final Match posSelect,
+                                   final DisambiguatorAction disambAction) {
     super(id, description, language, elements, true);
     if (disamb == null && posSelect == null
         && disambAction != DisambiguatorAction.UNIFY
@@ -68,21 +69,22 @@ public class DisambiguationPatternRule extends AbstractPatternRule {
         && disambAction != DisambiguatorAction.REMOVE
         && disambAction != DisambiguatorAction.IMMUNIZE
         && disambAction != DisambiguatorAction.REPLACE
-        && disambAction != DisambiguatorAction.FILTERALL) {
+        && disambAction != DisambiguatorAction.FILTERALL
+        && disambAction != DisambiguatorAction.IGNORE_SPELLING) {
       throw new NullPointerException("disambiguated POS cannot be null");
-    }    
+    }
     this.disambiguatedPOS = disamb;
     this.matchElement = posSelect;
     this.disAction = disambAction;
   }
-  
+
   /**
    * Used to add new interpretations.
    * 
    * @param newReadings
    *          An array of AnalyzedTokens. The length of the array should be the
    *          same as the number of the tokens matched and selected by
-   *          mark/mark_from & mark_to attributes (>1).
+   *          {@code <marker>...</marker>} elements.
    */
   public final void setNewInterpretations(final AnalyzedToken[] newReadings) {
     newTokenReadings = newReadings.clone();
@@ -91,15 +93,15 @@ public class DisambiguationPatternRule extends AbstractPatternRule {
   /**
    * Performs disambiguation on the source sentence.
    * 
-   * @param text {@link AnalyzedSentence} Sentence to be disambiguated.
+   * @param sentence {@link AnalyzedSentence} Sentence to be disambiguated.
    * @return {@link AnalyzedSentence} Disambiguated sentence (might be unchanged).
    */
 
-  public final AnalyzedSentence replace(final AnalyzedSentence text) throws IOException {
+  public final AnalyzedSentence replace(final AnalyzedSentence sentence) throws IOException {
     final DisambiguationPatternRuleReplacer replacer = new DisambiguationPatternRuleReplacer(this);
-    return replacer.replace(text);
+    return replacer.replace(sentence);
   }
-  
+
   /**
    * @param examples the examples to set
    */
@@ -127,7 +129,7 @@ public class DisambiguationPatternRule extends AbstractPatternRule {
   public List<String> getUntouchedExamples() {
     return untouchedExamples;
   }
-  
+
   /**
    * For testing only.
    */

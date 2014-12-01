@@ -20,6 +20,7 @@ package org.languagetool.rules.de;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.ResourceBundle;
@@ -28,8 +29,14 @@ import java.util.Set;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
+import org.languagetool.Language;
+import org.languagetool.language.German;
 import org.languagetool.rules.Category;
+import org.languagetool.rules.Example;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.tools.StringTools;
+
+import java.io.IOException;
 
 /**
  * Simple agreement checker for German verbs and subject. Checks agreement in:
@@ -51,14 +58,37 @@ import org.languagetool.rules.RuleMatch;
  */
 public class VerbAgreementRule extends GermanRule {
   
+  // Words that prevent a rule match when they occur directly before "bin":
   private static final Set<String> BIN_IGNORE = new HashSet<>(Arrays.asList(
+    "Mohamed",
+    "Muhammad",
+    "Muhammed",
+    "Mohammed",
+    "Mansour",
+    "Qaboos",
+    "Qabus",
+    "Tamim",
+    "Majid",
+    "Salman",
+    "Ghazi",
+    "Mahathir",
+    "Madschid",
+    "Maktum",
+    "al-Aziz",
+    "Asis",
+    "Numan",
+    "Hussein",
     "Abdul",
     "Abdulla",
     "Abdullah",
     "Isa",
-    "Muhammed",
     "Osama",
     "Said",
+    "Zayid",
+    "Zayed",
+    "Hamad",
+    "Chalifa",
+    "Raschid",
     "Turki",
     "/"
   ));
@@ -66,13 +96,18 @@ public class VerbAgreementRule extends GermanRule {
   private static final Set<String> QUOTATION_MARKS = new HashSet<>(Arrays.asList(
     "\"", "„"
   ));
+  
+  private final Language language;
 
   private AnalyzedTokenReadings finiteVerb;
 
-  public VerbAgreementRule(final ResourceBundle messages) {
+  public VerbAgreementRule(final ResourceBundle messages, German language) {
+    this.language = language;
     if (messages != null) {
       super.setCategory(new Category(messages.getString("category_grammar")));
     }
+    addExamplePair(Example.wrong("Ich <marker>bist</marker> über die Entwicklung sehr froh."),
+                   Example.fixed("Ich <marker>bin</marker> über die Entwicklung sehr froh."));
   }
   
   @Override
@@ -86,35 +121,50 @@ public class VerbAgreementRule extends GermanRule {
   }
   
   @Override
-  public RuleMatch[] match(final AnalyzedSentence text) {
+  public RuleMatch[] match(final AnalyzedSentence sentence) {
     
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = text.getTokensWithoutWhitespace();
+    final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
     
-    if (tokens.length < 4) // ignore one-word sentences (3 tokens: SENT_START, one word, SENT_END)
+    if (tokens.length < 4) { // ignore one-word sentences (3 tokens: SENT_START, one word, SENT_END)
       return toRuleMatchArray(ruleMatches);
+    }
     
-    // position of the pronouns
-    int posIch = -1, posDu = -1, posEr = -1, posWir = -1;
-    // positions of verbs which do match in person and number, and do not match any other person nor number
-    int posVer1Sin = -1, posVer2Sin = -1, posVer1Plu = -1/*, posVer2Plu = -1*/;
-    // positions of verbs which do match in person and number
-    int posPossibleVer1Sin = -1, posPossibleVer2Sin = -1, posPossibleVer3Sin = -1,
-        posPossibleVer1Plu = -1/*, posPossibleVer2Plu = -1*/;
+    // position of the pronouns:
+    int posIch = -1;
+    int posDu = -1;
+    int posEr = -1;
+    int posWir = -1;
+    // positions of verbs which do match in person and number, and do not match any other person nor number:
+    int posVer1Sin = -1;
+    int posVer2Sin = -1;
+    int posVer1Plu = -1;
+    /*int posVer2Plu = -1;*/
+    // positions of verbs which do match in person and number:
+    int posPossibleVer1Sin = -1;
+    int posPossibleVer2Sin = -1;
+    int posPossibleVer3Sin = -1;
+    int posPossibleVer1Plu = -1;
+    /*int posPossibleVer2Plu = -1;*/
     
     for (int i = 1; i < tokens.length; ++i) { // ignore SENT_START
       
       String strToken = tokens[i].getToken().toLowerCase();
       strToken = strToken.replace("‚", "");
-      
-      if (strToken.equals("ich")) {
-        posIch = i;
-      } else if (strToken.equals("du")) {
-        posDu = i;
-      } else if (strToken.equals("er")) {
-        posEr = i;
-      } else if (strToken.equals("wir")) {
-        posWir = i;
+
+      switch (strToken) {
+        case "ich":
+          posIch = i;
+          break;
+        case "du":
+          posDu = i;
+          break;
+        case "er":
+          posEr = i;
+          break;
+        case "wir":
+          posWir = i;
+          break;
       }
       
       if (tokens[i].hasPartialPosTag("VER")
@@ -132,14 +182,18 @@ public class VerbAgreementRule extends GermanRule {
 //        posVer2Plu = i;
         }
         
-        if (tokens[i].hasPartialPosTag(":1:SIN"))
+        if (tokens[i].hasPartialPosTag(":1:SIN")) {
           posPossibleVer1Sin = i;
-        if (tokens[i].hasPartialPosTag(":2:SIN"))
+        }
+        if (tokens[i].hasPartialPosTag(":2:SIN")) {
           posPossibleVer2Sin = i;
-        if (tokens[i].hasPartialPosTag(":3:SIN"))
+        }
+        if (tokens[i].hasPartialPosTag(":3:SIN")) {
           posPossibleVer3Sin = i;
-        if (tokens[i].hasPartialPosTag(":1:PLU"))
+        }
+        if (tokens[i].hasPartialPosTag(":1:PLU")) {
           posPossibleVer1Plu = i;
+        }
 //      if (tokens[i].hasPartialPosTag(":2:PLU"))
 //        posPossibleVer2Plu = i;
         
@@ -157,7 +211,9 @@ public class VerbAgreementRule extends GermanRule {
                && !isQuotationMark(tokens[posIch-1])) {
       final int plus1 = ((posIch + 1) == tokens.length) ? 0 : +1; // prevent posIch+1 segfault
       if (!verbDoesMatchPersonAndNumber(tokens[posIch-1], tokens[posIch+plus1], "1", "SIN")) {
-        ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posIch], finiteVerb));
+        if (!nextButOneIsModal(tokens, posIch)) {
+          ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posIch], finiteVerb, "1:SIN"));
+        }
       }
     }
     
@@ -167,15 +223,21 @@ public class VerbAgreementRule extends GermanRule {
       final int plus1 = ((posDu + 1) == tokens.length) ? 0 : +1;
       if (!verbDoesMatchPersonAndNumber(tokens[posDu-1], tokens[posDu+plus1], "2", "SIN") &&
           !tokens[posDu+plus1].hasPartialPosTag("VER:1:SIN:KJ2") && // "Wenn ich du wäre"
+          !tokens[posDu+plus1].hasPartialPosTag("ADJ:") && // "dass du  billige Klamotten..."
           !tokens[posDu-1].hasPartialPosTag("VER:1:SIN:KJ2")) {
-        ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posDu], finiteVerb));
+        if (!nextButOneIsModal(tokens, posDu)) {
+          ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posDu], finiteVerb, "2:SIN"));
+        }
       }
     }
     
     if (posEr > 0 && !isNear(posPossibleVer3Sin, posEr) && !isQuotationMark(tokens[posEr-1])) {
       final int plus1 = ((posEr + 1) == tokens.length) ? 0 : +1;
-      if (!verbDoesMatchPersonAndNumber(tokens[posEr-1], tokens[posEr+plus1], "3", "SIN")) {
-        ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posEr], finiteVerb));
+      if (!verbDoesMatchPersonAndNumber(tokens[posEr-1], tokens[posEr+plus1], "3", "SIN") 
+              && !nextButOneIsModal(tokens, posEr)
+              && !"äußerst".equals(finiteVerb.getToken())
+              && !"regen".equals(finiteVerb.getToken())) {  // "wo er regen Anteil nahm"
+        ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posEr], finiteVerb, "3:SIN"));
       }
     }
     
@@ -183,18 +245,22 @@ public class VerbAgreementRule extends GermanRule {
       ruleMatches.add(ruleMatchWrongVerb(tokens[posVer1Plu]));
     } else if (posWir > 0 && !isNear(posPossibleVer1Plu, posWir) && !isQuotationMark(tokens[posWir-1])) {
       final int plus1 = ((posWir + 1) == tokens.length) ? 0 : +1;
-      if (!verbDoesMatchPersonAndNumber(tokens[posWir-1], tokens[posWir+plus1], "1", "PLU")) {
-        ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posWir], finiteVerb));
+      if (!verbDoesMatchPersonAndNumber(tokens[posWir-1], tokens[posWir+plus1], "1", "PLU") && !nextButOneIsModal(tokens, posWir)) {
+        ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posWir], finiteVerb, "1:PLU"));
       }
     }
     
     return toRuleMatchArray(ruleMatches);
   }
-  
+
+  // avoid false alarm on 'wenn ich sterben sollte ...':
+  private boolean nextButOneIsModal(AnalyzedTokenReadings[] tokens, int pos) {
+    return pos < tokens.length - 2 && tokens[pos+2].hasPartialPosTag(":MOD:");
+  }
+
   /**
-   * @return true if |@param a - @param b| &lt; 5, and a != -1 
+   * @return true if |a - b| &lt; 5, and a != -1 
    */
-  
   private boolean isNear(final int a, final int b) {
     return (Math.abs(a - b) < 5) && a != -1;
   }
@@ -209,15 +275,18 @@ public class VerbAgreementRule extends GermanRule {
   private boolean hasUnambiguouslyPersonAndNumber(final AnalyzedTokenReadings tokenReadings, final String person, final String number) {
     if (tokenReadings.getToken().length() == 0
         || (Character.isUpperCase(tokenReadings.getToken().charAt(0)) && !(tokenReadings.getStartPos() == 0) )
-        || !tokenReadings.hasPartialPosTag("VER"))
+        || !tokenReadings.hasPartialPosTag("VER")) {
       return false;
+    }
 
     for (AnalyzedToken analyzedToken : tokenReadings) {
       final String postag = analyzedToken.getPOSTag();
-      if (postag.contains("_END")) // ignore SENT_END and PARA_END
+      if (postag.contains("_END")) { // ignore SENT_END and PARA_END
         continue;
-      if (!postag.contains(":" + person + ":" + number))
+      }
+      if (!postag.contains(":" + person + ":" + number)) {
         return false;
+      }
     } // for each reading
     
     return true;
@@ -232,7 +301,8 @@ public class VerbAgreementRule extends GermanRule {
         || !token.hasPartialPosTag("VER")
         || token.hasPartialPosTag("PA2")
         || token.hasPartialPosTag("PRO:")
-        || token.hasPartialPosTag("ZAL")) {
+        || token.hasPartialPosTag("ZAL")
+        || "einst".equals(token.getToken())) {
       return false;
     }
     return (token.hasPartialPosTag(":1:") || token.hasPartialPosTag(":2:") || token.hasPartialPosTag(":3:"));
@@ -244,10 +314,10 @@ public class VerbAgreementRule extends GermanRule {
    */
   private boolean verbDoesMatchPersonAndNumber(final AnalyzedTokenReadings token1, final AnalyzedTokenReadings token2,
                                                final String person, final String number) {
-   if (token1.getToken().equals(",") || token1.getToken().equals("und") ||
-       token2.getToken().equals(",") || token2.getToken().equals("und")) {
-    return true;
-   }
+    if (token1.getToken().equals(",") || token1.getToken().equals("und") ||
+        token2.getToken().equals(",") || token2.getToken().equals("und")) {
+      return true;
+    }
    
     boolean foundFiniteVerb = false;
     
@@ -270,6 +340,73 @@ public class VerbAgreementRule extends GermanRule {
     return !foundFiniteVerb;
   }
   
+  /**
+   * @return a list of forms of @param verb which match @param expectedVerbPOS (person:number)
+   * @param toUppercase true when the suggestions should be capitalized
+   */
+  private List<String> getVerbSuggestions(final AnalyzedTokenReadings verb, final String expectedVerbPOS, final boolean toUppercase) {
+    // find the first verb reading
+    AnalyzedToken verbToken = new AnalyzedToken("","","");
+    for (AnalyzedToken token : verb.getReadings()) {
+      if (token.getPOSTag().startsWith("VER:")) {
+        verbToken = token;
+        break;
+      }
+    }
+    
+    try {
+      String[] synthesized = language.getSynthesizer().synthesize(verbToken, "VER.*:"+expectedVerbPOS+".*", true);
+      // remove duplicates
+      Set<String> suggestionSet = new HashSet<>();
+      suggestionSet.addAll(Arrays.asList(synthesized));
+      List<String> suggestions = new ArrayList<>();
+      suggestions.addAll(suggestionSet);
+      if (toUppercase) {
+        for (int i = 0; i < suggestions.size(); ++i) {
+          suggestions.set(i, StringTools.uppercaseFirstChar(suggestions.get(i)));
+        }
+      }
+      Collections.sort(suggestions);
+      return suggestions;
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+  
+  /**
+   * @return a list of pronouns which match the person and number of @param verb
+   * @param toUppercase true when the suggestions should be capitalized
+   */
+  private List<String> getPronounSuggestions(final AnalyzedTokenReadings verb, final boolean toUppercase) {
+    List<String> result = new ArrayList<>();
+    if (verb.hasPartialPosTag(":1:SIN")) {
+      result.add("ich");
+    }
+    if (verb.hasPartialPosTag(":2:SIN")) {
+      result.add("du");
+    }
+    if (verb.hasPartialPosTag(":3:SIN")) {
+      result.add("er");
+      result.add("sie");
+      result.add("es");
+    }
+    if (verb.hasPartialPosTag(":1:PLU")) {
+      result.add("wir");
+    }
+    if (verb.hasPartialPosTag(":2:PLU")) {
+      result.add("ihr");
+    }
+    if (verb.hasPartialPosTag(":3:PLU") && !result.contains("sie")) { // do not add "sie" twice
+      result.add("sie");
+    }
+    if (toUppercase) {
+      for (int i = 0; i < result.size(); ++i) {
+        result.set(i, StringTools.uppercaseFirstChar(result.get(i)));
+      }
+    }
+    return result;
+  }
+  
   private RuleMatch ruleMatchWrongVerb(final AnalyzedTokenReadings token) {
     final String msg = "Möglicherweise fehlende grammatische Übereinstimmung zwischen Subjekt und Prädikat (" +
       token.getToken() + ") bezüglich Person oder Numerus (Einzahl, Mehrzahl - Beispiel: " +
@@ -277,15 +414,41 @@ public class VerbAgreementRule extends GermanRule {
     return new RuleMatch(this, token.getStartPos(), token.getStartPos() + token.getToken().length(), msg);
   }
   
-  private RuleMatch ruleMatchWrongVerbSubject(final AnalyzedTokenReadings subject, final AnalyzedTokenReadings verb) {
+  private RuleMatch ruleMatchWrongVerbSubject(final AnalyzedTokenReadings subject, final AnalyzedTokenReadings verb, final String expectedVerbPOS) {
     final String msg = "Möglicherweise fehlende grammatische Übereinstimmung zwischen Subjekt (" + subject.getToken() +
       ") und Prädikat (" + verb.getToken() + ") bezüglich Person oder Numerus (Einzahl, Mehrzahl - Beispiel: " +
       "'ich sind' statt 'ich bin').";
+    
+    List<String> suggestions = new ArrayList<>();
+    List<String> verbSuggestions = new ArrayList<>();
+    List<String> pronounSuggestions = new ArrayList<>();
+    
+    RuleMatch ruleMatch;
     if (subject.getStartPos() < verb.getStartPos()) {
-      return new RuleMatch(this, subject.getStartPos(), verb.getStartPos() + verb.getToken().length(), msg);
+      ruleMatch = new RuleMatch(this, subject.getStartPos(), verb.getStartPos() + verb.getToken().length(), msg);
+      verbSuggestions.addAll(getVerbSuggestions(verb, expectedVerbPOS, false));
+      for (String verbSuggestion : verbSuggestions) {
+        suggestions.add(subject.getToken() + " " + verbSuggestion);
+      }
+      pronounSuggestions.addAll(getPronounSuggestions(verb, Character.isUpperCase(subject.getToken().charAt(0))));
+      for (String pronounSuggestion : pronounSuggestions) {
+        suggestions.add(pronounSuggestion + " " + verb.getToken());
+      }
+      ruleMatch.setSuggestedReplacements(suggestions);
     } else {
-      return new RuleMatch(this, verb.getStartPos(), subject.getStartPos() + subject.getToken().length(), msg);
+      ruleMatch = new RuleMatch(this, verb.getStartPos(), subject.getStartPos() + subject.getToken().length(), msg);
+      verbSuggestions.addAll(getVerbSuggestions(verb, expectedVerbPOS, Character.isUpperCase(verb.getToken().charAt(0))));
+      for (String verbSuggestion : verbSuggestions) {
+        suggestions.add(verbSuggestion + " " + subject.getToken());
+      }
+      pronounSuggestions.addAll(getPronounSuggestions(verb, false));
+      for (String pronounSuggestion : pronounSuggestions) {
+        suggestions.add(verb.getToken() + " " + pronounSuggestion);
+      }
+      ruleMatch.setSuggestedReplacements(suggestions);
     }
+    
+    return ruleMatch;
   }
   
   @Override

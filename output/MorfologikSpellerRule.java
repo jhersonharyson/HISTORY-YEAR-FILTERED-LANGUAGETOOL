@@ -19,25 +19,24 @@
 
 package org.languagetool.rules.spelling.morfologik;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
-import java.util.ResourceBundle;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.rules.Category;
+import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.spelling.SpellingCheckRule;
 
+import java.io.IOException;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 public abstract class MorfologikSpellerRule extends SpellingCheckRule {
-  protected MorfologikSpeller speller;
+  
+  protected MorfologikSpeller speller1;
+  protected MorfologikSpeller speller2;
   protected Locale conversionLocale;
 
   private boolean ignoreTaggedWords = false;
@@ -54,7 +53,7 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     super.setCategory(new Category(messages.getString("category_typo")));
     this.conversionLocale = conversionLocale != null ? conversionLocale : Locale.getDefault();
     init();
-    setLocQualityIssueType("misspelling");
+    setLocQualityIssueType(ITSIssueType.Misspelling);
   }
 
   @Override
@@ -78,13 +77,15 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
   }
 
   @Override
-  public RuleMatch[] match(AnalyzedSentence text) throws IOException {
+  public RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = text.getTokensWithoutWhitespace();
+    final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
     //lazy init
-    if (speller == null) {
+    if (speller1 == null) {
       if (JLanguageTool.getDataBroker().resourceExists(getFileName())) {
-        speller = new MorfologikSpeller(getFileName(), conversionLocale);
+        speller1 = new MorfologikSpeller(getFileName(), 1);
+        speller2 = new MorfologikSpeller(getFileName(), 2);
+        setConvertsCase(speller1.convertsCase());
       } else {
         // should not happen, as we only configure this rule (or rather its subclasses)
         // when we have the resources:
@@ -100,7 +101,7 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
       if (isUrl(token.getToken())) {
         continue;
       }
-      if (ignoreToken(tokens, idx) || token.isImmunized()) {
+      if (ignoreToken(tokens, idx) || token.isImmunized() || token.isIgnoredBySpeller()) {
         continue;
       }
       if (ignoreTaggedWords && token.isTagged()) {
@@ -108,19 +109,19 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
       }
       final String word = token.getToken();
       if (tokenizingPattern() == null) {
-        ruleMatches.addAll(getRuleMatch(word, token.getStartPos()));
+        ruleMatches.addAll(getRuleMatches(word, token.getStartPos()));
       } else {
         int index = 0;
         final Matcher m = tokenizingPattern().matcher(word);
         while (m.find()) {
           final String match = word.subSequence(index, m.start()).toString();
-          ruleMatches.addAll(getRuleMatch(match, token.getStartPos() + index));
+          ruleMatches.addAll(getRuleMatches(match, token.getStartPos() + index));
           index = m.end();
         }
         if (index == 0) { // tokenizing char not found
-          ruleMatches.addAll(getRuleMatch(word, token.getStartPos()));
+          ruleMatches.addAll(getRuleMatches(word, token.getStartPos()));
         } else {
-          ruleMatches.addAll(getRuleMatch(word.subSequence(
+          ruleMatches.addAll(getRuleMatches(word.subSequence(
               index, word.length()).toString(), token.getStartPos() + index));
         }
       }
@@ -153,23 +154,22 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     return true;
   }
 
-  private List<RuleMatch> getRuleMatch(final String word, final int startPos) {
+  protected List<RuleMatch> getRuleMatches(final String word, final int startPos) throws IOException {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    if (isMisspelled(speller, word)) {
+    if (isMisspelled(speller1, word) || isProhibited(word)) {
       final RuleMatch ruleMatch = new RuleMatch(this, startPos, startPos
           + word.length(), messages.getString("spelling"),
           messages.getString("desc_spelling_short"));
-      //If lower case word is not a misspelled word, return it as the only suggestion
-      if (!isMisspelled(speller, word.toLowerCase(conversionLocale))) {
-        List<String> suggestion = Arrays.asList(word.toLowerCase(conversionLocale));
-        ruleMatch.setSuggestedReplacements(suggestion);
-        ruleMatches.add(ruleMatch);
-        return ruleMatches;
+      List<String> suggestions = speller1.getSuggestions(word);
+      if (suggestions.size() == 0 && word.length() >= 5) {
+        // speller1 uses a maximum edit distance of 1, it won't find suggestion for "garentee", "greatful" ezc.
+        suggestions.addAll(speller2.getSuggestions(word));
       }
-      List<String> suggestions = speller.getSuggestions(word);
-      suggestions = getAdditionalSuggestions(suggestions, word);
+      suggestions.addAll(0, getAdditionalTopSuggestions(suggestions, word));
+      suggestions.addAll(getAdditionalSuggestions(suggestions, word));
       if (!suggestions.isEmpty()) {
-        ruleMatch.setSuggestedReplacements(orderSuggestions(suggestions,word));
+        filterSuggestions(suggestions);
+        ruleMatch.setSuggestedReplacements(orderSuggestions(suggestions, word));
       }
       ruleMatches.add(ruleMatch);
     }
@@ -185,10 +185,6 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
    */
   public Pattern tokenizingPattern() {
     return null;
-  }
-
-  protected List<String> getAdditionalSuggestions(List<String> suggestions, String word) {
-    return suggestions;
   }
 
   protected List<String> orderSuggestions(List<String> suggestions, String word) {

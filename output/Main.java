@@ -42,6 +42,8 @@ import org.languagetool.Language;
 import org.languagetool.MultiThreadedJLanguageTool;
 import org.languagetool.gui.AboutDialog;
 import org.languagetool.gui.Configuration;
+import org.languagetool.markup.AnnotatedText;
+import org.languagetool.markup.AnnotatedTextBuilder;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.tools.StringTools;
@@ -70,18 +72,28 @@ public class Main extends WeakBase implements XJobExecutor,
     XServiceDisplayName, XServiceInfo, XProofreader,
     XLinguServiceEventBroadcaster {
 
+  // Service name required by the OOo API && our own name.
+  private static final String[] SERVICE_NAMES = {
+          "com.sun.star.linguistic2.Proofreader",
+          "org.languagetool.openoffice.Main" };
+
+  // use a different name than the stand-alone version to avoid conflicts:
+  private static final String CONFIG_FILE = ".languagetool-ooo.cfg";
+
+  private static final ResourceBundle MESSAGES = JLanguageTool.getMessageBundle();
+
+  // LibreOffice (since 4.2.0) special tag for locale with variant 
+  // e.g. language ="qlt" country="ES" variant="ca-ES-valencia":
+  private static final String LIBREOFFICE_SPECIAL_LANGUAGE_TAG = "qlt";
+
   private Configuration config;
   private JLanguageTool langTool;
   private Language docLanguage;
-
   private String docID;
 
-  /*
-   * Rules disabled using the config dialog box rather than Spelling dialog box
-   * or the context menu.
-   */
+  // Rules disabled using the config dialog box rather than Spelling dialog box
+  // or the context menu.
   private Set<String> disabledRules;
-
   private Set<String> disabledRulesUI;
 
   private List<XLinguServiceEventListener> xEventListeners;
@@ -96,21 +108,6 @@ public class Main extends WeakBase implements XJobExecutor,
   private List<String> tokenizedSentences;
   private int position;
   private List<RuleMatch> paragraphMatches;
-
-  // Service name required by the OOo API && our own name.
-  private static final String[] SERVICE_NAMES = {
-      "com.sun.star.linguistic2.Proofreader",
-      "org.languagetool.openoffice.Main" };
-
-  // use a different name than the stand-alone version to avoid conflicts:
-  private static final String CONFIG_FILE = ".languagetool-ooo.cfg";
-
-  private static final ResourceBundle MESSAGES = JLanguageTool.getMessageBundle();
-
-  // LibreOffice (since 4.2.0) special tag for locale with variant 
-  // e.g. language ="qlt" country="ES" variant="ca-ES-valencia":
-  private static final String LIBREOFFICE_SPECIAL_LANGUAGE_TAG = "qlt";
-  
   private XComponentContext xContext;
 
   public Main(final XComponentContext xCompContext) {
@@ -139,8 +136,7 @@ public class Main extends WeakBase implements XJobExecutor,
   private XComponent getXComponent() {
     try {
       final XMultiComponentFactory xMCF = xContext.getServiceManager();
-      final Object desktop = xMCF.createInstanceWithContext(
-          "com.sun.star.frame.Desktop", xContext);
+      final Object desktop = xMCF.createInstanceWithContext("com.sun.star.frame.Desktop", xContext);
       final XDesktop xDesktop = UnoRuntime.queryInterface(XDesktop.class, desktop);
       return xDesktop.getCurrentComponent();
     } catch (final Throwable t) {
@@ -152,7 +148,7 @@ public class Main extends WeakBase implements XJobExecutor,
   /**
    * Checks the language under the cursor. Used for opening the configuration
    * dialog.
-   * @return Language the language under the visible cursor
+   * @return the language under the visible cursor
    */
   private Language getLanguage() {
     final XComponent xComponent = getXComponent();
@@ -160,9 +156,8 @@ public class Main extends WeakBase implements XJobExecutor,
     final XPropertySet xCursorProps;
     try {
       final XModel model = UnoRuntime.queryInterface(XModel.class, xComponent);
-      final XTextViewCursorSupplier xViewCursorSupplier = UnoRuntime
-          .queryInterface(XTextViewCursorSupplier.class,
-              model.getCurrentController());
+      final XTextViewCursorSupplier xViewCursorSupplier =
+          UnoRuntime.queryInterface(XTextViewCursorSupplier.class, model.getCurrentController());
       final XTextViewCursor xCursor = xViewCursorSupplier.getViewCursor();
       if (xCursor.isCollapsed()) { // no text selection
         xCursorProps = UnoRuntime.queryInterface(XPropertySet.class, xCursor);
@@ -176,11 +171,13 @@ public class Main extends WeakBase implements XJobExecutor,
       }
 
       // The CharLocale and CharLocaleComplex properties may both be set, so we still cannot know
-      // whether the text is Khmer (the only "complex text layout (CTL)" language we support so far).
+      // whether the text is e.g. Khmer or Tamil (the only "complex text layout (CTL)" languages we support so far).
       // Thus we check the text itself:
-      final KhmerDetector khmerDetector = new KhmerDetector();
-      if (khmerDetector.isKhmer(xCursor.getText().getString())) {
-        return Language.getLanguageForShortName("km"); // Khmer
+      if (new KhmerDetector().isThisLanguage(xCursor.getText().getString())) {
+        return Language.getLanguageForShortName("km");
+      }
+      if (new TamilDetector().isThisLanguage(xCursor.getText().getString())) {
+        return Language.getLanguageForShortName("ta");
       }
 
       final Object obj = xCursorProps.getPropertyValue("CharLocale");
@@ -191,8 +188,7 @@ public class Main extends WeakBase implements XJobExecutor,
       boolean langIsSupported = false;
       for (Language element : Language.LANGUAGES) {
         if (charLocale.Language.equalsIgnoreCase(LIBREOFFICE_SPECIAL_LANGUAGE_TAG)
-            && element.getShortNameWithCountryAndVariant().equalsIgnoreCase(
-                charLocale.Variant)) {
+            && element.getShortNameWithCountryAndVariant().equalsIgnoreCase(charLocale.Variant)) {
           langIsSupported = true;
           break;
         }
@@ -211,18 +207,19 @@ public class Main extends WeakBase implements XJobExecutor,
       showError(t);
       return null;
     }
+    return getLanguage(charLocale);
+  }
 
+  private Language getLanguage(Locale locale) {
     try {
-      if (charLocale.Language.equalsIgnoreCase(LIBREOFFICE_SPECIAL_LANGUAGE_TAG)) {
-        return Language.getLanguageForShortName(charLocale.Variant);
+      if (locale.Language.equalsIgnoreCase(LIBREOFFICE_SPECIAL_LANGUAGE_TAG)) {
+        return Language.getLanguageForShortName(locale.Variant);
       } else {
-        return Language.getLanguageForShortName(charLocale.Language + "-"
-            + charLocale.Country);
+        return Language.getLanguageForShortName(locale.Language + "-" + locale.Country);
       }
     } catch (java.lang.IllegalArgumentException e) {
-      return Language.getLanguageForShortName(charLocale.Language);
+      return Language.getLanguageForShortName(locale.Language);
     }
-
   }
 
   /**
@@ -248,40 +245,41 @@ public class Main extends WeakBase implements XJobExecutor,
       paRes.aDocumentIdentifier = docID;
       paRes.aText = paraText;
       paRes.aProperties = propertyValues;
-      return doGrammarCheckingInternal(paraText, locale, paRes);
+      int[] footnotePositions = getPropertyValues("FootnotePositions", propertyValues);  // since LO 4.3
+      return doGrammarCheckingInternal(paraText, locale, paRes, footnotePositions);
     } catch (final Throwable t) {
       showError(t);
       return paRes;
     }
   }
 
+  private int[] getPropertyValues(String propName, PropertyValue[] propertyValues) {
+    for (PropertyValue propertyValue : propertyValues) {
+      if (propName.equals(propertyValue.Name)) {
+        if (propertyValue.Value instanceof int[]) {
+          return (int[]) propertyValue.Value;
+        } else {
+          System.err.println("Not of expected type int[]: " + propertyValue.Name + ": " + propertyValue.Value.getClass());
+        }
+      }
+    }
+    return new int[]{};  // e.g. for LO/OO < 4.3 and the 'FootnotePositions' property
+  }
+
   private synchronized ProofreadingResult doGrammarCheckingInternal(
-      final String paraText, final Locale locale, final ProofreadingResult paRes) {
+      final String paraText, final Locale locale, final ProofreadingResult paRes, int[] footnotePositions) {
 
     if (!StringTools.isEmpty(paraText) && hasLocale(locale)) {
-      Language langForShortName;
-      try {
-        if (locale.Language.equalsIgnoreCase(LIBREOFFICE_SPECIAL_LANGUAGE_TAG)) {
-          langForShortName = Language.getLanguageForShortName(locale.Variant);
-        } else {
-          langForShortName = Language.getLanguageForShortName(locale.Language
-              + "-" + locale.Country);
-        }
-      } catch (java.lang.IllegalArgumentException e) {
-        langForShortName = Language.getLanguageForShortName(locale.Language);
-      }
+      Language langForShortName = getLanguage(locale);
       if (!langForShortName.equals(docLanguage) || langTool == null || recheck) {
         docLanguage = langForShortName;
-        if (docLanguage == null) {
-          return paRes;
-        }
         initLanguageTool();
       }
 
       final Set<String> disabledRuleIds = config.getDisabledRuleIds();
       if (disabledRuleIds != null) {
         // copy as the config thread may access this as well
-        final ArrayList<String> list = new ArrayList<>(disabledRuleIds);
+        final List<String> list = new ArrayList<>(disabledRuleIds);
         for (final String id : list) {
           langTool.disableRule(id);
         }
@@ -289,7 +287,7 @@ public class Main extends WeakBase implements XJobExecutor,
       final Set<String> disabledCategories = config.getDisabledCategoryNames();
       if (disabledCategories != null) {
         // copy as the config thread may access this as well
-        final ArrayList<String> list = new ArrayList<>(disabledCategories);
+        final List<String> list = new ArrayList<>(disabledCategories);
         for (final String categoryName : list) {
           langTool.disableCategory(categoryName);
         }
@@ -297,7 +295,7 @@ public class Main extends WeakBase implements XJobExecutor,
       final Set<String> enabledRuleIds = config.getEnabledRuleIds();
       if (enabledRuleIds != null) {
         // copy as the config thread may access this as well
-        final ArrayList<String> list = new ArrayList<>(enabledRuleIds);
+        final List<String> list = new ArrayList<>(enabledRuleIds);
         for (String ruleName : list) {
           langTool.enableDefaultOffRule(ruleName);
           langTool.enableRule(ruleName);
@@ -310,22 +308,22 @@ public class Main extends WeakBase implements XJobExecutor,
         paRes.nStartOfNextSentencePosition = position + sentence.length();
         paRes.nBehindEndOfSentencePosition = paRes.nStartOfNextSentencePosition;
         if (!StringTools.isEmpty(sentence)) {
-          final List<RuleMatch> ruleMatches = langTool.check(sentence, false,
+          AnnotatedText annotatedText = getAnnotatedText(sentence, footnotePositions, paRes);
+          final List<RuleMatch> ruleMatches = langTool.check(annotatedText, false,
               JLanguageTool.ParagraphHandling.ONLYNONPARA);
           final SingleProofreadingError[] pErrors = checkParaRules(paraText,
-              locale, paRes.nStartOfSentencePosition,
+                  paRes.nStartOfSentencePosition,
               paRes.nStartOfNextSentencePosition, paRes.aDocumentIdentifier);
           int pErrorCount = 0;
           if (pErrors != null) {
             pErrorCount = pErrors.length;
           }
           if (!ruleMatches.isEmpty()) {
-            final SingleProofreadingError[] errorArray = new SingleProofreadingError[ruleMatches
-                .size() + pErrorCount];
+            final SingleProofreadingError[] errorArray = 
+                    new SingleProofreadingError[ruleMatches.size() + pErrorCount];
             int i = 0;
             for (final RuleMatch myRuleMatch : ruleMatches) {
-              errorArray[i] = createOOoError(myRuleMatch,
-                  paRes.nStartOfSentencePosition);
+              errorArray[i] = createOOoError(myRuleMatch, paRes.nStartOfSentencePosition);
               i++;
             }
             // add para matches
@@ -354,16 +352,35 @@ public class Main extends WeakBase implements XJobExecutor,
     return paRes;
   }
 
+  private AnnotatedText getAnnotatedText(String sentence, int[] footnotePos, ProofreadingResult paRes) {
+    Set<Integer> correctedPos = new HashSet<>();
+    for (int pos : footnotePos) {
+      correctedPos.add(pos - paRes.nStartOfSentencePosition);
+    }
+    AnnotatedTextBuilder annotations = new AnnotatedTextBuilder();
+    // not very efficient but simple implementation:
+    for (int i = 0; i < sentence.length(); i++) {
+      if (correctedPos.contains(i)) {
+        annotations.addMarkup("\u200B");
+      } else {
+        annotations.addText(String.valueOf(sentence.charAt(i)));
+      }
+    }
+    return annotations.build();
+  }
+
   private void initLanguageTool() {
     try {
       prepareConfig(docLanguage);
-      langTool = new MultiThreadedJLanguageTool(docLanguage,
-          config.getMotherTongue());
+      langTool = new MultiThreadedJLanguageTool(docLanguage, config.getMotherTongue());
       langTool.activateDefaultPatternRules();
       langTool.activateDefaultFalseFriendRules();
       for (Rule rule : langTool.getAllActiveRules()) {
-        if (rule.isSpellingRule()) {
+        if (rule.isDictionaryBasedSpellingRule()) {
           langTool.disableRule(rule.getId());
+        }
+        if (rule.useInOffice()) {
+          langTool.enableRule(rule.getId());
         }
       }
       recheck = false;
@@ -403,11 +420,11 @@ public class Main extends WeakBase implements XJobExecutor,
   // See https://bugs.freedesktop.org/show_bug.cgi?id=69416
   // non-private for test case
   String cleanFootnotes(String paraText) {
-    return paraText.replaceAll("([.!?])\\d ", "$1¹ ");
+    return paraText.replaceAll("([^\\d][.!?])\\d ", "$1¹ ");
   }
 
   private synchronized SingleProofreadingError[] checkParaRules(
-      final String paraText, final Locale locale, final int startPos,
+      final String paraText, final int startPos,
       final int endPos, final String docID) {
     if (startPos == 0) {
       try {
@@ -418,10 +435,8 @@ public class Main extends WeakBase implements XJobExecutor,
         showError(t);
       }
     }
-    if (paragraphMatches != null && !paragraphMatches.isEmpty()
-        && docID.equals(this.docID)) {
-      final List<SingleProofreadingError> errorList = new ArrayList<>(
-          paragraphMatches.size());
+    if (paragraphMatches != null && !paragraphMatches.isEmpty() && docID.equals(this.docID)) {
+      final List<SingleProofreadingError> errorList = new ArrayList<>(paragraphMatches.size());
       for (final RuleMatch myRuleMatch : paragraphMatches) {
         final int startErrPos = myRuleMatch.getFromPos();
         final int endErrPos = myRuleMatch.getToPos();
@@ -448,10 +463,9 @@ public class Main extends WeakBase implements XJobExecutor,
     final SingleProofreadingError aError = new SingleProofreadingError();
     aError.nErrorType = com.sun.star.text.TextMarkupType.PROOFREADING;
     // the API currently has no support for formatting text in comments
-    final String comment = ruleMatch.getMessage()
+    aError.aFullComment = ruleMatch.getMessage()
         .replaceAll("<suggestion>", "\"").replaceAll("</suggestion>", "\"")
-        .replaceAll("([\r]*\n)", " "); // convert line ends to spaces
-    aError.aFullComment = comment;
+        .replaceAll("([\r]*\n)", " ");
     // not all rules have short comments
     if (!StringTools.isEmpty(ruleMatch.getShortMessage())) {
       aError.aShortComment = ruleMatch.getShortMessage();
@@ -646,13 +660,12 @@ public class Main extends WeakBase implements XJobExecutor,
   }
 
   public static boolean __writeRegistryServiceInfo(final XRegistryKey regKey) {
-    return Factory.writeRegistryServiceInfo(Main.class.getName(),
-        Main.getServiceNames(), regKey);
+    return Factory.writeRegistryServiceInfo(Main.class.getName(), Main.getServiceNames(), regKey);
   }
 
   @Override
   public void trigger(final String sEvent) {
-    if(Thread.currentThread().getContextClassLoader() == null) {
+    if (Thread.currentThread().getContextClassLoader() == null) {
       Thread.currentThread().setContextClassLoader(Main.class.getClassLoader());
     }
     if (!javaVersionOkay()) {
@@ -678,10 +691,9 @@ public class Main extends WeakBase implements XJobExecutor,
         && (version.startsWith("1.0") || version.startsWith("1.1")
             || version.startsWith("1.2") || version.startsWith("1.3")
             || version.startsWith("1.4") || version.startsWith("1.5")
-            || version .startsWith("1.6"))) {
+            || version.startsWith("1.6"))) {
       final DialogThread dt = new DialogThread(
-          "Error: LanguageTool requires Java 7.0 or later. Current version: "
-              + version);
+          "Error: LanguageTool requires Java 7.0 or later. Current version: " + version);
       dt.start();
       return false;
     }
@@ -709,10 +721,11 @@ public class Main extends WeakBase implements XJobExecutor,
     msg += Tools.getFullStackTrace(e);
     final String metaInfo = "OS: " + System.getProperty("os.name") + " on "
         + System.getProperty("os.arch") + ", Java version "
-        + System.getProperty("java.vm.version") + " from "
+        + System.getProperty("java.version") + " from "
         + System.getProperty("java.vm.vendor");
     msg += metaInfo;
     final DialogThread dt = new DialogThread(msg);
+    e.printStackTrace();  // without this, we see no exception if a test case fails
     dt.start();
   }
 
@@ -745,8 +758,7 @@ public class Main extends WeakBase implements XJobExecutor,
   }
 
   /**
-   * Called from grammar/spell checking dialog to ignore a rule (not called when
-   * "Ignore" is selected in the context menu for an error.)
+   * Called when "Ignore" is selected e.g. in the context menu for an error.
    */
   @Override
   public void ignoreRule(final String ruleId, final Locale locale)

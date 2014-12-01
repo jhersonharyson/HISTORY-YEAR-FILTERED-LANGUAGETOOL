@@ -36,6 +36,7 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.dev.dumpcheck.Sentence;
 import org.languagetool.tokenizers.SentenceTokenizer;
 
 import static org.languagetool.dev.index.PatternRuleQueryBuilder.FIELD_NAME;
@@ -49,18 +50,17 @@ import static org.languagetool.dev.index.PatternRuleQueryBuilder.SOURCE_FIELD_NA
  */
 public class Indexer implements AutoCloseable {
 
-  private static final Version LUCENE_VERSION = Version.LUCENE_44;
+  static final String TITLE_FIELD_NAME = "title";
+
+  private static final Version LUCENE_VERSION = Version.LUCENE_4_10_1;
 
   private final IndexWriter writer;
   private final SentenceTokenizer sentenceTokenizer;
 
   public Indexer(Directory dir, Language language) {
     try {
-      final Map<String, Analyzer> analyzerMap = new HashMap<>();
-      analyzerMap.put(FIELD_NAME, new LanguageToolAnalyzer(LUCENE_VERSION, new JLanguageTool(language), false));
-      analyzerMap.put(FIELD_NAME_LOWERCASE, new LanguageToolAnalyzer(LUCENE_VERSION, new JLanguageTool(language), true));
-      final Analyzer analyzer = new PerFieldAnalyzerWrapper(new DoNotUseAnalyzer(), analyzerMap);
-      final IndexWriterConfig writerConfig = new IndexWriterConfig(LUCENE_VERSION, analyzer);
+      final Analyzer analyzer = getAnalyzer(language);
+      final IndexWriterConfig writerConfig = getIndexWriterConfig(analyzer);
       writerConfig.setOpenMode(OpenMode.CREATE);
       writer = new IndexWriter(dir, writerConfig);
       sentenceTokenizer = language.getSentenceTokenizer();
@@ -74,10 +74,21 @@ public class Indexer implements AutoCloseable {
     run(args[0], args[1], args[2]);
   }
 
+  static Analyzer getAnalyzer(Language language) {
+    final Map<String, Analyzer> analyzerMap = new HashMap<>();
+    analyzerMap.put(FIELD_NAME, new LanguageToolAnalyzer(LUCENE_VERSION, new JLanguageTool(language), false));
+    analyzerMap.put(FIELD_NAME_LOWERCASE, new LanguageToolAnalyzer(LUCENE_VERSION, new JLanguageTool(language), true));
+    return new PerFieldAnalyzerWrapper(new DoNotUseAnalyzer(), analyzerMap);
+  }
+
+  static IndexWriterConfig getIndexWriterConfig(Analyzer analyzer) {
+    return new IndexWriterConfig(LUCENE_VERSION, analyzer);
+  }
+
   private static void ensureCorrectUsageOrExit(String[] args) {
     if (args.length != 3) {
       System.err.println("Usage: Indexer <textFile> <indexDir> <languageCode>");
-      System.err.println("\ttextFile path to a text file to be indexed");
+      System.err.println("\ttextFile path to a text file to be indexed (line end implies sentence end)");
       System.err.println("\tindexDir path to a directory storing the index");
       System.err.println("\tlanguageCode short language code, e.g. en for English");
       System.exit(1);
@@ -96,43 +107,34 @@ public class Indexer implements AutoCloseable {
       try (FSDirectory directory = FSDirectory.open(new File(indexDir))) {
         final Language language = Language.getLanguageForShortName(languageCode);
         try (Indexer indexer = new Indexer(directory, language)) {
-          run(reader, indexer, false);
+          indexer.indexText(reader);
         }
       }
     }
     System.out.println("Index complete!");
   }
 
-  public static void run(String content, Directory dir, Language language, boolean isSentence) throws IOException {
+  public static void run(String content, Directory dir, Language language) throws IOException {
     final BufferedReader br = new BufferedReader(new StringReader(content));
     try (Indexer indexer = new Indexer(dir, language)) {
-      run(br, indexer, isSentence);
+      indexer.indexText(br);
     }
   }
 
-  public static void run(BufferedReader reader, Indexer indexer, boolean isSentence) throws IOException {
-    indexer.index(reader, null, isSentence, -1);
-  }
-
-  public void index(String content, boolean isSentence, int docCount) throws IOException {
-    index(content, null, isSentence, docCount);
-  }
-
-  public void index(String content, String source, boolean isSentence, int docCount) throws IOException {
-    final BufferedReader br = new BufferedReader(new StringReader(content));
-    index(br, source, isSentence, docCount);
-  }
-
-  public void index(BufferedReader reader, String source, boolean isSentence, int docCount) throws IOException {
+  public void indexSentence(Sentence sentence, int docCount) throws IOException {
+    final BufferedReader reader = new BufferedReader(new StringReader(sentence.getText()));
     String line;
     while ((line = reader.readLine()) != null) {
-      if (isSentence) {
-        add(-1, line, source);
-      } else {
-        final List<String> sentences = sentenceTokenizer.tokenize(line);
-        for (String sentence : sentences) {
-          add(docCount, sentence, source);
-        }
+      add(line, sentence.getSource(), sentence.getTitle(), docCount);
+    }
+  }
+
+  public void indexText(BufferedReader reader) throws IOException {
+    String line;
+    while ((line = reader.readLine()) != null) {
+      final List<String> sentences = sentenceTokenizer.tokenize(line);
+      for (String sentence : sentences) {
+        add(sentence, null, null, -1);
       }
     }
   }
@@ -141,7 +143,7 @@ public class Indexer implements AutoCloseable {
     writer.addDocument(doc);
   }
 
-  private void add(int docCount, String sentence, String source) throws IOException {
+  private void add(String sentence, String source, String title, int docCount) throws IOException {
     final Document doc = new Document();
     final FieldType type = new FieldType();
     type.setStored(true);
@@ -154,6 +156,13 @@ public class Indexer implements AutoCloseable {
       countType.setStored(true);
       countType.setIndexed(false);
       doc.add(new Field("docCount", docCount + "", countType));
+    }
+    if (title != null) {
+      final FieldType titleType = new FieldType();
+      titleType.setStored(true);
+      titleType.setIndexed(false);
+      titleType.setTokenized(false);
+      doc.add(new Field(TITLE_FIELD_NAME, title, titleType));
     }
     if (source != null) {
       final FieldType sourceType = new FieldType();

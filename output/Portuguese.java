@@ -18,32 +18,37 @@
  */
 package org.languagetool.language;
 
-import java.util.Arrays;
-import java.util.List;
-
 import org.languagetool.Language;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.DoublePunctuationRule;
-import org.languagetool.rules.GenericUnpairedBracketsRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.pt.PortugueseCompoundRule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.WhitespaceRule;
-import org.languagetool.rules.WordRepeatRule;
+import org.languagetool.rules.*;
+import org.languagetool.rules.pt.PreReformPortugueseCompoundRule;
 import org.languagetool.rules.spelling.hunspell.HunspellNoSuggestionRule;
 import org.languagetool.tagging.Tagger;
-import org.languagetool.tagging.xx.DemoTagger;
+import org.languagetool.tagging.pt.PortugueseTagger;
 import org.languagetool.tokenizers.SRXSentenceTokenizer;
 import org.languagetool.tokenizers.SentenceTokenizer;
 
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.ResourceBundle;
+
+/**
+ * Pre-spelling-reform Portuguese.
+ */
 public class Portuguese extends Language {
 
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
+  private String name = "Portuguese";
 
   @Override
   public String getName() {
-    return "Portuguese";
+    return name;
+  }
+
+  @Override
+  public void setName(String name) {
+    this.name = name;
   }
 
   @Override
@@ -58,12 +63,12 @@ public class Portuguese extends Language {
 
   @Override
   public Language getDefaultLanguageVariant() {
-    return new PortuguesePortugal();
+    return new PortugalPortuguese();
   }
 
   @Override
   public Contributor[] getMaintainers() {
-    final Contributor contributor = new Contributor("Marco A.G. Pinto");
+    Contributor contributor = new Contributor("Marco A.G. Pinto");
     contributor.setUrl("http://www.marcoagpinto.com/");
     return new Contributor[] { contributor };
   }
@@ -71,7 +76,7 @@ public class Portuguese extends Language {
   @Override
   public Tagger getTagger() {
     if (tagger == null) {
-      tagger = new DemoTagger();
+      tagger = new PortugueseTagger();
     }
     return tagger;
   }
@@ -85,17 +90,18 @@ public class Portuguese extends Language {
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            DoublePunctuationRule.class,
-            GenericUnpairedBracketsRule.class,
-            HunspellNoSuggestionRule.class,
-            UppercaseSentenceStartRule.class,
-            WordRepeatRule.class,
-            WhitespaceRule.class,
-            //Specific to Portuguese
-            PortugueseCompoundRule.class
+            new CommaWhitespaceRule(messages),
+            new DoublePunctuationRule(messages),
+            new GenericUnpairedBracketsRule(messages, this),
+            new HunspellNoSuggestionRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),
+            new WordRepeatRule(messages, this),
+            new MultipleWhitespaceRule(messages, this),
+            new SentenceWhitespaceRule(messages),
+            //Specific to Portuguese:
+            new PreReformPortugueseCompoundRule(messages)
     );
   }
 

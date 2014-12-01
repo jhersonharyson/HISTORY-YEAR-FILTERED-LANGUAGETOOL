@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2006 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
@@ -18,34 +18,27 @@
  */
 package org.languagetool.rules;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.ResourceBundle;
-import java.util.Scanner;
-import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.tools.StringTools;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
+
 /**
  * Checks that compounds (if in the list) are not written as separate words.
  * 
  * @author Daniel Naber & Marcin Miłkowski (refactoring)
  */
-
 public abstract class AbstractCompoundRule extends Rule {
 
-  private static final int MAX_TERMS = 5;  
+  private static final int MAX_TERMS = 5;
 
   private final Set<String> incorrectCompounds = new HashSet<>();
   private final Set<String> noDashSuggestion = new HashSet<>();
@@ -57,47 +50,53 @@ public abstract class AbstractCompoundRule extends Rule {
 
   private String shortDesc;
 
-  /** Flag to indicate if the hyphen is ignored in the text entered by the user.
-   * Set this to false if you want the rule to offer suggestions for words like [ro] "câte-și-trei" (with hyphen), not only for "câte și trei" (with spaces)
-   * This is only available for languages with hyphen as a word separator (ie: not available for english, available for Romanian)
-   * See Language.getWordTokenizer()
-   */
-  private boolean hyphenIgnored = true;
-  
-  public AbstractCompoundRule(final ResourceBundle messages, final String fileName,
-        final String withHyphenMessage, final String withoutHyphenMessage, final String withOrWithoutHyphenMessage) throws IOException {
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_misc")));
-    }
-    loadCompoundFile(JLanguageTool.getDataBroker().getFromResourceDirAsStream(fileName), "UTF-8");
-    this.withHyphenMessage = withHyphenMessage;
-    this.withoutHyphenMessage = withoutHyphenMessage;
-    this.withOrWithoutHyphenMessage = withOrWithoutHyphenMessage;
-    setLocQualityIssueType("misspelling");
-  }
-
   @Override
-  public abstract String getId();    
+  public abstract String getId();
 
   @Override
   public abstract String getDescription();
+
+  /**
+   * @since 2.8
+   */
+  public AbstractCompoundRule(ResourceBundle messages, List<String> fileNames,
+                              String withHyphenMessage, String withoutHyphenMessage, String withOrWithoutHyphenMessage) throws IOException {
+    if (messages != null) {
+      super.setCategory(new Category(messages.getString("category_misc")));
+    }
+    for (String fileName : fileNames) {
+      loadCompoundFile(fileName, "UTF-8");
+    }
+    this.withHyphenMessage = withHyphenMessage;
+    this.withoutHyphenMessage = withoutHyphenMessage;
+    this.withOrWithoutHyphenMessage = withOrWithoutHyphenMessage;
+    setLocQualityIssueType(ITSIssueType.Misspelling);
+  }
+  
+  public AbstractCompoundRule(final ResourceBundle messages, final String fileName,
+      final String withHyphenMessage, final String withoutHyphenMessage, final String withOrWithoutHyphenMessage) throws IOException {
+    this(messages, Collections.singletonList(fileName), withHyphenMessage, withoutHyphenMessage, withOrWithoutHyphenMessage);
+  }
 
   public void setShort(final String shortDescription) {
     shortDesc = shortDescription;
   }
 
+  /**
+   * Flag to indicate if the hyphen is ignored in the text entered by the user.
+   * Set this to false if you want the rule to offer suggestions for words 
+   * like [ro] "câte-și-trei" (with hyphen), not only for "câte și trei" (with spaces)
+   * This is only available for languages with hyphen as a word separator (ie: not 
+   * available for English, available for Romanian). See Language.getWordTokenizer()
+   */
   public boolean isHyphenIgnored() {
-    return hyphenIgnored;
-  }
-
-  public void setHyphenIgnored(boolean ignoreHyphen) {
-    this.hyphenIgnored = ignoreHyphen;
+    return true;
   }
 
   @Override
-  public RuleMatch[] match(final AnalyzedSentence text) {
+  public RuleMatch[] match(final AnalyzedSentence sentence) {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = text.getTokensWithoutWhitespace();
+    final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
 
     RuleMatch prevRuleMatch = null;
     final Queue<AnalyzedTokenReadings> prevTokens = new ArrayBlockingQueue<>(MAX_TERMS);
@@ -113,28 +112,15 @@ public abstract class AbstractCompoundRule extends Rule {
         addToQueue(token, prevTokens);
         continue;
       }
+      if (token.isImmunized()) {
+        continue;
+      }
 
-      final StringBuilder sb = new StringBuilder();
-      int j = 0;
-      AnalyzedTokenReadings firstMatchToken = null;
+      final AnalyzedTokenReadings firstMatchToken = prevTokens.peek();
       final List<String> stringsToCheck = new ArrayList<>();
       final List<String> origStringsToCheck = new ArrayList<>();    // original upper/lowercase spelling
-      final Map<String, AnalyzedTokenReadings> stringToToken = new HashMap<>();
-      for (AnalyzedTokenReadings atr : prevTokens) {
-        if (j == 0) {
-          firstMatchToken = atr;
-        }
-        sb.append(' ');
-        sb.append(atr.getToken());
-        if (j >= 1) {
-          final String stringToCheck = normalize(sb.toString());
-          stringsToCheck.add(stringToCheck);
-          origStringsToCheck.add(sb.toString().trim());
-          if (!stringToToken.containsKey(stringToCheck))
-            stringToToken.put(stringToCheck, atr);
-        }
-        j++;
-      }
+      final Map<String, AnalyzedTokenReadings> stringToToken =
+              getStringToTokenMap(prevTokens, stringsToCheck, origStringsToCheck);
       // iterate backwards over all potentially incorrect strings to make
       // sure we match longer strings first:
       for (int k = stringsToCheck.size()-1; k >= 0; k--) {
@@ -148,7 +134,7 @@ public abstract class AbstractCompoundRule extends Rule {
             replacement.add(origStringToCheck.replace(' ', '-'));
             msg = withHyphenMessage;
           }
-          if (!hasAllUppercaseParts(origStringToCheck) && !onlyDashSuggestion.contains(stringToCheck)) {
+          if (isNotAllUppercase(origStringToCheck) && !onlyDashSuggestion.contains(stringToCheck)) {
             replacement.add(mergeCompound(origStringToCheck));
             msg = withoutHyphenMessage;
           }
@@ -160,7 +146,7 @@ public abstract class AbstractCompoundRule extends Rule {
           } else if (replacement.isEmpty() || replacement.size() == 2) {     // isEmpty shouldn't happen
             msg = withOrWithoutHyphenMessage;
           }
-          final RuleMatch ruleMatch = new RuleMatch(this, firstMatchToken.getStartPos(), 
+          final RuleMatch ruleMatch = new RuleMatch(this, firstMatchToken.getStartPos(),
               atr.getStartPos() + atr.getToken().length(), msg, shortDesc);
           // avoid duplicate matches:
           if (prevRuleMatch != null && prevRuleMatch.getFromPos() == ruleMatch.getFromPos()) {
@@ -178,6 +164,27 @@ public abstract class AbstractCompoundRule extends Rule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  private Map<String, AnalyzedTokenReadings> getStringToTokenMap(Queue<AnalyzedTokenReadings> prevTokens,
+                                                                 List<String> stringsToCheck, List<String> origStringsToCheck) {
+    final StringBuilder sb = new StringBuilder();
+    final Map<String, AnalyzedTokenReadings> stringToToken = new HashMap<>();
+    int j = 0;
+    for (AnalyzedTokenReadings atr : prevTokens) {
+      sb.append(' ');
+      sb.append(atr.getToken());
+      if (j >= 1) {
+        final String stringToCheck = normalize(sb.toString());
+        stringsToCheck.add(stringToCheck);
+        origStringsToCheck.add(sb.toString().trim());
+        if (!stringToToken.containsKey(stringToCheck)) {
+          stringToToken.put(stringToCheck, atr);
+        }
+      }
+      j++;
+    }
+    return stringToToken;
+  }
+
   private String normalize(final String inStr) {
     String str = inStr.trim().toLowerCase();
     if (str.indexOf('-') != -1 && str.indexOf(' ') != -1) {
@@ -191,16 +198,16 @@ public abstract class AbstractCompoundRule extends Rule {
     return str;
   }
 
-  private boolean hasAllUppercaseParts(final String str) {
+  private boolean isNotAllUppercase(final String str) {
     final String[] parts = str.split(" ");
     for (String part : parts) {
       if (isHyphenIgnored() || !"-".equals(part)) { // do not treat '-' as an upper-case word
         if (StringTools.isAllUppercase(part)) {
-          return true;
+          return false;
         }
       }
     }
-    return false;
+    return true;
   }
 
   private String mergeCompound(final String str) {
@@ -213,7 +220,7 @@ public abstract class AbstractCompoundRule extends Rule {
         } else {
           sb.append(stringParts[k].toLowerCase());
         }
-      }  
+      }
     }
     return sb.toString();
   }
@@ -226,10 +233,14 @@ public abstract class AbstractCompoundRule extends Rule {
     }
   }
 
-  private void loadCompoundFile(final InputStream file, final String encoding) throws IOException {
-    try (Scanner scanner = new Scanner(file, encoding)) {
-      while (scanner.hasNextLine()) {
-        String line = scanner.nextLine().trim();
+  private void loadCompoundFile(final String fileName, final String encoding) throws IOException {
+    InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(fileName);
+    try (
+      InputStreamReader reader = new InputStreamReader(stream, encoding);
+      BufferedReader br = new BufferedReader(reader)
+    ) {
+      String line;
+      while ((line = br.readLine()) != null) {
         if (line.length() < 1 || line.charAt(0) == '#') {
           continue;     // ignore comments
         }
@@ -237,10 +248,10 @@ public abstract class AbstractCompoundRule extends Rule {
         line = line.replace('-', ' ');
         final String[] parts = line.split(" ");
         if (parts.length > MAX_TERMS) {
-          throw new IOException("Too many compound parts: " + line + ", maximum allowed: " + MAX_TERMS);
+          throw new IOException("Too many compound parts in file " + fileName + ": " + line + ", maximum allowed: " + MAX_TERMS);
         }
         if (parts.length == 1) {
-          throw new IOException("Not a compound: " + line);
+          throw new IOException("Not a compound in file " + fileName + ": " + line);
         }
         if (line.endsWith("+")) {
           line = removeLastCharacter(line);
@@ -249,6 +260,9 @@ public abstract class AbstractCompoundRule extends Rule {
           line = removeLastCharacter(line);
           onlyDashSuggestion.add(line.toLowerCase());
         }
+        //if (incorrectCompounds.contains(line.toLowerCase())) {
+        //  throw new RuntimeException("Duplicated word in file " + fileName + ": " + line);
+        //}
         incorrectCompounds.add(line.toLowerCase());
       }
     }

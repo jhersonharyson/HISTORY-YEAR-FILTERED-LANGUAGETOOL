@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.languagetool.dev.index.LanguageToolFilter.LEMMA_PREFIX;
 import static org.languagetool.dev.index.LanguageToolFilter.POS_PREFIX;
 
 /**
@@ -71,6 +72,7 @@ public class PatternRuleQueryBuilder {
         final BooleanClause clause = makeQuery(element);
         booleanQuery.add(clause);
       } catch (UnsupportedPatternRuleException e) {
+        //System.out.println("Ignoring because it's not supported: " + element + ": " + e);
         // cannot handle - okay to ignore, as we may return too broad matches
       } catch (Exception e) {
         throw new RuntimeException("Could not create query for rule " + rule.getId(), e);
@@ -99,7 +101,8 @@ public class PatternRuleQueryBuilder {
         final SpanQuery[] spanClauses = {spanQueryForTerm, spanQueryForPos};
         return new BooleanClause(new SpanNearQuery(spanClauses, 0, false), BooleanClause.Occur.MUST);
       } else {
-        throw new UnsupportedPatternRuleException("FIXME: Term/POS combination not supported yet: " + element);
+        // should not happen, we always use Occur.MUST:
+        throw new UnsupportedPatternRuleException("Term/POS combination not supported yet: " + element);
       }
     
     } else if (termQuery != null) {
@@ -134,32 +137,52 @@ public class PatternRuleQueryBuilder {
     }
     final Query termQuery;
     final Term termQueryTerm = getTermQueryTerm(element, termStr);
-    if (element.isInflected() && element.isRegularExpression()) {
-      // TODO: support this, e.g. "walk|climb|run"
+    if (element.getNegation() || element.getMinOccurrence() == 0) {
+      // we need to ignore this - negation, if any, must happen at the same position
       return null;
+    } else if (element.isInflected() && element.isRegularExpression()) {
+      Term lemmaQueryTerm = getQueryTerm(element, LEMMA_PREFIX + "(", simplifyRegex(termStr), ")");
+      final Query regexpQuery = getRegexQuery(lemmaQueryTerm, termStr, element);
+      return new BooleanClause(regexpQuery, BooleanClause.Occur.MUST);
     } else if (element.isInflected() && !element.isRegularExpression()) {
+      /*
+      This is simpler, but leads to problem with e.g. German rules ZEITLICH_SYNCHRON and GEWISSEN_SUBST:
+      Term lemmaQueryTerm = getQueryTerm(element, LEMMA_PREFIX, termStr, "");
+      Query query = new TermQuery(lemmaQueryTerm);
+      return new BooleanClause(query, BooleanClause.Occur.MUST);
+      */
       final Synthesizer synthesizer = language.getSynthesizer();
       if (synthesizer != null) {
         try {
           final String[] synthesized = synthesizer.synthesize(new AnalyzedToken(termStr, null, termStr), ".*", true);
-          final RegexpQuery regexpQuery = new RegexpQuery(new Term(FIELD_NAME, StringUtils.join(synthesized, "|")));
-          return new BooleanClause(regexpQuery, BooleanClause.Occur.MUST);
+          final Query query;
+          if (synthesized.length == 0) {
+            query = new TermQuery(termQueryTerm);
+          } else {
+            query = new RegexpQuery(getTermQueryTerm(element, StringUtils.join(synthesized, "|")));
+          }
+          return new BooleanClause(query, BooleanClause.Occur.MUST);
         } catch (IOException e) {
           throw new RuntimeException("Could not build Lucene query for '" + element + "' and '" + termStr + "'", e);
         }
       }
       return null;
     } else if (element.isRegularExpression()) {
-      termQuery = getRegexQuery(termQueryTerm, termStr);
+      termQuery = getRegexQuery(termQueryTerm, termStr, element);
     } else {
       termQuery = new TermQuery(termQueryTerm);
     }
-    if (element.getNegation()) {
-      // we need to ignore this - negation, if any, must happen at the same position
-      return null;
-    } else {
-      return new BooleanClause(termQuery, BooleanClause.Occur.MUST);
-    }
+    return new BooleanClause(termQuery, BooleanClause.Occur.MUST);
+  }
+
+  // regex syntax not supported, but doesn't matter - remove or simplify it:
+  private String simplifyRegex(String regex) {
+    return regex.replace("(?:", "(").replace("\\d", "[0-9]").replace("\\w", "[a-zA-Z_0-9]");
+  }
+
+  // the new and fast Regex query of Lucene doesn't support full Java regex syntax:
+  private boolean needsSimplification(String regex) {
+    return regex.contains("(?:") || regex.contains("\\d") || regex.contains("\\w");
   }
 
   private BooleanClause getPosQueryOrNull(Element element, String pos) {
@@ -168,19 +191,17 @@ public class PatternRuleQueryBuilder {
     }
     final Query posQuery;
     final Term posQueryTerm;
-    if (element.isPOStagRegularExpression()) {
-      posQueryTerm = getPosQueryTerm(element, POS_PREFIX + "(", pos, ")");
-      posQuery = getRegexQuery(posQueryTerm, pos);
-    } else {
-      posQueryTerm = getPosQueryTerm(element, POS_PREFIX, pos, "");
-      posQuery = new TermQuery(posQueryTerm);
-    }
-    if (element.getPOSNegation()) {
+    if (element.getPOSNegation() || element.getMinOccurrence() == 0) {
       // we need to ignore this - negation, if any, must happen at the same position
       return null;
+    } else if (element.isPOStagRegularExpression()) {
+      posQueryTerm = getQueryTerm(element, POS_PREFIX + "(", pos, ")");
+      posQuery = getRegexQuery(posQueryTerm, pos, element);
     } else {
-      return new BooleanClause(posQuery, BooleanClause.Occur.MUST);
+      posQueryTerm = getQueryTerm(element, POS_PREFIX, pos, "");
+      posQuery = new TermQuery(posQueryTerm);
     }
+    return new BooleanClause(posQuery, BooleanClause.Occur.MUST);
   }
 
   private Term getTermQueryTerm(Element element, String str) {
@@ -191,55 +212,51 @@ public class PatternRuleQueryBuilder {
     }
   }
 
-  private Term getPosQueryTerm(Element element, String prefix, String pos, String suffix) {
+  private Term getQueryTerm(Element element, String prefix, String str, String suffix) {
     if (element.isCaseSensitive()) {
-      return new Term(FIELD_NAME, prefix + pos + suffix);
+      return new Term(FIELD_NAME, prefix + str + suffix);
     } else {
-      return new Term(FIELD_NAME_LOWERCASE, prefix.toLowerCase() + pos.toLowerCase() + suffix.toLowerCase());
+      return new Term(FIELD_NAME_LOWERCASE, prefix.toLowerCase() + str.toLowerCase() + suffix.toLowerCase());
     }
   }
 
-  private Query getRegexQuery(Term term, String str) {
+  private Query getRegexQuery(Term term, String str, Element element) {
     try {
+      if (needsSimplification(str)) {
+        Term newTerm = new Term(term.field(), simplifyRegex(term.text()));
+        return new RegexpQuery(newTerm);
+      }
       if (str.contains("?iu") || str.contains("?-i")) {
         // Lucene's RegexpQuery doesn't seem to handle this correctly
-        return getFallbackRegexQuery(str);
+        return getFallbackRegexQuery(str, element);
       }
       return new RegexpQuery(term);
     } catch (IllegalArgumentException e) {
       // fallback for special constructs like "\p{Punct}" not supported by Lucene RegExp:
-      return getFallbackRegexQuery(str);
+      return getFallbackRegexQuery(str, element);
     }
   }
 
-  private RegexQuery getFallbackRegexQuery(String str) {
+  /** Return a query with the old (and slow, but more complete) way Lucene implements regular expressions. */
+  private RegexQuery getFallbackRegexQuery(String str, Element element) {
     // No lowercase of str, so '\p{Punct}' doesn't become '\p{punct}':
-    final RegexQuery query = new RegexQuery(new Term(FIELD_NAME_LOWERCASE, str));
+    final RegexQuery query = new RegexQuery(new Term(element.isCaseSensitive() ? FIELD_NAME : FIELD_NAME_LOWERCASE, str));
     query.setRegexImplementation(new JavaUtilRegexCapabilities(JavaUtilRegexCapabilities.FLAG_CASE_INSENSITIVE));
     return query;
   }
 
   private void checkUnsupportedElement(Element patternElement)
       throws UnsupportedPatternRuleException {
+    if (patternElement.hasOrGroup()) {
+      // TODO: this is not enough: the first of the tokens in the <or> group will not get into this branch
+      throw new UnsupportedPatternRuleException("<or> not yet supported.");
+    }
     if (patternElement.isUnified()) {
       throw new UnsupportedPatternRuleException("Elements with unified tokens are not supported.");
     }
-    if (patternElement.getString().contains("\\d")) {
-      throw new UnsupportedPatternRuleException("Elements with regex containing \\d are not supported.");
-    }
     if (patternElement.getString().matches("\\\\\\d+")) { // e.g. "\1"
-      throw new UnsupportedPatternRuleException("Elements with only match references are not supported.");
+      throw new UnsupportedPatternRuleException("Elements with only match references (e.g. \\1) are not supported.");
     }
-    /*if (patternElement.isRegularExpression() && isProbablySlowRegex(patternElement.getString())) {
-      throw new UnsupportedPatternRuleException("Elements with potentially slow regex not supported: " + patternElement.getString());
-    }
-    if (patternElement.isPOStagRegularExpression() && isProbablySlowRegex(patternElement.getPOStag())) {
-      throw new UnsupportedPatternRuleException("Elements with potentially slow POS regex not supported: " + patternElement.getPOStag());
-    }*/
   }
-
-  //private boolean isProbablySlowRegex(String regex) {
-  //  return regex.startsWith(".") || regex.toLowerCase().startsWith("[a-");
-  //}
 
 }

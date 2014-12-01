@@ -18,12 +18,21 @@
  */
 package org.languagetool;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.util.Locale;
 
 import org.junit.Test;
-import org.languagetool.language.*;
-
-import static org.junit.Assert.*;
+import org.languagetool.language.AmericanEnglish;
+import org.languagetool.language.BritishEnglish;
+import org.languagetool.language.English;
+import org.languagetool.language.German;
+import org.languagetool.language.GermanyGerman;
+import org.languagetool.language.SwissGerman;
 
 public class LanguageTest {
 
@@ -35,10 +44,9 @@ public class LanguageTest {
   @Test
   public void testRuleFileName() {
     assertEquals("[/org/languagetool/rules/en/grammar.xml, /org/languagetool/rules/en/en-GB/grammar.xml]", new BritishEnglish().getRuleFileNames().toString());
-    assertEquals("[/org/languagetool/rules/en/grammar.xml]", new AmericanEnglish().getRuleFileNames().toString());
+    assertEquals("[/org/languagetool/rules/en/grammar.xml, /org/languagetool/rules/en/en-US/grammar.xml]", new AmericanEnglish().getRuleFileNames().toString());
     assertEquals("[/org/languagetool/rules/en/grammar.xml]", new English().getRuleFileNames().toString());
     assertEquals("[/org/languagetool/rules/de/grammar.xml]", new German().getRuleFileNames().toString());
-    assertEquals("[/org/languagetool/rules/de/grammar.xml]", new German().getRuleFileName().toString());  // old, deprecated API
   }
 
   @Test
@@ -172,8 +180,4 @@ public class LanguageTest {
     assertFalse(new English().equalsConsiderVariantsIfSpecified(new German()));
   }
 
-  @Test
-  public void testGetAllMaintainers() {
-    assertTrue(Language.getAllMaintainers(TestTools.getMessages("en")).length() > 100);
-  }
 }

@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2006 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
@@ -19,16 +19,15 @@
 package org.languagetool.tagging;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 import morfologik.stemming.Dictionary;
-import morfologik.stemming.DictionaryLookup;
-import morfologik.stemming.IStemmer;
-import morfologik.stemming.WordData;
 
+import morfologik.stemming.WordData;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
@@ -41,92 +40,128 @@ import org.languagetool.tools.StringTools;
  */
 public abstract class BaseTagger implements Tagger {
 
+  protected WordTagger wordTagger;
   protected Locale conversionLocale = Locale.getDefault();
 
   private boolean tagLowercaseWithUppercase = true;
-  private Dictionary dictionary;
+  private volatile Dictionary dictionary;
 
   /**
    * Get the filename, e.g., {@code /en/english.dict}.
    */
   public abstract String getFileName();
 
+  /**
+   * Get the filename for manual additions, e.g., {@code /en/added.txt}, or {@code null}.
+   * @since 2.8
+   */
+  public abstract String getManualAdditionsFileName();
+
   public void setLocale(Locale locale) {
     conversionLocale = locale;
   }
 
+  protected WordTagger getWordTagger() {
+    if (wordTagger == null) {
+      MorfologikTagger morfologikTagger = new MorfologikTagger(getFileName());
+      try {
+        String manualFileName = getManualAdditionsFileName();
+        if (manualFileName != null) {
+          InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(manualFileName);
+          ManualTagger manualTagger = new ManualTagger(stream);
+          wordTagger = new CombiningTagger(morfologikTagger, manualTagger);
+        } else {
+          wordTagger = morfologikTagger;
+        }
+      } catch (IOException e) {
+        throw new RuntimeException("Could not load manual tagger data from " + getManualAdditionsFileName(), e);
+      }
+    }
+    return wordTagger;
+  }
+
   protected Dictionary getDictionary() throws IOException {
-    if (dictionary == null) {
+    Dictionary dict = dictionary;
+    if (dict == null) {
       synchronized (this) {
-        if (dictionary == null) {
+        dict = dictionary;
+        if (dict == null) {
           final URL url = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(getFileName());
-          dictionary = Dictionary.read(url);
+          dictionary = dict = Dictionary.read(url);
         }
       }
     }
-    return dictionary;
+    return dict;
   }
 
   @Override
   public List<AnalyzedTokenReadings> tag(final List<String> sentenceTokens)
-          throws IOException {
-    List<AnalyzedToken> taggerTokens;
-    List<AnalyzedToken> lowerTaggerTokens;
-    List<AnalyzedToken> upperTaggerTokens;
+      throws IOException {
     final List<AnalyzedTokenReadings> tokenReadings = new ArrayList<>();
     int pos = 0;
-    final IStemmer dictLookup = new DictionaryLookup(getDictionary());
-
     for (String word : sentenceTokens) {
-      final List<AnalyzedToken> l = new ArrayList<>();
-      final String lowerWord = word.toLowerCase(conversionLocale);
-      taggerTokens = asAnalyzedTokenList(word, dictLookup.lookup(word));
-      lowerTaggerTokens = asAnalyzedTokenList(word, dictLookup.lookup(lowerWord));
-      final boolean isLowercase = word.equals(lowerWord);
-      final boolean isMixedCase = StringTools.isMixedCase(word);
-
-      //normal case
-      addTokens(taggerTokens, l);
-
-      //tag non-lowercase (alluppercase or startuppercase), but not mixedcase word with lowercase word tags
-      if (!isLowercase && !isMixedCase) {
-        addTokens(lowerTaggerTokens, l);
-      }
-
-      //tag lowercase word with startuppercase word tags
-      if (tagLowercaseWithUppercase) {
-        if (lowerTaggerTokens.isEmpty() && taggerTokens.isEmpty()) {
-          if (isLowercase) {
-            upperTaggerTokens = asAnalyzedTokenList(word,
-                dictLookup.lookup(StringTools.uppercaseFirstChar(word)));
-            if (!upperTaggerTokens.isEmpty()) {
-              addTokens(upperTaggerTokens, l);
-            }
-          }
-        }
-      }
-
-      // Additional language-dependent-tagging 
-      if (l.isEmpty()) {
-        List<AnalyzedToken> additionalTaggedTokens = additionalTags(word);
-        addTokens(additionalTaggedTokens, l);
-      }
-
-      if (l.isEmpty()) {
-        l.add(new AnalyzedToken(word, null, null));
-      }
-
+      final List<AnalyzedToken> l = getAnalyzedTokens(word);
       tokenReadings.add(new AnalyzedTokenReadings(l, pos));
       pos += word.length();
     }
-
     return tokenReadings;
+  }
+
+  protected List<AnalyzedTokenReadings> tag(String token) throws IOException {
+    final List<AnalyzedTokenReadings> tokenReadings = new ArrayList<>();
+    final List<AnalyzedToken> l = getAnalyzedTokens(token);
+    tokenReadings.add(new AnalyzedTokenReadings(l, 0));
+    return tokenReadings;
+  }
+
+  protected List<AnalyzedToken> getAnalyzedTokens(String word) {
+    final List<AnalyzedToken> result = new ArrayList<>();
+    final String lowerWord = word.toLowerCase(conversionLocale);
+    final boolean isLowercase = word.equals(lowerWord);
+    final boolean isMixedCase = StringTools.isMixedCase(word);
+    List<AnalyzedToken> taggerTokens = asAnalyzedTokenListForTaggedWords(word, getWordTagger().tag(word));
+    List<AnalyzedToken> lowerTaggerTokens = asAnalyzedTokenListForTaggedWords(word, getWordTagger().tag(lowerWord));
+    //normal case:
+    addTokens(taggerTokens, result);
+    //tag non-lowercase (alluppercase or startuppercase), but not mixedcase word with lowercase word tags:
+    if (!isLowercase && !isMixedCase) {
+      addTokens(lowerTaggerTokens, result);
+    }
+    //tag lowercase word with startuppercase word tags:
+    if (tagLowercaseWithUppercase) {
+      if (lowerTaggerTokens.isEmpty() && taggerTokens.isEmpty()) {
+        if (isLowercase) {
+          List<AnalyzedToken> upperTaggerTokens = asAnalyzedTokenListForTaggedWords(word,
+              getWordTagger().tag(StringTools.uppercaseFirstChar(word)));
+          if (!upperTaggerTokens.isEmpty()) {
+            addTokens(upperTaggerTokens, result);
+          }
+        }
+      }
+    }
+    // Additional language-dependent-tagging:
+    if (result.isEmpty()) {
+      List<AnalyzedToken> additionalTaggedTokens = additionalTags(word, getWordTagger());
+      addTokens(additionalTaggedTokens, result);
+    }
+    if (result.isEmpty()) {
+      result.add(new AnalyzedToken(word, null, null));
+    }
+    return result;
   }
 
   protected List<AnalyzedToken> asAnalyzedTokenList(final String word, final List<WordData> wdList) {
     final List<AnalyzedToken> aTokenList = new ArrayList<>();
     for (WordData wd : wdList) {
       aTokenList.add(asAnalyzedToken(word, wd));
+    }
+    return aTokenList;
+  }
+
+  protected List<AnalyzedToken> asAnalyzedTokenListForTaggedWords(final String word, List<TaggedWord> taggedWords) {
+    final List<AnalyzedToken> aTokenList = new ArrayList<>();
+    for (TaggedWord taggedWord : taggedWords) {
+      aTokenList.add(asAnalyzedToken(word, taggedWord));
     }
     return aTokenList;
   }
@@ -144,6 +179,11 @@ public abstract class BaseTagger implements Tagger {
         StringTools.asString(wd.getStem()));
   }
 
+  private AnalyzedToken asAnalyzedToken(String word, TaggedWord taggedWord) {
+    return new AnalyzedToken(word, taggedWord.getPosTag(), taggedWord.getLemma());
+  }
+
+  //please do not make protected, this breaks other languages
   private void addTokens(final List<AnalyzedToken> taggedTokens, final List<AnalyzedToken> l) {
     if (taggedTokens != null) {
       for (AnalyzedToken at : taggedTokens) {
@@ -166,10 +206,12 @@ public abstract class BaseTagger implements Tagger {
     tagLowercaseWithUppercase = false;
   }
 
-  /*
-   *  Additional tagging in some language-dependent circumstances
+  /**
+   * Allows additional tagging in some language-dependent circumstances
+   * @param word The word to tag
+   * @return Returns list of analyzed tokens with additional tags, or {@code null}
    */
-  public List<AnalyzedToken> additionalTags(String word) {
+  protected List<AnalyzedToken> additionalTags(String word, WordTagger wordTagger) {
     return null;
   }
 

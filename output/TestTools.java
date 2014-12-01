@@ -19,8 +19,6 @@
 package org.languagetool;
 
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -35,6 +33,7 @@ import morfologik.stemming.Dictionary;
 import morfologik.stemming.DictionaryLookup;
 import morfologik.stemming.WordData;
 
+import org.languagetool.language.Demo;
 import org.languagetool.tagging.BaseTagger;
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
@@ -46,11 +45,13 @@ import static org.junit.Assert.assertEquals;
 
 public final class TestTools {
 
+  private static final Language DEMO_LANGUAGE = new Demo();
+  
   private TestTools() {
   }
 
-  public static ResourceBundle getEnglishMessages() {
-    return getMessages("en");
+  public static Language getDemoLanguage() {
+    return DEMO_LANGUAGE;
   }
 
   public static Set<Language> getLanguagesExcept(String[] langCodes) {
@@ -65,14 +66,21 @@ public final class TestTools {
     return languages;
   }
 
+  public static ResourceBundle getEnglishMessages() {
+    return getMessages("en");
+  }
+
   /**
    * Gets the resource bundle for the specified language.
-   * @param language lowercase two-letter ISO-639 code.
+   * @param languageCode lowercase two-letter ISO-639 code.
    * @return the resource bundle for the specified language.
    */
-  public static ResourceBundle getMessages(String language) {
+  public static ResourceBundle getMessages(String languageCode) {
+    if (languageCode.length() > 3) {
+      throw new RuntimeException("Use a character code (ISO-639 code), not a full language name: " + languageCode);
+    }
     final ResourceBundle messages = ResourceBundle.getBundle(
-            JLanguageTool.MESSAGE_BUNDLE, new Locale(language));
+            JLanguageTool.MESSAGE_BUNDLE, new Locale(languageCode));
     return messages;
   }
 
@@ -92,8 +100,7 @@ public final class TestTools {
     final List<String> noWhitespaceTokens = getNoWhitespaceTokens(tokens);
     final List<AnalyzedTokenReadings> output = tagger.tag(noWhitespaceTokens);
     final StringBuilder outputStr = new StringBuilder();
-    for (final Iterator<AnalyzedTokenReadings> iter = output.iterator(); iter
-        .hasNext();) {
+    for (final Iterator<AnalyzedTokenReadings> iter = output.iterator(); iter.hasNext();) {
       final AnalyzedTokenReadings tokenReadings = iter.next();
       final List<String> readings = getAsStrings(tokenReadings);
       outputStr.append(StringTools.listToString(readings, "|"));
@@ -124,7 +131,7 @@ public final class TestTools {
       int startPos = 0;
       int noWhitespaceCount = 0;
       for (final String tokenStr : tokens) {
-        AnalyzedTokenReadings posTag = null;
+        AnalyzedTokenReadings posTag;
         if (isWord(tokenStr)) {
           posTag = aTokens.get(noWhitespaceCount);
           posTag.setStartPos(startPos);
@@ -153,6 +160,26 @@ public final class TestTools {
     assertEquals(expected, outputStr.toString());
   }
 
+  public static boolean isWord(final String token) {
+    for (int i = 0; i < token.length(); i++) {
+      final char c = token.charAt(i);
+      if (Character.isLetter(c) || Character.isDigit(c)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public static void testDictionary(BaseTagger tagger, Language language) throws IOException {
+    final Dictionary dictionary = Dictionary.read(JLanguageTool.getDataBroker().getFromResourceDirAsUrl(tagger.getFileName()));
+    final DictionaryLookup lookup = new DictionaryLookup(dictionary);
+    for (WordData wordData : lookup) {
+      if (wordData.getTag() == null || wordData.getTag().length() == 0) {
+        System.err.println("**** Warning: " + language + ": the word " + wordData.getWord() + "/" + wordData.getStem() + " lacks a POS tag in the dictionary.");
+      }
+    }
+  }
+
   private static List<String> getAsStrings(AnalyzedTokenReadings tokenReadings) {
     final List<String> readings = new ArrayList<>();
     for (AnalyzedToken analyzedToken : tokenReadings) {
@@ -165,13 +192,7 @@ public final class TestTools {
   }
 
   private static String getAsString(AnalyzedToken analyzedToken) {
-    final StringBuilder readingStr = new StringBuilder();
-    readingStr.append(analyzedToken.getToken());
-    readingStr.append("/[");
-    readingStr.append(analyzedToken.getLemma());
-    readingStr.append(']');
-    readingStr.append(analyzedToken.getPOSTag());
-    return readingStr.toString();
+    return analyzedToken.getToken() + "/[" + analyzedToken.getLemma() + ']' + analyzedToken.getPOSTag();
   }
 
   private static List<String> getNoWhitespaceTokens(List<String> tokens) {
@@ -183,36 +204,6 @@ public final class TestTools {
       }
     }
     return noWhitespaceTokens;
-  }
-
-  public static boolean isWord(final String token) {
-    for (int i = 0; i < token.length(); i++) {
-      final char c = token.charAt(i);
-      if (Character.isLetter(c) || Character.isDigit(c)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  public static String callStringStaticMethod(final Class targetClass,
-      final String methodName, final Class[] argClasses,
-      final Object[] argObjects) throws InvocationTargetException,
-      IllegalArgumentException, IllegalAccessException, SecurityException,
-      NoSuchMethodException {
-    final Method method = targetClass.getDeclaredMethod(methodName, argClasses);
-    method.setAccessible(true);
-    return (String) method.invoke(null, argObjects);
-  }
-
-  public static void testDictionary(BaseTagger tagger, Language language) throws IOException {
-    final Dictionary dictionary = Dictionary.read(JLanguageTool.getDataBroker().getFromResourceDirAsUrl(tagger.getFileName()));
-    final DictionaryLookup lookup = new DictionaryLookup(dictionary);
-    for (WordData wordData : lookup) {
-      if (wordData.getTag() == null || wordData.getTag().length() == 0) {
-        System.err.println("**** Warning: " + language + ": the word " + wordData.getWord() + "/" + wordData.getStem() + " lacks a POS tag in the dictionary.");
-      }
-    }
   }
 
 }

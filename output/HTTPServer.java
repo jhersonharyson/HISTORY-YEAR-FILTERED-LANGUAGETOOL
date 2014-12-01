@@ -25,8 +25,7 @@ import org.languagetool.gui.Tools;
 import java.net.InetSocketAddress;
 import java.util.ResourceBundle;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 import static org.languagetool.server.HTTPServerConfig.DEFAULT_HOST;
 
@@ -93,15 +92,21 @@ public class HTTPServer extends Server {
     this.port = config.getPort();
     this.host = host;
     try {
-      if (host == null) {
-        server = HttpServer.create(new InetSocketAddress(port), 0);
-      } else {
-        server = HttpServer.create(new InetSocketAddress(host, port), 0);
-      }
-      final LanguageToolHttpHandler httpHandler = new LanguageToolHttpHandler(config.isVerbose(), allowedIps, runInternally, null);
+      InetSocketAddress address = host != null ? new InetSocketAddress(host, port) : new InetSocketAddress(port);
+      server = HttpServer.create(address, 0);
+      final RequestLimiter limiter = getRequestLimiterOrNull(config);
+      final LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>();
+      httpHandler = new LanguageToolHttpHandler(config.isVerbose(), allowedIps, runInternally, limiter, workQueue);
+      httpHandler.setMaxTextLength(config.getMaxTextLength());
       httpHandler.setAllowOriginUrl(config.getAllowOriginUrl());
+      httpHandler.setMaxCheckTimeMillis(config.getMaxCheckTimeMillis());
+      httpHandler.setTrustXForwardForHeader(config.getTrustXForwardForHeader());
+      if (config.getMode() == HTTPServerConfig.Mode.AfterTheDeadline) {
+        httpHandler.setAfterTheDeadlineMode(config.getAfterTheDeadlineLanguage());
+      }
+      httpHandler.setLanguageModel(config.getLanguageModelDir());
       server.createContext("/", httpHandler);
-      executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+      executorService = getExecutorService(workQueue, config);
       server.setExecutor(executorService);
     } catch (Exception e) {
       final ResourceBundle messages = JLanguageTool.getMessageBundle();
@@ -115,12 +120,16 @@ public class HTTPServer extends Server {
     super.stop();
     if (executorService != null) {
       executorService.shutdownNow();
-    }    
+    }
   }
 
   public static void main(String[] args) {
-    if (args.length > 3 || usageRequested(args)) {
-      System.out.println("Usage: " + HTTPServer.class.getSimpleName() + " [--port|-p port] [--public]");
+    if (args.length > 5 || usageRequested(args)) {
+      System.out.println("Usage: " + HTTPServer.class.getSimpleName() + " [--config propertyFile] [--port|-p port] [--public]");
+      System.out.println("  --config file  a Java property file with values for:");
+      System.out.println("                 'mode' - 'LanguageTool' or 'AfterTheDeadline' for emulation of After the Deadline output (optional, experimental)");
+      System.out.println("                 'afterTheDeadlineLanguage' - language code like 'en' or 'en-GB' (required if mode is 'AfterTheDeadline')");
+      printCommonConfigFileOptions();
       printCommonOptions();
       System.exit(1);
     }

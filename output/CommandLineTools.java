@@ -24,9 +24,12 @@ import org.languagetool.bitext.BitextReader;
 import org.languagetool.bitext.StringPair;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.TextLevelRule;
 import org.languagetool.rules.bitext.BitextRule;
 import org.languagetool.rules.patterns.PatternRule;
+import org.languagetool.tokenizers.SentenceTokenizer;
 import org.languagetool.tools.ContextTools;
+import org.languagetool.tools.RuleAsXmlSerializer;
 import org.languagetool.tools.StringTools;
 import org.languagetool.tools.Tools;
 
@@ -52,7 +55,6 @@ public final class CommandLineTools {
    *
    * @param contents Text to tag.
    * @param lt LanguageTool instance
-   * @throws java.io.IOException
    */
   public static void tagText(final String contents, final JLanguageTool lt) throws IOException {
     AnalyzedSentence analyzedText;
@@ -83,7 +85,6 @@ public final class CommandLineTools {
    * @param prevMatches number of previously matched rules
    * @param xmlMode mode of xml printout for simple xml output
    * @return Number of rule matches to the input text.
-   * @throws IOException
    */
   public static int checkText(final String contents, final JLanguageTool lt,
                               final boolean apiFormat, int contextSize, final int lineOffset,
@@ -99,8 +100,9 @@ public final class CommandLineTools {
       r.setEndLine(r.getEndLine() + lineOffset);
     }
     if (apiFormat) {
-      final String xml = StringTools.ruleMatchesToXML(ruleMatches, contents,
-              contextSize, xmlMode);
+      final RuleAsXmlSerializer serializer = new RuleAsXmlSerializer();
+      final String xml = serializer.ruleMatchesToXml(ruleMatches, contents,
+              contextSize, lt.getLanguage());
       final PrintStream out = new PrintStream(System.out, true, "UTF-8");
       out.print(xml);
     } else {
@@ -109,7 +111,9 @@ public final class CommandLineTools {
 
     //display stats if it's not in a buffered mode
     if (xmlMode == StringTools.XmlPrintMode.NORMAL_XML) {
-      displayTimeStats(startTime, lt.getSentenceCount(), apiFormat);
+      SentenceTokenizer sentenceTokenizer = lt.getLanguage().getSentenceTokenizer();
+      int sentenceCount = sentenceTokenizer.tokenize(contents).size();
+      displayTimeStats(startTime, sentenceCount, apiFormat);
     }
     return ruleMatches.size();
   }
@@ -178,54 +182,6 @@ public final class CommandLineTools {
    * Checks the bilingual input (bitext) and displays the output (considering the target 
    * language) in API format or in the simple text format.
    *
-   * NOTE: the positions returned by the rule matches are relative
-   * to the target string only, and always start at the first line 
-   * and first column, no matter how many lines were checked before.
-   * To have multiple lines taken into account, use the checkBitext
-   * method that takes a BitextReader.
-   *
-   * @param src   Source text.
-   * @param trg   Target text.
-   * @param srcLt Source JLanguageTool (used to analyze the text).
-   * @param trgLt Target JLanguageTool (used to analyze the text).
-   * @param bRules  Bilingual rules used in addition to target standard rules.
-   * @param apiFormat Whether API format should be used.
-   * @param xmlMode The mode of XML output display.
-   * @return  The number of rules matched on the bitext.
-   * @throws IOException
-   * @since 1.0.1
-   */
-  public static int checkBitext(final String src, final String trg,
-                                final JLanguageTool srcLt, final JLanguageTool trgLt,
-                                final List<BitextRule> bRules,
-                                final boolean apiFormat, final StringTools.XmlPrintMode xmlMode) throws IOException {
-    final long startTime = System.currentTimeMillis();
-    final int contextSize = DEFAULT_CONTEXT_SIZE;
-    final List<RuleMatch> ruleMatches =
-            Tools.checkBitext(src, trg, srcLt, trgLt, bRules);
-    final List<RuleMatch> adaptedMatches = new ArrayList<>();
-    for (RuleMatch match : ruleMatches) {
-      match = trgLt.adjustRuleMatchPos(match, 0, 0, 0, trg, null);
-      adaptedMatches.add(match);
-    }
-    if (apiFormat) {
-      final String xml = StringTools.ruleMatchesToXML(adaptedMatches, trg, contextSize, xmlMode);
-      final PrintStream out = new PrintStream(System.out, true, "UTF-8");
-      out.print(xml);
-    } else {
-      printMatches(adaptedMatches, 0, trg, contextSize);
-    }
-    //display stats if it's not in a buffered mode:
-    if (xmlMode == StringTools.XmlPrintMode.NORMAL_XML) {
-      displayTimeStats(startTime, srcLt.getSentenceCount(), apiFormat);
-    }
-    return adaptedMatches.size();
-  }
-
-  /**
-   * Checks the bilingual input (bitext) and displays the output (considering the target 
-   * language) in API format or in the simple text format.
-   *
    * NOTE: the positions returned by the rule matches are adjusted
    * according to the data returned by the reader.
    *
@@ -235,7 +191,6 @@ public final class CommandLineTools {
    * @param bRules  Bilingual rules used in addition to target standard rules.
    * @param apiFormat Whether API format should be used.
    * @return The number of rules matched on the bitext.
-   * @throws IOException
    * @since 1.0.1
    */
   public static int checkBitext(final BitextReader reader,
@@ -244,10 +199,14 @@ public final class CommandLineTools {
                                 final boolean apiFormat) throws IOException {
     final long startTime = System.currentTimeMillis();
     final int contextSize = DEFAULT_CONTEXT_SIZE;
-    StringTools.XmlPrintMode xmlMode = StringTools.XmlPrintMode.START_XML;
     final List<RuleMatch> ruleMatches = new ArrayList<>();
     int matchCount = 0;
     int sentCount = 0;
+    final RuleAsXmlSerializer serializer = new RuleAsXmlSerializer();
+    final PrintStream out = new PrintStream(System.out, true, "UTF-8");
+    if (apiFormat) {
+      out.print(serializer.getXmlStart(null, null));
+    }
     for (StringPair srcAndTrg : reader) {
       final List<RuleMatch> curMatches = Tools.checkBitext(
               srcAndTrg.getSource(), srcAndTrg.getTarget(),
@@ -264,13 +223,8 @@ public final class CommandLineTools {
       ruleMatches.addAll(fixedMatches);
       if (fixedMatches.size() > 0) {
         if (apiFormat) {
-          final String xml = StringTools.ruleMatchesToXML(fixedMatches,
-                  reader.getCurrentLine(),
-                  contextSize, xmlMode);
-          if (xmlMode == StringTools.XmlPrintMode.START_XML) {
-            xmlMode = StringTools.XmlPrintMode.CONTINUE_XML;
-          }
-          final PrintStream out = new PrintStream(System.out, true, "UTF-8");
+          final String xml = serializer.ruleMatchesToXmlSnippet(fixedMatches,
+                  reader.getCurrentLine(), contextSize);
           out.print(xml);
         } else {
           printMatches(fixedMatches, matchCount, reader.getCurrentLine(), contextSize);
@@ -281,8 +235,7 @@ public final class CommandLineTools {
     }
     displayTimeStats(startTime, sentCount, apiFormat);
     if (apiFormat) {
-      final PrintStream out = new PrintStream(System.out, true, "UTF-8");
-      out.print("</matches>");
+      out.print(serializer.getXmlEnd());
     }
     return ruleMatches.size();
   }
@@ -293,7 +246,6 @@ public final class CommandLineTools {
    *
    * @param contents text to check
    * @param lt instance of LanguageTool
-   * @throws IOException
    */
   public static void profileRulesOnText(final String contents,
                                         final JLanguageTool lt) throws IOException {
@@ -304,6 +256,9 @@ public final class CommandLineTools {
     System.out.println("Rule ID\tTime\tSentences\tMatches\tSentences per sec.");
     final List<String> sentences = lt.sentenceTokenize(contents);
     for (Rule rule : rules) {
+      if (rule instanceof TextLevelRule) {
+        continue; // profile rules for sentences only
+      }
       int matchCount = 0;
       for (int k = 0; k < 10; k++) {
         final long startTime = System.currentTimeMillis();

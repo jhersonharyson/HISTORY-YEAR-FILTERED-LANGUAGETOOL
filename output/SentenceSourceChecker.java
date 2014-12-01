@@ -29,6 +29,7 @@ import org.languagetool.rules.RuleMatch;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.text.NumberFormat;
 import java.util.*;
 
 /**
@@ -67,16 +68,13 @@ public class SentenceSourceChecker {
     }
     final int maxArticles = Integer.parseInt(commandLine.getOptionValue("max-sentences", "0"));
     final int maxErrors = Integer.parseInt(commandLine.getOptionValue("max-errors", "0"));
-    String[] ruleIds = null;
-    if (commandLine.hasOption('r')) {
-      ruleIds = commandLine.getOptionValue('r').split(",");
-    }
-    String[] categoryIds = null;
-    if (commandLine.hasOption("also-enable-categories")) {
-      categoryIds = commandLine.getOptionValue("also-enable-categories").split(",");
-    }
+    String[] ruleIds = commandLine.hasOption('r') ? commandLine.getOptionValue('r').split(",") : null;
+    String[] categoryIds = commandLine.hasOption("also-enable-categories") ?
+                           commandLine.getOptionValue("also-enable-categories").split(",") : null;
     String[] fileNames = commandLine.getOptionValues('f');
-    prg.run(propFile, disabledRuleIds, languageCode, Arrays.asList(fileNames), ruleIds, categoryIds, maxArticles, maxErrors);
+    File languageModelDir = commandLine.hasOption("languagemodel") ?
+                            new File(commandLine.getOptionValue("languagemodel")) : null;
+    prg.run(propFile, disabledRuleIds, languageCode, Arrays.asList(fileNames), ruleIds, categoryIds, maxArticles, maxErrors, languageModelDir);
   }
 
   private static void addDisabledRules(String languageCode, Set<String> disabledRuleIds, Properties disabledRules) {
@@ -96,7 +94,8 @@ public class SentenceSourceChecker {
             .create("l"));
     options.addOption(OptionBuilder.withLongOpt("db-properties").withArgName("file").hasArg()
             .withDescription("A file to set database access properties. If not set, the output will be written to STDOUT. " +
-                    "The file needs to set the properties dbUrl ('jdbc:...'), dbUser, and dbPassword.")
+                    "The file needs to set the properties dbUrl ('jdbc:...'), dbUser, and dbPassword. " +
+                    "It can optionally define the batchSize for insert statements, which defaults to 1.")
             .create("d"));
     options.addOption(OptionBuilder.withLongOpt("rule-properties").withArgName("file").hasArg()
             .withDescription("A file to set rules which should be disabled per language (e.g. en=RULE1,RULE2 or all=RULE3,RULE4)")
@@ -118,6 +117,9 @@ public class SentenceSourceChecker {
     options.addOption(OptionBuilder.withLongOpt("max-errors").withArgName("number").hasArg()
             .withDescription("maximum number of errors, stop when finding more")
             .create());
+    options.addOption(OptionBuilder.withLongOpt("languagemodel").withArgName("indexDir").hasArg()
+            .withDescription("directory with a '3grams' sub directory that contains an ngram index")
+            .create());
     try {
       CommandLineParser parser = new GnuParser();
       return parser.parse(options, args);
@@ -132,11 +134,14 @@ public class SentenceSourceChecker {
     return null;
   }
 
-  private void run(File propFile, Set<String> disabledRules, String langCode, List<String> fileNames, String[] ruleIds, 
-                   String[] additionalCategoryIds, int maxSentences, int maxErrors) throws IOException {
+  private void run(File propFile, Set<String> disabledRules, String langCode, List<String> fileNames, String[] ruleIds,
+                   String[] additionalCategoryIds, int maxSentences, int maxErrors, File languageModelDir) throws IOException {
     final Language lang = Language.getLanguageForShortName(langCode);
     final JLanguageTool languageTool = new MultiThreadedJLanguageTool(lang);
     languageTool.activateDefaultPatternRules();
+    if (languageModelDir != null) {
+      languageTool.activateLanguageModelRules(languageModelDir);
+    }
     if (ruleIds != null) {
       enableOnlySpecifiedRules(ruleIds, languageTool);
     } else {
@@ -160,10 +165,19 @@ public class SentenceSourceChecker {
       MixingSentenceSource mixingSource = MixingSentenceSource.create(fileNames, lang);
       while (mixingSource.hasNext()) {
         Sentence sentence = mixingSource.next();
-        List<RuleMatch> matches = languageTool.check(sentence.getText());
-        resultHandler.handleResult(sentence, matches, lang);
-        sentenceCount++;
-        ruleMatchCount += matches.size();
+        try {
+          List<RuleMatch> matches = languageTool.check(sentence.getText());
+          resultHandler.handleResult(sentence, matches, lang);
+          sentenceCount++;
+          if (sentenceCount % 5000 == 0) {
+            System.err.printf("%s sentences checked...\n", NumberFormat.getNumberInstance(Locale.US).format(sentenceCount));
+          }
+          ruleMatchCount += matches.size();
+        } catch (DocumentLimitReachedException | ErrorLimitReachedException e) {
+          throw e;
+        } catch (Exception e) {
+          throw new RuntimeException("Check failed on sentence: " + StringUtils.abbreviate(sentence.getText(), 250), e);
+        }
       }
     } catch (ErrorLimitReachedException | DocumentLimitReachedException e) {
       System.out.println(e);
@@ -236,7 +250,7 @@ public class SentenceSourceChecker {
   private void disableSpellingRules(JLanguageTool languageTool) {
     final List<Rule> allActiveRules = languageTool.getAllActiveRules();
     for (Rule rule : allActiveRules) {
-      if (rule.isSpellingRule()) {
+      if (rule.isDictionaryBasedSpellingRule()) {
         languageTool.disableRule(rule.getId());
       }
     }

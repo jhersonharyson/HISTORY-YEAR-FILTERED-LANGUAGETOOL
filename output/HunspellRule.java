@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2012 Marcin Miłkowski (http://www.languagetool.org)
  * 
  * This library is free software; you can redistribute it and/or
@@ -27,6 +27,7 @@ import java.io.OutputStream;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
 import java.util.regex.Pattern;
@@ -38,7 +39,6 @@ import org.languagetool.Language;
 import org.languagetool.rules.Category;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.spelling.SpellingCheckRule;
-import org.languagetool.tools.StringTools;
 
 /**
  * A hunspell-based spellchecking-rule.
@@ -53,8 +53,8 @@ public class HunspellRule extends SpellingCheckRule {
   public static final String RULE_ID = "HUNSPELL_RULE";
 
   protected boolean needsInit = true;
-  protected Hunspell.Dictionary dictionary = null;
-  
+  protected Hunspell.Dictionary hunspellDict = null;
+
   private static final String NON_ALPHABETIC = "[^\\p{L}]";
 
   private Pattern nonWordPattern;
@@ -75,35 +75,35 @@ public class HunspellRule extends SpellingCheckRule {
   }
 
   @Override
-  public RuleMatch[] match(AnalyzedSentence text) throws IOException {
+  public RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
     if (needsInit) {
       init();
     }
-    if (dictionary == null) {
+    if (hunspellDict == null) {
       // some languages might not have a dictionary, be silent about it
       return toRuleMatchArray(ruleMatches);
     }
-    final String[] tokens = tokenizeText(getSentenceTextWithoutUrls(text));
+    final String[] tokens = tokenizeText(getSentenceTextWithoutUrlsAndImmunizedTokens(sentence));
 
     // starting with the first token to skip the zero-length START_SENT
-    int len = text.getTokens()[1].getStartPos();
-    for (final String word : tokens) {
-      if (ignoreWord(word)) {
+    int len = sentence.getTokens()[1].getStartPos();
+    for (int i = 0; i < tokens.length; i++) {
+      String word = tokens[i];
+      if (ignoreWord(Arrays.asList(tokens), i) || ignoreWord(word)) {
         len += word.length() + 1;
         continue;
       }
-      boolean isAlphabetic = true;
-      if (word.length() == 1) { // hunspell dictionaries usually do not contain punctuation
-        isAlphabetic = StringTools.isAlphabetic(word.charAt(0));
-      }
-      if (isAlphabetic && !word.equals("--") && dictionary.misspelled(word)) {
+      if (isMisspelled(word)) {
         final RuleMatch ruleMatch = new RuleMatch(this,
-                len, len + word.length(),
-                messages.getString("spelling"),
-                messages.getString("desc_spelling_short"));
+            len, len + word.length(),
+            messages.getString("spelling"),
+            messages.getString("desc_spelling_short"));
         final List<String> suggestions = getSuggestions(word);
-        if (suggestions != null) {
+        suggestions.addAll(0, getAdditionalTopSuggestions(suggestions, word));
+        suggestions.addAll(getAdditionalSuggestions(suggestions, word));
+        if (!suggestions.isEmpty()) {
+          filterSuggestions(suggestions);
           ruleMatch.setSuggestedReplacements(suggestions);
         }
         ruleMatches.add(ruleMatch);
@@ -114,26 +114,41 @@ public class HunspellRule extends SpellingCheckRule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  private boolean isMisspelled(String word) {
+    boolean isAlphabetic = true;
+    if (word.length() == 1) { // hunspell dictionaries usually do not contain punctuation
+      isAlphabetic = Character.isAlphabetic(word.charAt(0));
+    }
+    return (isAlphabetic && !word.equals("--") && hunspellDict.misspelled(word)) || isProhibited(removeTrailingDot(word));
+  }
+
+  private String removeTrailingDot(String word) {
+    if (word.endsWith(".")) {
+      return word.substring(0, word.length()-1);
+    }
+    return word;
+  }
+
   public List<String> getSuggestions(String word) throws IOException {
     if (needsInit) {
       init();
     }
-    return dictionary.suggest(word);
+    return hunspellDict.suggest(word);
   }
 
   protected String[] tokenizeText(final String sentence) {
     return nonWordPattern.split(sentence);
   }
 
-  private String getSentenceTextWithoutUrls(final AnalyzedSentence sentence) {
+  private String getSentenceTextWithoutUrlsAndImmunizedTokens(final AnalyzedSentence sentence) {
     final StringBuilder sb = new StringBuilder();
     final AnalyzedTokenReadings[] sentenceTokens = sentence.getTokens();
     for (int i = 1; i < sentenceTokens.length; i++) {
       final String token = sentenceTokens[i].getToken();
-      if (isUrl(token)) {
-        // replace URLs with whitespace to ignore them for spell checking:
+      if (isUrl(token) || sentenceTokens[i].isImmunized() || sentenceTokens[i].isIgnoredBySpeller()) {
+        // replace URLs and immunized tokens with whitespace to ignore them for spell checking:
         for (int j = 0; j < token.length(); j++) {
-          sb.append(" ");
+          sb.append(' ');
         }
       } else {
         sb.append(token);
@@ -152,26 +167,25 @@ public class HunspellRule extends SpellingCheckRule {
       langCountry = language.getShortName();
     }
     final String shortDicPath = "/"
-            + language.getShortName()
-            + "/hunspell/"
-            + langCountry
-            + ".dic";
+        + language.getShortName()
+        + "/hunspell/"
+        + langCountry
+        + ".dic";
     String wordChars = "";
     // set dictionary only if there are dictionary files:
     if (JLanguageTool.getDataBroker().resourceExists(shortDicPath)) {
       final String path = getDictionaryPath(langCountry, shortDicPath);
       if ("".equals(path)) {
-        dictionary = null;
+        hunspellDict = null;
       } else {
-        dictionary = Hunspell.getInstance().
-                getDictionary(path);
+        hunspellDict = Hunspell.getInstance().getDictionary(path);
 
-        if (!"".equals(dictionary.getWordChars())) {
-          wordChars = "(?![" + dictionary.getWordChars().replace("-", "\\-") + "])";
+        if (!"".equals(hunspellDict.getWordChars())) {
+          wordChars = "(?![" + hunspellDict.getWordChars().replace("-", "\\-") + "])";
         }
 
-        dictionary.addWord(SpellingCheckRule.LANGUAGETOOL); // to make demo text check 4 times faster...
-        dictionary.addWord(SpellingCheckRule.LANGUAGETOOL_FX);
+        hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOL); // to make demo text check 4 times faster...
+        hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOL_FX);
       }
     }
     nonWordPattern = Pattern.compile(wordChars + NON_ALPHABETIC);
@@ -179,7 +193,7 @@ public class HunspellRule extends SpellingCheckRule {
   }
 
   private String getDictionaryPath(final String dicName,
-                                   final String originalPath) throws IOException {
+      final String originalPath) throws IOException {
 
     final URL dictURL = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(originalPath);
     String dictionaryPath;
@@ -187,15 +201,14 @@ public class HunspellRule extends SpellingCheckRule {
     //to the local temporary directory
     if ("jar".equals(dictURL.getProtocol())) {
       final File tempDir = new File(System.getProperty("java.io.tmpdir"));
-      File temporaryFile = new File(tempDir, dicName + ".dic");
-      JLanguageTool.addTemporaryFile(temporaryFile);
+      File tempDicFile = new File(tempDir, dicName + ".dic");
+      JLanguageTool.addTemporaryFile(tempDicFile);
       fileCopy(JLanguageTool.getDataBroker().
-              getFromResourceDirAsStream(originalPath), temporaryFile);
-      temporaryFile = new File(tempDir, dicName + ".aff");
-      JLanguageTool.addTemporaryFile(temporaryFile);
+          getFromResourceDirAsStream(originalPath), tempDicFile);
+      File tempAffFile = new File(tempDir, dicName + ".aff");
+      JLanguageTool.addTemporaryFile(tempAffFile);
       fileCopy(JLanguageTool.getDataBroker().
-              getFromResourceDirAsStream(originalPath.
-                      replaceFirst(".dic$", ".aff")), temporaryFile);
+          getFromResourceDirAsStream(originalPath.replaceFirst(".dic$", ".aff")), tempAffFile);
 
       dictionaryPath = tempDir.getAbsolutePath() + "/" + dicName;
     } else {

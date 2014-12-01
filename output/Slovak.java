@@ -18,17 +18,13 @@
  */
 package org.languagetool.language;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ResourceBundle;
 
 import org.languagetool.Language;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.DoublePunctuationRule;
-import org.languagetool.rules.GenericUnpairedBracketsRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.WhitespaceRule;
-import org.languagetool.rules.WordRepeatRule;
+import org.languagetool.rules.*;
 import org.languagetool.rules.sk.CompoundRule;
 import org.languagetool.rules.sk.MorfologikSlovakSpellerRule;
 import org.languagetool.synthesis.Synthesizer;
@@ -42,11 +38,17 @@ public class Slovak extends Language {
 
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
-  private Synthesizer synthesizer; 
-  
+  private Synthesizer synthesizer;
+  private String name = "Slovak";
+
   @Override
   public String getName() {
-    return "Slovak";
+    return name;
+  }
+
+  @Override
+  public void setName(String name) {
+    this.name = name;
   }
 
   @Override
@@ -95,24 +97,24 @@ public class Slovak extends Language {
   
   @Override
   public Contributor[] getMaintainers() {
-    final Contributor contributor = new Contributor("Zdenko Podobný");
+    Contributor contributor = new Contributor("Zdenko Podobný");
     contributor.setUrl("http://sk-spell.sk.cx");
     return new Contributor[] { contributor };
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            DoublePunctuationRule.class,
-            GenericUnpairedBracketsRule.class,            
-            UppercaseSentenceStartRule.class,
-            WordRepeatRule.class,
-            WhitespaceRule.class,
+            new CommaWhitespaceRule(messages),
+            new DoublePunctuationRule(messages),
+            new GenericUnpairedBracketsRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),
+            new WordRepeatRule(messages, this),
+            new MultipleWhitespaceRule(messages, this),
             // specific to Slovak:
-            CompoundRule.class,
-            MorfologikSlovakSpellerRule.class
-            //SlovakVesRule.class
+            new CompoundRule(messages),
+            new MorfologikSlovakSpellerRule(messages, this)
+            //new SlovakVesRule(messages)
     );
   }
 

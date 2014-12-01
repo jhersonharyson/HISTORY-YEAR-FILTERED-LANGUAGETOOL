@@ -72,17 +72,21 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
       }
     }
 
-    final Collection<String> parts = wordSplitter.tokenize(word);
+    final List<String> parts = wordSplitter.tokenize(word);
     int partCount = 0;
     for (String part : parts) {
-      if (dictionary.misspelled(part)) {
+      if (hunspellDict.misspelled(part)) {
         List<String> suggestions = morfoSpeller.getSuggestions(part);
         if (suggestions.size() == 0) {
           suggestions = morfoSpeller.getSuggestions(StringTools.uppercaseFirstChar(part));
         }
         for (String suggestion : suggestions) {
           final List<String> partsCopy = new ArrayList<>(parts);
-          partsCopy.set(partCount, suggestion);
+          if (partCount > 0 && !parts.get(partCount-1).endsWith("-")) {
+            partsCopy.set(partCount, suggestion.toLowerCase());
+          } else {
+            partsCopy.set(partCount, suggestion);
+          }
           candidates.add(StringTools.listToString(partsCopy, ""));
         }
       }
@@ -119,7 +123,7 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
       final String[] words = tokenizeText(wordOrPhrase);
       boolean wordIsOkay = true;
       for (String word : words) {
-        if (dictionary.misspelled(word)) {
+        if (hunspellDict.misspelled(word)) {
           wordIsOkay = false;
           break;
         }

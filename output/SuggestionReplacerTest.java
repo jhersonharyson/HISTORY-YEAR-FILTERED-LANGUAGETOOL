@@ -37,6 +37,8 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class SuggestionReplacerTest extends TestCase {
 
+  private final SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
+  private final GermanyGerman germanyGerman = new GermanyGerman();
   private final JLanguageTool langTool = getLanguageTool();
   private final JLanguageTool englishLangTool = getLanguageTool(new English());
 
@@ -49,51 +51,45 @@ public class SuggestionReplacerTest extends TestCase {
     applySuggestion(langTool, filter, "Der [[Abschied]].\n\n==Überschrift==\n\nEin Ab schied.",
                                       "Der [[Abschied]].\n\n==Überschrift==\n\nEin <s>Abschied.</s>");
     applySuggestion(langTool, filter, "Ein ökonomischer Gottesdienst.",
-                                      "Ein <s>ökumenisch</s> Gottesdienst.");  // known problem: does not inflect
+                                      "Ein <s>ökumenischer</s> Gottesdienst.");
     applySuggestion(langTool, filter, "Ein ökonomischer Gottesdienst mit ökonomischer Planung.",
-                                      "Ein <s>ökumenisch</s> Gottesdienst mit ökonomischer Planung.");
+                                      "Ein <s>ökumenischer</s> Gottesdienst mit ökonomischer Planung.");
     applySuggestion(langTool, filter, "\nEin ökonomischer Gottesdienst.\n",
-                                      "\nEin <s>ökumenisch</s> Gottesdienst.\n");
+                                      "\nEin <s>ökumenischer</s> Gottesdienst.\n");
     applySuggestion(langTool, filter, "\n\nEin ökonomischer Gottesdienst.\n",
-                                      "\n\nEin <s>ökumenisch</s> Gottesdienst.\n");
+                                      "\n\nEin <s>ökumenischer</s> Gottesdienst.\n");
   }
 
   public void testNestedTemplates() throws Exception {
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     String markup = "{{FNBox|\n" +
             "  {{FNZ|1|1979 und 1984}}\n" +
             "  {{FNZ|2|[[Rundungsfehler]]}}\n" +
             "}}\n\nEin ökonomischer Gottesdienst.\n";
-    applySuggestion(langTool, filter, markup, markup.replace("ökonomischer", "<s>ökumenisch</s>"));
+    applySuggestion(langTool, filter, markup, markup.replace("ökonomischer", "<s>ökumenischer</s>"));
   }
 
   public void testReference1() throws Exception {
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     String markup = "Hier <ref name=isfdb>\n" +
             "Retrieved 2012-07-31.</ref> steht,, das Haus.";
     applySuggestion(langTool, filter, markup, markup.replace("steht,, das Haus.", "<s>steht,</s> das Haus."));
   }
 
   public void testReference2() throws Exception {
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     String markup = "Hier <ref name=\"NPOVxxx\" /> steht,, das Haus.";
     applySuggestion(langTool, filter, markup, markup.replace("steht,, das Haus.", "<s>steht, das</s> Haus."));
   }
 
   public void testErrorAtTextBeginning() throws Exception {
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     String markup = "A hour ago\n";
     applySuggestion(englishLangTool, filter, markup, markup.replace("A", "<s>An</s>"));
   }
 
   public void testErrorAtParagraphBeginning() throws Exception {
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     String markup = "X\n\nA hour ago\n";
     applySuggestion(englishLangTool, filter, markup, markup.replace("A", "<s>An</s>"));
   }
 
   public void testKnownBug() throws Exception {
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     String markup = "{{HdBG GKZ|9761000}}.";
     try {
       applySuggestion(langTool, filter, markup, markup);
@@ -115,14 +111,13 @@ public class SuggestionReplacerTest extends TestCase {
             "}}\n" +
             "\n" +
             "'''Wikipedia''' [{{IPA|ˌvɪkiˈpeːdia}}] (auch: ''die Wikipedia'') ist ein am [[15. Januar|15.&nbsp;Januar]] [[2001]] gegründetes Projekt. Und und so.\n";
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     applySuggestion(langTool, filter, markup, markup.replace("Und und so.", "<s>Und so.</s>"));
   }
 
   public void testCompleteText() throws Exception {
     InputStream stream = SuggestionReplacerTest.class.getResourceAsStream("/org/languagetool/dev/wikipedia/wikipedia.txt");
     String origMarkup = IOUtils.toString(stream, "utf-8");
-    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
+    JLanguageTool langTool = new JLanguageTool(germanyGerman);
     langTool.disableRule(GermanSpellerRule.RULE_ID);
     langTool.disableRule("DE_AGREEMENT");
     langTool.disableRule("GERMAN_WORD_REPEAT_BEGINNING_RULE");
@@ -130,14 +125,12 @@ public class SuggestionReplacerTest extends TestCase {
     langTool.disableRule("DE_CASE");
     langTool.disableRule("ABKUERZUNG_LEERZEICHEN");
     langTool.disableRule("TYPOGRAFISCHE_ANFUEHRUNGSZEICHEN");
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     PlainTextMapping mapping = filter.filter(origMarkup);
     List<RuleMatch> matches = langTool.check(mapping.getPlainText());
     assertThat("Expected 3 matches, got: " + matches, matches.size(), is(3));
-    String markup = origMarkup;
     int oldPos = 0;
     for (RuleMatch match : matches) {
-      SuggestionReplacer replacer = new SuggestionReplacer(mapping, markup, "<s>", "</s>");
+      SuggestionReplacer replacer = new SuggestionReplacer(mapping, origMarkup, new ErrorMarker("<s>", "</s>"));
       List<RuleMatchApplication> ruleMatchApplications = replacer.applySuggestionsToOriginalText(match);
       assertThat(ruleMatchApplications.size(), is(1));
       RuleMatchApplication ruleMatchApplication = ruleMatchApplications.get(0);
@@ -155,15 +148,13 @@ public class SuggestionReplacerTest extends TestCase {
   public void testCompleteText2() throws Exception {
     InputStream stream = SuggestionReplacerTest.class.getResourceAsStream("/org/languagetool/dev/wikipedia/wikipedia2.txt");
     String origMarkup = IOUtils.toString(stream, "utf-8");
-    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
+    JLanguageTool langTool = new JLanguageTool(germanyGerman);
     langTool.activateDefaultPatternRules();
-    SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     PlainTextMapping mapping = filter.filter(origMarkup);
     List<RuleMatch> matches = langTool.check(mapping.getPlainText());
     assertTrue("Expected >= 30 matches, got: " + matches, matches.size() >= 30);
-    String markup = origMarkup;
     for (RuleMatch match : matches) {
-      SuggestionReplacer replacer = new SuggestionReplacer(mapping, markup, "<s>", "</s>");
+      SuggestionReplacer replacer = new SuggestionReplacer(mapping, origMarkup, new ErrorMarker("<s>", "</s>"));
       List<RuleMatchApplication> ruleMatchApplications = replacer.applySuggestionsToOriginalText(match);
       if (ruleMatchApplications.size() == 0) {
         continue;
@@ -174,7 +165,7 @@ public class SuggestionReplacerTest extends TestCase {
   }
 
   private JLanguageTool getLanguageTool() {
-    JLanguageTool langTool = getLanguageTool(new GermanyGerman());
+    JLanguageTool langTool = getLanguageTool(germanyGerman);
     langTool.disableRule("DE_CASE");
     return langTool;
   }
@@ -193,7 +184,7 @@ public class SuggestionReplacerTest extends TestCase {
     PlainTextMapping mapping = filter.filter(text);
     List<RuleMatch> matches = langTool.check(mapping.getPlainText());
     assertThat("Expected 1 match, got: " + matches, matches.size(), is(1));
-    SuggestionReplacer replacer = new SuggestionReplacer(mapping, text, "<s>", "</s>");
+    SuggestionReplacer replacer = new SuggestionReplacer(mapping, text, new ErrorMarker("<s>", "</s>"));
     List<RuleMatchApplication> ruleMatchApplications = replacer.applySuggestionsToOriginalText(matches.get(0));
     assertThat(ruleMatchApplications.size(), is(1));
     assertThat(ruleMatchApplications.get(0).getTextWithCorrection(), is(expected));

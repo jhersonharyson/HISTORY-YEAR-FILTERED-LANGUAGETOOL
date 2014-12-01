@@ -24,17 +24,26 @@ import java.io.IOException;
 
 import org.junit.Test;
 import org.languagetool.JLanguageTool;
+import org.languagetool.Language;
 import org.languagetool.TestTools;
 import org.languagetool.language.BritishEnglish;
+import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 
-public class MorfologikBritishSpellerRuleTest {
+public class MorfologikBritishSpellerRuleTest extends AbstractEnglishSpellerRuleTest {
 
+  @Test
+  public void testSuggestions() throws IOException {
+    Language language = new BritishEnglish();
+    Rule rule = new MorfologikBritishSpellerRule(TestTools.getMessages("en"), language);
+    super.testNonVariantSpecificSuggestions(rule, language);
+  }
+  
   @Test
   public void testMorfologikSpeller() throws IOException {
     final BritishEnglish language = new BritishEnglish();
     final MorfologikBritishSpellerRule rule =
-            new MorfologikBritishSpellerRule (TestTools.getMessages("English"), language);
+            new MorfologikBritishSpellerRule(TestTools.getMessages("en"), language);
 
     final JLanguageTool langTool = new JLanguageTool(language);
 
@@ -55,7 +64,7 @@ public class MorfologikBritishSpellerRuleTest {
     assertEquals(1, matches.length);
     assertEquals(0, matches[0].getFromPos());
     assertEquals(8, matches[0].getToPos());
-    assertEquals("behaviour", matches[0].getSuggestedReplacements().get(0));
+    assertEquals("Behaviour", matches[0].getSuggestedReplacements().get(0));
 
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("aõh")).length);
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("a")).length);

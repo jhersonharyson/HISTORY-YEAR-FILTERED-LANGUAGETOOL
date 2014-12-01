@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2005 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
@@ -18,16 +18,24 @@
  */
 package org.languagetool.rules;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.ResourceBundle;
+import java.util.Scanner;
+
 import org.apache.commons.lang.StringUtils;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.tools.StringTools;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.*;
 
 /**
  * A rule that matches words which should not be used and suggests
@@ -41,8 +49,9 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
   private static final String FILE_ENCODING = "utf-8";
 
   private final Map<String, List<String>> wrongWords;
-  
+
   private boolean ignoreTaggedWords = false;
+  private boolean checkLemmas = true;
 
   public abstract String getFileName();
 
@@ -66,7 +75,7 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
   public Locale getLocale() {
     return Locale.getDefault();
   }
-  
+
   /**
    * Skip words that are known in the POS tagging dictionary, assuming they
    * cannot be incorrect.
@@ -105,25 +114,29 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
   }
 
   private String cleanup(String word) {
-    if (!isCaseSensitive()) {
-      word = word.toLowerCase(getLocale());
-    }
-    return word;
+    return isCaseSensitive() ? word : word.toLowerCase(getLocale()); 
   }
 
   @Override
-  public final RuleMatch[] match(final AnalyzedSentence text) {
+  public final RuleMatch[] match(final AnalyzedSentence sentence) {
     List<RuleMatch> ruleMatches = new ArrayList<>();
-    AnalyzedTokenReadings[] tokens = text.getTokensWithoutWhitespace();
+    AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
 
     for (AnalyzedTokenReadings tokenReadings : tokens) {
+
+      //this rule is used mostly for spelling, so ignore both immunized
+      // and speller-ignorable rules
+      if (tokenReadings.isImmunized() || tokenReadings.isIgnoredBySpeller()) {
+        continue;
+      }
+
       String originalTokenStr = tokenReadings.getToken();
-      if (ignoreTaggedWords && tokenReadings.isTagged()) {
+      if (ignoreTaggedWords && isTagged(tokenReadings)) {
         continue;
       }
       String tokenString = cleanup(originalTokenStr);
 
-      if (!wrongWords.containsKey(tokenString)) {
+      if (!wrongWords.containsKey(tokenString) && checkLemmas) {
         for (AnalyzedToken analyzedToken : tokenReadings.getReadings()) {
           String lemma = analyzedToken.getLemma();
           if (lemma != null) {
@@ -136,10 +149,14 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
         }
       }
 
-      List<String> possibleReplacements = wrongWords.get(tokenString);     
+      // try first with the original word, then with the all lower-case version
+      List<String> possibleReplacements = wrongWords.get(originalTokenStr);
+      if (possibleReplacements == null) {
+        possibleReplacements = wrongWords.get(tokenString);
+      }
 
       if (possibleReplacements != null && possibleReplacements.size() > 0) {
-        List<String> replacements = new ArrayList<>();  
+        List<String> replacements = new ArrayList<>();
         replacements.addAll(possibleReplacements);
         if (replacements.contains(originalTokenStr)) {
           replacements.remove(originalTokenStr);
@@ -154,6 +171,15 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  /**
+   * This method allows to override which tags will mark token as tagged
+   * @param tokenReadings
+   * @return returns true if token has valid tag
+   */
+  protected boolean isTagged(AnalyzedTokenReadings tokenReadings) {
+    return tokenReadings.isTagged();
+  }
+
   private RuleMatch createRuleMatch(AnalyzedTokenReadings tokenReadings,
       List<String> replacements) {
     String tokenString = tokenReadings.getToken();
@@ -164,8 +190,7 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
 
     if (!isCaseSensitive() && StringTools.startsWithUppercase(tokenString)) {
       for (int i = 0; i < replacements.size(); i++) {
-        replacements
-            .set(i, StringTools.uppercaseFirstChar(replacements.get(i)));
+        replacements.set(i, StringTools.uppercaseFirstChar(replacements.get(i)));
       }
     }
 
@@ -186,9 +211,8 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
         }
         String[] parts = line.split("=");
         if (parts.length != 2) {
-          throw new IOException("Format error in file "
-                  + JLanguageTool.getDataBroker().getFromRulesDirAsUrl(
-                  getFileName()) + ", line: " + line);
+          URL filename = JLanguageTool.getDataBroker().getFromRulesDirAsUrl(getFileName());
+          throw new IOException("Format error in file " + filename + ", line: " + line);
         }
 
         String[] replacements = parts[1].split("\\|");
@@ -201,6 +225,21 @@ public abstract class AbstractSimpleReplaceRule extends Rule {
       }
     }
     return map;
+  }
+
+  /**
+   * @since 2.5
+   */
+  public boolean isCheckLemmas() {
+    return checkLemmas;
+  }
+
+  /**
+   * Used to disable matching lemmas.
+   * @since 2.5
+   */
+  public void setCheckLemmas(boolean checkLemmas) {
+    this.checkLemmas = checkLemmas;
   }
 
   @Override

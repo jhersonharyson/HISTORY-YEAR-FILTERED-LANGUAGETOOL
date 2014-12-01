@@ -19,8 +19,10 @@
 
 package org.languagetool.language;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.ResourceBundle;
 
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.en.MorfologikAmericanSpellerRule;
@@ -28,29 +30,21 @@ import org.languagetool.rules.en.MorfologikAmericanSpellerRule;
 public class AmericanEnglish extends English {
 
   @Override
-  public final String[] getCountries() {
+  public String[] getCountries() {
     return new String[]{"US"};
   }
 
   @Override
-  public final String getName() {
+  public String getName() {
     return "English (US)";
   }
 
-  /**
-   * @deprecated was never used (deprecated since 2.5) 
-   */
-  @Deprecated
-  public final String getId() {
-      return "MORFOLOGIK_RULE_EN_US";
-  }
-  
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
-    final List<Class<? extends Rule>> rules = new ArrayList<>();
-    rules.addAll(super.getRelevantRules());    
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
+    List<Rule> rules = new ArrayList<>();
+    rules.addAll(super.getRelevantRules(messages));
     // American English speller...
-    rules.add(MorfologikAmericanSpellerRule.class);
+    rules.add(new MorfologikAmericanSpellerRule(messages, this));
     return rules;
   }
 

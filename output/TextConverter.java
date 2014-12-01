@@ -23,28 +23,13 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import de.fau.cs.osr.ptk.common.ast.*;
+import org.apache.commons.lang.StringEscapeUtils;
 import org.sweble.wikitext.engine.Page;
 import org.sweble.wikitext.engine.PageTitle;
-import org.sweble.wikitext.engine.utils.EntityReferences;
 import org.sweble.wikitext.engine.utils.SimpleWikiConfiguration;
 import org.sweble.wikitext.lazy.LinkTargetException;
 import org.sweble.wikitext.lazy.encval.IllegalCodePoint;
-import org.sweble.wikitext.lazy.parser.Bold;
-import org.sweble.wikitext.lazy.parser.Enumeration;
-import org.sweble.wikitext.lazy.parser.EnumerationItem;
-import org.sweble.wikitext.lazy.parser.ExternalLink;
-import org.sweble.wikitext.lazy.parser.HorizontalRule;
-import org.sweble.wikitext.lazy.parser.ImageLink;
-import org.sweble.wikitext.lazy.parser.InternalLink;
-import org.sweble.wikitext.lazy.parser.Italics;
-import org.sweble.wikitext.lazy.parser.Itemization;
-import org.sweble.wikitext.lazy.parser.ItemizationItem;
-import org.sweble.wikitext.lazy.parser.MagicWord;
-import org.sweble.wikitext.lazy.parser.Paragraph;
-import org.sweble.wikitext.lazy.parser.Section;
-import org.sweble.wikitext.lazy.parser.Url;
-import org.sweble.wikitext.lazy.parser.Whitespace;
-import org.sweble.wikitext.lazy.parser.XmlElement;
+import org.sweble.wikitext.lazy.parser.*;
 import org.sweble.wikitext.lazy.preprocessor.TagExtension;
 import org.sweble.wikitext.lazy.preprocessor.Template;
 import org.sweble.wikitext.lazy.preprocessor.TemplateArgument;
@@ -62,9 +47,8 @@ import xtc.tree.Location;
  * better understand the visitor pattern as implemented by the Visitor class,
  * please take a look at the following resources:
  * <ul>
- * <li>{@link http://en.wikipedia.org/wiki/Visitor_pattern} (classic pattern)</li>
- * <li>{@link http://www.javaworld.com/javaworld/javatips/jw-javatip98.html}
- * (the version we use here)</li>
+ * <li>http://en.wikipedia.org/wiki/Visitor_pattern (classic pattern)</li>
+ * <li>http://www.javaworld.com/javaworld/javatips/jw-javatip98.html (the version we use here)</li>
  * </ul>
  *
  * The methods needed to descend into an AST and visit the children of a given
@@ -102,6 +86,8 @@ public class TextConverter extends Visitor {
   private boolean noWrap;
 
   private LinkedList<Integer> sections;
+  
+  private boolean enableMapping = true;
 
   // =========================================================================
 
@@ -110,10 +96,17 @@ public class TextConverter extends Visitor {
     this.wrapCol = wrapCol;
   }
 
+  public void enableMapping(boolean enableMapping) {
+    this.enableMapping = enableMapping;
+  }
+
   /**
    * Return a mapping from converted text positions to original text positions.
    */
   public Map<Integer, Location> getMapping() {
+    if (!enableMapping) {
+      throw new IllegalStateException("enableMapping not activated");
+    }
     return mapping;
   }
 
@@ -142,8 +135,28 @@ public class TextConverter extends Visitor {
 
   // =========================================================================
 
+  private boolean inGallery = false;
+  private boolean inSource = false;
+  
   public void visit(AstNode n) {
     // Fallback for all nodes that are not explicitly handled elsewhere
+    Object data = n.getAttribute("RTD");
+    if (data != null && data instanceof RtData) {
+      RtData rtd = (RtData) data;
+      Object[][] rts = rtd.getRts();
+      if (rts.length > 0 && rts[0].length > 0) {
+        Object rtsElem = rts[0][0];
+        if ("<gallery".equals(rtsElem)) {
+          inGallery = true;
+        } else if ("<source".equals(rtsElem)) {
+          inSource = true;
+        } else if ("</gallery>".equals(rtsElem)) {
+          inGallery = false;
+        } else if ("</source>".equals(rtsElem)) {
+          inSource = false;
+        }
+      }
+    }
   }
 
   public void visit(NodeList n) {
@@ -173,6 +186,9 @@ public class TextConverter extends Visitor {
   }
 
   public void visit(Text text) {
+    if (inGallery || inSource) {
+      return;
+    }
     addMapping(text);
     write(text.getContent());
   }
@@ -201,16 +217,10 @@ public class TextConverter extends Visitor {
 
   public void visit(XmlEntityRef er) {
     addMapping(er);
-    String ch = EntityReferences.resolve(er.getName());
     if ("nbsp".equals(er.getName())) {
-      write(' ');
-    } else if ("ndash".equals(er.getName()) || "mdash".equals(er.getName())) {
-      write('-');
-    } else if (ch == null) {
-      write('&');
-      write(er.getName());
-      write(';');
+      write('\u00A0');  // non-breaking space
     } else {
+      String ch = StringEscapeUtils.unescapeHtml("&" + er.getName() + ";");
       write(ch);
     }
   }
@@ -231,6 +241,11 @@ public class TextConverter extends Visitor {
         throw new RuntimeException("Error getting content of external link " + link, e);
       }
     }
+    
+    // TODO: sometimes this seems to fix the error position, but we'd need to find out under which circumstances:
+    //String url = link.getTarget().getProtocol() + ":" + link.getTarget().getPath();
+    //int correction = url.length();
+    //addMapping(link, correction);
     addMapping(link);
     write(out.toString());
   }
@@ -370,10 +385,19 @@ public class TextConverter extends Visitor {
   }
 
   private void addMapping(Locatable loc) {
+    addMapping(loc, 0);
+  }
+
+  private void addMapping(Locatable loc, int columnCorrection) {
+    if (!enableMapping) {
+      // this is surprisingly resource intensive, so it can be disabled
+      return;
+    }
     String contentSoFar = sb.toString() + line;
     int textPos = contentSoFar.length() + needNewlines + 1;
     if (loc.hasLocation()) {
-      mapping.put(textPos, loc.getLocation());
+      Location location = loc.getLocation();
+      mapping.put(textPos, new Location(location.file, location.line, location.column + columnCorrection));
       //System.out.println("PUT " + textPos + " -> " + loc.getLocation());
     }
   }
@@ -458,4 +482,5 @@ public class TextConverter extends Visitor {
   private void write(int num) {
     writeWord(String.valueOf(num));
   }
+
 }

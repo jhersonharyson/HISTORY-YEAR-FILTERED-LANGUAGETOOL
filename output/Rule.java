@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.ResourceBundle;
 
 import org.languagetool.AnalyzedSentence;
+import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 
 /**
@@ -41,26 +42,17 @@ public abstract class Rule {
 
   private List<String> correctExamples = new ArrayList<>();
   private List<IncorrectExample> incorrectExamples = new ArrayList<>();
-  private String locQualityIssueType = "uncategorized";
+  private ITSIssueType locQualityIssueType = ITSIssueType.Uncategorized;
   private Category category;
   private URL url;
-  /** If true, then the rule is turned off by default. */
   private boolean defaultOff;
-  /** Used by paragraph rules to signal that they can remove previous rule matches */
-  private boolean paragraphBackTrack;
-  /** The final list of RuleMatches, without removed matches. */
-  private List<RuleMatch> previousMatches;
-  private List<RuleMatch> removedMatches;
 
-  /**
-   * Called by language-dependent rules.
-   */
   public Rule() {
-    this.messages = null;
+    this(null);
   }
 
   /**
-   * Called by language-independent rules.
+   * Called by rules that require a translation of their messages.
    */
   public Rule(final ResourceBundle messages) {
     this.messages = messages;
@@ -69,7 +61,8 @@ public abstract class Rule {
   /**
    * A string used to identify the rule in e.g. configuration files.
    * This string is supposed to be unique and to stay the same in all upcoming
-   * versions of LanguageTool.
+   * versions of LanguageTool. It's supposed to contain only the characters {@code A-Z} 
+   * and the underscore.
    */
   public abstract String getId();
 
@@ -86,10 +79,10 @@ public abstract class Rule {
    * text may be different than the order in which you get the sentences (this may be the
    * case when LanguageTool is used as a LibreOffice/OpenOffice add-on, for example).
    *
-   * @param text a pre-analyzed sentence
+   * @param sentence a pre-analyzed sentence
    * @return an array of {@link RuleMatch} objects
    */
-  public abstract RuleMatch[] match(AnalyzedSentence text) throws IOException;
+  public abstract RuleMatch[] match(AnalyzedSentence sentence) throws IOException;
 
   /**
    * If a rule keeps its state over more than the check of one sentence, this
@@ -99,21 +92,41 @@ public abstract class Rule {
   public abstract void reset();
 
   /**
-   * Whether this rule can be used for text in the given language. Note that
-   * this just checks if this rule is in the list of hard-coded rules for the
-   * given language, thus is will never return {@code true} for {@link org.languagetool.rules.patterns.PatternRule}s.
+   * Whether this rule can be used for text in the given language.
+   * Since LanguageTool 2.6, this also works {@link org.languagetool.rules.patterns.PatternRule}s
+   * (before, it used to always return {@code false} for those).
    */
-  public final boolean supportsLanguage(final Language language) {
-    final List<Class<? extends Rule>> relevantRuleClasses = language.getRelevantRules();
-    return relevantRuleClasses != null && relevantRuleClasses.contains(this.getClass());
+  public boolean supportsLanguage(final Language language) {
+    try {
+      List<Class<? extends Rule>> relevantRuleClasses = new ArrayList<>();
+      List<Rule> relevantRules = language.getRelevantRules(JLanguageTool.getMessageBundle());
+      for (Rule relevantRule : relevantRules) {
+        relevantRuleClasses.add(relevantRule.getClass());
+      }
+      return relevantRuleClasses.contains(this.getClass());
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   /**
-   * Whether this is a spelling rule. Used e.g. by the LanguageTool GUI to mark
-   * spelling errors with a different color.
-   * @since 1.8
+   * Whether this is a spelling rule that uses a dictionary.
+   * Rules that return {@code true} here are basically rules that work like
+   * a simple hunspell-like spellchecker: they check words without considering
+   * the words' context.
+   * @since 2.5
    */
-  public boolean isSpellingRule() {
+  public boolean isDictionaryBasedSpellingRule() {
+    return false;
+  }
+  
+  /**
+   * Whether this rule should be forced to be used in LO/OO extension.
+   * Rules that return {@code true} will be enabled always in LO/OO extension
+   * regardless of other options like isDictionaryBasedSpellingRule().
+   * @since 2.6
+   */
+  public boolean useInOffice() {
     return false;
   }
 
@@ -158,74 +171,6 @@ public abstract class Rule {
     return ruleMatches.toArray(new RuleMatch[ruleMatches.size()]);
   }
 
-  public final boolean isParagraphBackTrack() {
-    return paragraphBackTrack;
-  }
-
-  public final void setParagraphBackTrack(final boolean backTrack) {
-    paragraphBackTrack = backTrack;
-  }
-
-  /**
-   * Method to add matches.
-   * 
-   * @param ruleMatch
-   *          RuleMatch - matched rule added by check()
-   */
-  public final void addRuleMatch(final RuleMatch ruleMatch) {
-    if (previousMatches == null) {
-      previousMatches = new ArrayList<>();
-    }
-    previousMatches.add(ruleMatch);
-  }
-
-  /**
-   * Deletes (or disables) previously matched rule.
-   * 
-   * @param index
-   *          Index of the rule that should be deleted.
-   */
-  public final void setAsDeleted(final int index) {
-    if (removedMatches == null) {
-      removedMatches = new ArrayList<>();
-    }
-    removedMatches.add(previousMatches.get(index));
-  }
-
-  public final boolean isInRemoved(final RuleMatch ruleMatch) {
-    if (removedMatches == null) {
-      return false;
-    }
-    return removedMatches.contains(ruleMatch);
-  }
-
-  public final boolean isInMatches(final int index) {
-    if (previousMatches == null) {
-      return false;
-    }
-    if (previousMatches.size() > index) {
-      return previousMatches.get(index) != null;
-    }
-    return false;
-  }
-
-  public final void clearMatches() {
-    if (previousMatches != null) {
-      previousMatches.clear();
-    }
-  }
-
-  public final int getMatchesIndex() {
-    if (previousMatches == null) {
-      return 0;
-    }
-    return previousMatches.size();
-  }
-
-  public final List<RuleMatch> getMatches() {
-    return previousMatches;
-  }
-
   /**
    * Checks whether the rule has been turned off by default by the rule author.
    * @return True if the rule is turned off by default.
@@ -249,8 +194,8 @@ public abstract class Rule {
   }
   
   /**
-   * An URL describing the rule match in more detail. Typically points to a dictionary or grammar website
-   * with explanations and examples.
+   * An optional URL describing the rule match in more detail. Typically points to a dictionary or grammar website
+   * with explanations and examples. Will return {@code null} for rules that have no URL.
    * @since 1.8
    */
   public URL getUrl() {
@@ -259,6 +204,7 @@ public abstract class Rule {
 
   /**
    * @since 1.8
+   * @see #getUrl()
    */
   public void setUrl(URL url) {
     this.url = url;
@@ -273,19 +219,29 @@ public abstract class Rule {
    * cases, <tt>uncategorized</tt> is returned.
    *
    * @return the Localization Quality Issue Type - <tt>uncategorized</tt> if no type has been assigned
-   * @since 2.0
+   * @since 2.5
    */
-  public String getLocQualityIssueType() {
+  public ITSIssueType getLocQualityIssueType() {
     return locQualityIssueType;
   }
 
   /**
    * Set the Localization Quality Issue Type.
    * @see #getLocQualityIssueType()
-   * @since 2.0
+   * @since 2.5
    */
-  public void setLocQualityIssueType(String locQualityIssueType) {
-    this.locQualityIssueType = locQualityIssueType;
+  public void setLocQualityIssueType(ITSIssueType locQualityIssueType) {
+    this.locQualityIssueType = Objects.requireNonNull(locQualityIssueType);
+  }
+
+  /**
+   * Convenience method to add a pair of sentences: an incorrect sentence and the same sentence
+   * with the error corrected.
+   * @since 2.5
+   */
+  protected void addExamplePair(IncorrectExample incorrectSentence, String correctSentence) {
+    incorrectExamples.add(incorrectSentence);
+    correctExamples.add(correctSentence);
   }
 
 }

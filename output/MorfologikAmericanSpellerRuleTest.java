@@ -18,25 +18,44 @@
  */
 package org.languagetool.rules.en;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.languagetool.JLanguageTool;
+import org.languagetool.Language;
 import org.languagetool.TestTools;
 import org.languagetool.language.AmericanEnglish;
+import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 
 import java.io.IOException;
 
+import static junit.framework.TestCase.assertTrue;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
 
-public class MorfologikAmericanSpellerRuleTest {
+public class MorfologikAmericanSpellerRuleTest extends AbstractEnglishSpellerRuleTest {
+
+  private static final AmericanEnglish language = new AmericanEnglish();
+  
+  private static MorfologikAmericanSpellerRule rule;
+  private static JLanguageTool langTool;
+
+  @BeforeClass
+  public static void setup() throws IOException {
+    rule = new MorfologikAmericanSpellerRule(TestTools.getMessages("en"), language);
+    langTool = new JLanguageTool(language);
+  }
+
+  @Test
+  public void testSuggestions() throws IOException {
+    Language language = new AmericanEnglish();
+    Rule rule = new MorfologikAmericanSpellerRule(TestTools.getMessages("en"), language);
+    super.testNonVariantSpecificSuggestions(rule, language);
+  }
 
   @Test
   public void testMorfologikSpeller() throws IOException {
-    final AmericanEnglish language = new AmericanEnglish();
-    final MorfologikAmericanSpellerRule rule =
-            new MorfologikAmericanSpellerRule (TestTools.getMessages("English"), language);
-
-    final JLanguageTool langTool = new JLanguageTool(language);
 
     // correct sentences:
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("This is an example: we get behavior as a dictionary word.")).length);
@@ -67,6 +86,73 @@ public class MorfologikAmericanSpellerRuleTest {
     assertEquals(3, matches[0].getFromPos());
     assertEquals(10, matches[0].getToPos());
     assertEquals("taught", matches[0].getSuggestedReplacements().get(0));
+    
+    // hyphens - accept words if all their parts are okay:
+    assertEquals(0, rule.match(langTool.getAnalyzedSentence("A web-based software.")).length);
+    assertEquals(1, rule.match(langTool.getAnalyzedSentence("A wxeb-based software.")).length);
+    assertEquals(1, rule.match(langTool.getAnalyzedSentence("A web-baxsed software.")).length);
+    // yes, we also accept fantasy words:
+    assertEquals(0, rule.match(langTool.getAnalyzedSentence("A web-feature-driven-car software.")).length);
+    assertEquals(1, rule.match(langTool.getAnalyzedSentence("A web-feature-drivenx-car software.")).length);
   }
 
+  @Test
+  public void testSuggestionForIrregularWords() throws IOException {
+    // verbs:
+    assertSuggestion("He teached us.", "taught");
+    assertSuggestion("He buyed the wrong brand", "bought");
+    assertSuggestion("I thinked so.", "thought");
+    assertSuggestion("She awaked", "awoke");
+    assertSuggestion("She becomed", "became");
+    assertSuggestion("It begined", "began");
+    assertSuggestion("It bited", "bit");
+    assertSuggestion("She dealed", "dealt");
+    assertSuggestion("She drived", "drove");
+    assertSuggestion("He drawed", "drew");
+    assertSuggestion("She finded", "found");
+    assertSuggestion("It hurted", "hurt");
+    assertSuggestion("It was keeped", "kept");
+    assertSuggestion("He maked", "made");
+    assertSuggestion("She runed", "ran");
+    assertSuggestion("She selled", "sold");
+    assertSuggestion("He speaked", "spoke");  // needs dict update to not include 'spake'
+
+    // double consonants not yet supported:
+    //assertSuggestion("He cutted", "cut");
+    //assertSuggestion("She runned", "ran");
+
+    // nouns:
+    assertSuggestion("auditory stimuluses", "stimuli");
+    assertSuggestion("analysises", "analyses");
+    assertSuggestion("parenthesises", "parentheses");
+    assertSuggestion("childs", "children");
+    assertSuggestion("womans", "women");
+    assertSuggestion("criterions", "criteria");
+    //accepted by spell checker, e.g. as third-person verb:
+    // foots, mouses, man
+    
+    // adjectives (comparative):
+    assertSuggestion("gooder", "better");
+    assertSuggestion("bader", "worse");
+    assertSuggestion("farer", "further", "farther");
+    //accepted by spell checker:
+    //badder
+
+    // adjectives (superlative):
+    assertSuggestion("goodest", "best");
+    assertSuggestion("badest", "worst");
+    assertSuggestion("farest", "furthest", "farthest");
+    //double consonants not yet supported:
+    //assertSuggestion("baddest", "worst");
+  }
+
+  private void assertSuggestion(String input, String... expectedSuggestions) throws IOException {
+    RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence(input));
+    assertThat(matches.length, is(1));
+    assertTrue("Expected >= " + expectedSuggestions.length + ", got: " + matches[0].getSuggestedReplacements(),
+            matches[0].getSuggestedReplacements().size() >= expectedSuggestions.length);
+    for (String expectedSuggestion : expectedSuggestions) {
+      assertTrue(matches[0].getSuggestedReplacements().contains(expectedSuggestion));
+    }
+  }
 }

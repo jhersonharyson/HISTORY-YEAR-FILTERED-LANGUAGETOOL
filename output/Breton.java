@@ -19,15 +19,13 @@
 
 package org.languagetool.language;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ResourceBundle;
 
 import org.languagetool.Language;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.DoublePunctuationRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.WhitespaceRule;
+import org.languagetool.rules.*;
 import org.languagetool.rules.br.TopoReplaceRule;
 import org.languagetool.rules.br.MorfologikBretonSpellerRule;
 import org.languagetool.tagging.Tagger;
@@ -48,9 +46,10 @@ public class Breton extends Language {
   private Tagger tagger;
   private Tokenizer wordTokenizer;
   private Disambiguator disambiguator;
+  private String name = "Breton";
 
   @Override
-  public final SentenceTokenizer getSentenceTokenizer() {
+  public SentenceTokenizer getSentenceTokenizer() {
     if (sentenceTokenizer == null) {
       sentenceTokenizer = new SRXSentenceTokenizer(this);
     }
@@ -58,7 +57,7 @@ public class Breton extends Language {
   }
 
   @Override
-  public final Tokenizer getWordTokenizer() {
+  public Tokenizer getWordTokenizer() {
     if (wordTokenizer == null) {
       wordTokenizer = new BretonWordTokenizer();
     }
@@ -67,7 +66,12 @@ public class Breton extends Language {
 
   @Override
   public String getName() {
-    return "Breton";
+    return name;
+  }
+
+  @Override
+  public void setName(String name) {
+    this.name = name;
   }
 
   @Override
@@ -89,7 +93,7 @@ public class Breton extends Language {
   }
 
   @Override
-  public final Disambiguator getDisambiguator() {
+  public Disambiguator getDisambiguator() {
     if (disambiguator == null) {
       disambiguator = new XmlRuleDisambiguator(new Breton());
     }
@@ -98,21 +102,21 @@ public class Breton extends Language {
 
   @Override
   public Contributor[] getMaintainers() {
-    final Contributor contributorFulup = new Contributor("Fulup Jakez");
     return new Contributor[] {
-        Contributors.DOMINIQUE_PELLE, contributorFulup
+        Contributors.DOMINIQUE_PELLE, new Contributor("Fulup Jakez")
     };
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            DoublePunctuationRule.class,
-            MorfologikBretonSpellerRule.class,
-            UppercaseSentenceStartRule.class,
-            WhitespaceRule.class,
-            TopoReplaceRule.class
+            new CommaWhitespaceRule(messages),
+            new DoublePunctuationRule(messages),
+            new MorfologikBretonSpellerRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),
+            new MultipleWhitespaceRule(messages, this),
+            new SentenceWhitespaceRule(messages),
+            new TopoReplaceRule(messages)
     );
   }
 

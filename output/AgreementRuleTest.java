@@ -41,7 +41,7 @@ public class AgreementRuleTest extends TestCase {
   
   @Override
   public void setUp() throws IOException {
-    rule = new AgreementRule(null);
+    rule = new AgreementRule(null, new German());
     langTool = new JLanguageTool(new German());
   }
   
@@ -69,6 +69,10 @@ public class AgreementRuleTest extends TestCase {
     assertGood("Des großen Mannes.");
     assertGood("Und nach der Nummerierung kommt die Überschrift.");
     assertGood("Sie wiesen dieselben Verzierungen auf.");
+    assertGood("Die erwähnte Konferenz ist am Samstag.");
+    assertGood("Sie erreichten 5 Prozent.");
+    assertGood("Sie erreichten mehrere Prozent Zustimmung.");
+    assertGood("Die Bestandteile, aus denen Schwefel besteht.");
 
     assertGood("Das Dach von meinem Auto.");
     assertGood("Das Dach von meinen Autos.");
@@ -78,6 +82,17 @@ public class AgreementRuleTest extends TestCase {
 
     assertGood("Das Dach meines großen Autos.");
     assertGood("Das Dach meiner großen Autos.");
+
+    assertGood("Dann schlug er so kräftig wie er konnte mit den Schwingen.");
+    assertGood("Also wenn wir Glück haben, ...");
+    assertGood("Wenn wir Pech haben, ...");
+    assertGood("Ledorn öffnete eines der an ihr vorhandenen Fächer.");
+    assertGood("Auf der einen Seite endlose Dünen");
+    assertGood("In seinem Maul hielt er einen blutigen Fleischklumpen.");
+    assertGood("Gleichzeitig dachte er intensiv an Nebelschwaden, aus denen Wolken ja bestanden.");
+    assertGood("Warum stellte der bloß immer wieder dieselben Fragen?");
+    assertGood("Bei der Hinreise.");
+    assertGood("Schließlich tauchten in einem Waldstück unter ihnen Schienen auf.");
 
     assertGood("Das Wahlrecht, das Frauen damals zugesprochen bekamen.");
     assertGood("Es war Karl, dessen Leiche Donnerstag gefunden wurde.");
@@ -103,6 +118,7 @@ public class AgreementRuleTest extends TestCase {
     // relative clauses:
     assertGood("Das Recht, das Frauen eingeräumt wird.");
     assertGood("Der Mann, in dem quadratische Fische schwammen.");
+    assertGood("Der Mann, durch den quadratische Fische schwammen.");
     assertGood("Gutenberg, der quadratische Mann.");
     // TODO: not detected, because "die" is considered a relative pronoun:
     //assertBad("Gutenberg, die Genie.");
@@ -125,6 +141,7 @@ public class AgreementRuleTest extends TestCase {
     assertGood("Dieser ist nun in den Ortungsbereich des einen Roboters gefahren.");
     assertGood("Wenn dies großen Erfolg hat, werden wir es weiter fördern.");
     assertGood("Die Ereignisse dieses einen Jahres waren sehr schlimm.");
+    assertGood("Er musste einen Hochwasser führenden Fluss nach dem anderen überqueren.");
 
     // incorrect sentences:
     assertBad("Es sind die Tisch.", "dem Tisch", "den Tisch", "der Tisch", "die Tische");
@@ -139,6 +156,11 @@ public class AgreementRuleTest extends TestCase {
     assertBad("Das Auto einem Mannes.", "einem Mann", "einem Manne", "eines Mannes");
     assertBad("Das Auto einer Mannes.", "eines Mannes");
     assertBad("Das Auto einen Mannes.", "einen Mann", "eines Mannes");
+    
+    assertBad("Die erwähnt Konferenz ist am Samstag.");
+    assertBad("Die erwähntes Konferenz ist am Samstag.");
+    assertBad("Die erwähnten Konferenz ist am Samstag.");
+    assertBad("Die erwähnter Konferenz ist am Samstag.");
     
     assertBad("Des großer Mannes.");
 
@@ -156,6 +178,8 @@ public class AgreementRuleTest extends TestCase {
 
     assertBad("Der Haus ist groß", "Das Haus", "Dem Haus", "Der Häuser");
     assertBad("Aber der Haus ist groß", "das Haus", "dem Haus", "der Häuser");
+    
+    assertBad("Ich habe einen Feder gefunden.", "eine Feder", "einer Feder");
 
     // TODO: not yet detected:
     //assertBad("Erst recht wir fleißiges Arbeiter.");
@@ -170,6 +194,20 @@ public class AgreementRuleTest extends TestCase {
     //assertBad("Es sind der Frau.");
   }
 
+  public void testVieleWenige() throws IOException {
+    assertGood("Zusammenschluss mehrerer dörflicher Siedlungen an einer Furt");
+    assertGood("Für einige markante Szenen");
+    assertGood("Für einige markante Szenen baute Hitchcock ein Schloss.");
+    assertGood("Haben Sie viele glückliche Erfahrungen in Ihrer Kindheit gemacht?");
+    assertGood("Es gibt viele gute Sachen auf der Welt.");
+    assertGood("Viele englische Wörter haben lateinischen Ursprung");
+    assertGood("Ein Bericht über Fruchtsaft, einige ähnliche Erzeugnisse und Fruchtnektar");
+    assertGood("Der Typ, der seit einiger Zeit immer wieder hierher kommt.");
+    assertGood("Jede Schnittmenge abzählbar vieler offener Mengen");
+    assertGood("Es kam zur Fusion der genannten und noch einiger weiterer Unternehmen.");
+    assertGood("Zu dieser Fragestellung gibt es viele unterschiedliche Meinungen.");
+  }
+  
   public void testDetNounRuleErrorMessages() throws IOException {
     // check detailed error messages:
     assertBadWithMessage("Das Fahrrads.", "bezüglich Kasus");
@@ -178,7 +216,7 @@ public class AgreementRuleTest extends TestCase {
     assertBadWithMessage("Die Tischen sind ecking.", "bezüglich Kasus");
     assertBadWithMessage("Die Tischen sind ecking.", "und Genus");
     //TODO: input is actually correct
-    assertBadWithMessage("Bei dem Papierabzüge von Digitalbildern bestellte werden.", "bezüglich Kasus, Genus oder Numerus.");
+    assertBadWithMessage("Bei dem Papierabzüge von Digitalbildern bestellt werden.", "bezüglich Kasus, Genus oder Numerus.");
   }
   
   public void testRegression() throws IOException {
@@ -201,20 +239,26 @@ public class AgreementRuleTest extends TestCase {
     assertGood("Dem riesigen Tisch fehlt was.");
     assertGood("Die riesigen Tische sind groß.");
     assertGood("Der riesigen Tische wegen.");
-    // TODO: incorrectly detected as incorrect:
-    // Dann hat das natürlich Nachteile.
+    assertGood("An der roten Ampel.");
+    assertGood("Dann hat das natürlich Nachteile.");
     
     // incorrect sentences:
     assertBad("Es sind die riesigen Tisch.");
     //assertBad("Dort, die riesigen Tischs!");    // TODO: error not detected because of comma
     assertBad("Als die riesigen Tischs kamen.");
     assertBad("Als die riesigen Tisches kamen.");
+    assertBad("Der riesigen Tisch und so.");
+    assertBad("An der roter Ampel.");
+    assertBad("An der rote Ampel.");
+    assertBad("An der rotes Ampel.");
+    assertBad("An der rotem Ampel.");
     // TODO: not yet detected:
-    //assertBad("Der riesigen Tisch und so.");
+    //assertBad("An der rot Ampel.");
   }
 
   private void assertGood(String s) throws IOException {
-    assertEquals("Found unexpected match in sentence '" + s + "'", 0, rule.match(langTool.getAnalyzedSentence(s)).length);
+    RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence(s));
+    assertEquals("Found unexpected match in sentence '" + s + "': " + Arrays.toString(matches), 0, matches.length);
   }
 
   private void assertBad(String s, String... expectedSuggestions) throws IOException {

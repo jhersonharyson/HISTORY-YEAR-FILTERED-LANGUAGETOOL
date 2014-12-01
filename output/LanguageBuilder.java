@@ -34,7 +34,7 @@ public final class LanguageBuilder {
   private LanguageBuilder() {
   }
 
-  public static Language makeAdditionalLanguage(final File file) {
+  public static Language makeAdditionalLanguage(final File file) throws InstantiationException, IllegalAccessException {
     return makeLanguage(file, true);
   }
 
@@ -43,7 +43,7 @@ public final class LanguageBuilder {
    * e.g. <tt>rules-de-German.xml</tt> and builds
    * a Language object for that language.
    */
-  private static Language makeLanguage(final File file, final boolean isAdditional) {
+  private static Language makeLanguage(final File file, final boolean isAdditional) throws IllegalAccessException, InstantiationException {
     Objects.requireNonNull(file, "file cannot be null");
     if (!file.getName().endsWith(".xml")) {
       throw new RuleFilenameException(file);
@@ -55,52 +55,73 @@ public final class LanguageBuilder {
     if (!startsWithRules || !secondPartHasCorrectLength) {
       throw new RuleFilenameException(file);
     }
-    //TODO: when the Language already exists, and the XML file is mergeable with
-    // other rules (need to add a parameter for this?), subclass the existing language,
+    //TODO: when the XML file is mergeable with
+    // other rules (check this in the XML Rule Loader by using rules[@integrate='add']?),
+    // subclass the existing language,
     //and adjust the settings if any are set in the rule file default configuration set
-    
-    final Language newLanguage = new Language() {
-      @Override
-      public Locale getLocale() {
-        return new Locale(getShortName());
-      }
-      @Override
-      public Contributor[] getMaintainers() {
-        return null;
-      }
-      @Override
-      public String getShortName() {
-        if (parts[1].length() == 2) {
-          return parts[1];
+
+    Language newLanguage;
+    if (Language.isLanguageSupported(parts[1])) {
+      newLanguage = Language.getLanguageForShortName(parts[1]).getClass().newInstance();
+      newLanguage.addExternalRuleFile(file.getAbsolutePath());
+      newLanguage.setName(parts[2].replace(".xml", ""));
+      newLanguage.makeExternal();
+    } else {
+      newLanguage = new Language() {
+        @Override
+        public Locale getLocale() {
+          return new Locale(getShortName());
         }
-        return  parts[1].split("_")[0]; //en as in en_US
-      }
-      @Override
-      public String[] getCountries() {
-        if (parts[1].length() == 2) {
-          return new String[] {""};
+
+        @Override
+        public Contributor[] getMaintainers() {
+          return null;
         }
-        return new String[] {parts[1].split("_")[1]}; //US as in en_US
-      }
-      @Override
-      public String getName() {
-        return parts[2].replace(".xml", "");
-      }
-      @Override
-      public List<Class<? extends Rule>> getRelevantRules() {
-        return Collections.emptyList();
-      }
-      @Override
-      public List<String> getRuleFileNames() {
-        final List<String> ruleFiles = new ArrayList<>();
-        ruleFiles.add(file.getAbsolutePath());
-        return ruleFiles;
-      }
-      @Override
-      public boolean isExternal() {
-        return isAdditional;
-      }
-    };
+
+        @Override
+        public String getShortName() {
+          if (parts[1].length() == 2) {
+            return parts[1];
+          }
+          return parts[1].split("_")[0]; //en as in en_US
+        }
+
+        @Override
+        public String[] getCountries() {
+          if (parts[1].length() == 2) {
+            return new String[]{""};
+          }
+          return new String[]{parts[1].split("_")[1]}; //US as in en_US
+        }
+
+        @Override
+        public String getName() {
+          return parts[2].replace(".xml", "");
+        }
+
+        @Override
+        public void setName(final String name) {
+          //cannot be changed for this language
+        }
+
+        @Override
+        public List<Rule> getRelevantRules(ResourceBundle messages) {
+          return Collections.emptyList();
+        }
+
+        @Override
+        public List<String> getRuleFileNames() {
+          final List<String> ruleFiles = new ArrayList<>();
+          ruleFiles.add(file.getAbsolutePath());
+          return ruleFiles;
+        }
+
+        @Override
+        public boolean isExternal() {
+          return isAdditional;
+        }
+      };
+    }
     return newLanguage;
   }
   

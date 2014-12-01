@@ -27,6 +27,7 @@ import junit.framework.TestCase;
 
 import org.languagetool.JLanguageTool;
 import org.languagetool.chunking.ChunkTag;
+import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.IncorrectExample;
 import org.languagetool.rules.Rule;
 
@@ -48,27 +49,46 @@ public class PatternRuleLoaderTest extends TestCase {
     final Rule demoRule2 = getRuleById("API_OUTPUT_TEST_RULE", rules);
     assertNull(demoRule2.getUrl());
 
-    assertEquals("uncategorized", demoRule1.getLocQualityIssueType());
-    assertEquals("tag inheritance failed", "addition", getRuleById("TEST_GO", rules).getLocQualityIssueType());
-    assertEquals("tag inheritance overwrite failed", "uncategorized", getRuleById("TEST_PHRASES1", rules).getLocQualityIssueType());
-    assertEquals("tag inheritance overwrite failed", "characters", getRuleById("test_include", rules).getLocQualityIssueType());
+    assertEquals(ITSIssueType.Uncategorized, demoRule1.getLocQualityIssueType());
+    assertEquals("tag inheritance failed", ITSIssueType.Addition, getRuleById("TEST_GO", rules).getLocQualityIssueType());
+    assertEquals("tag inheritance overwrite failed", ITSIssueType.Uncategorized, getRuleById("TEST_PHRASES1", rules).getLocQualityIssueType());
+    assertEquals("tag inheritance overwrite failed", ITSIssueType.Characters, getRuleById("test_include", rules).getLocQualityIssueType());
 
     final List<Rule> groupRules1 = getRulesById("test_spacebefore", rules);
-    assertEquals("tag inheritance form category failed", "addition", groupRules1.get(0).getLocQualityIssueType());
-    assertEquals("tag inheritance overwrite failed", "duplication", groupRules1.get(1).getLocQualityIssueType());
+    assertEquals("tag inheritance form category failed", ITSIssueType.Addition, groupRules1.get(0).getLocQualityIssueType());
+    assertEquals("tag inheritance overwrite failed", ITSIssueType.Duplication, groupRules1.get(1).getLocQualityIssueType());
     final List<Rule> groupRules2 = getRulesById("test_unification_with_negation", rules);
-    assertEquals("tag inheritance from rulegroup failed", "grammar", groupRules2.get(0).getLocQualityIssueType());
+    assertEquals("tag inheritance from rulegroup failed", ITSIssueType.Grammar, groupRules2.get(0).getLocQualityIssueType());
 
     final Set<String> categories = getCategoryNames(rules);
-    assertEquals(2, categories.size());
+    assertEquals(3, categories.size());
     assertTrue(categories.contains("misc"));
     assertTrue(categories.contains("otherCategory"));
+    assertTrue(categories.contains("Test tokens with min and max attributes"));
 
     final PatternRule demoRuleWithChunk = (PatternRule) getRuleById("DEMO_CHUNK_RULE", rules);
     final List<Element> elements = demoRuleWithChunk.getElements();
     assertEquals(2, elements.size());
     assertEquals(null, elements.get(1).getPOStag());
     assertEquals(new ChunkTag("B-NP-singular"), elements.get(1).getChunkTag());
+
+    final List<Rule> orRules = getRulesById("GROUP_WITH_URL", rules);
+    assertEquals(3, orRules.size());
+    assertEquals("http://fake-server.org/rule-group-url", orRules.get(0).getUrl().toString());
+    assertEquals("http://fake-server.org/rule-group-url-overwrite", orRules.get(1).getUrl().toString());
+    assertEquals("http://fake-server.org/rule-group-url", orRules.get(2).getUrl().toString());
+    
+    assertEquals("short message on rule group", ((PatternRule)orRules.get(0)).getShortMessage());
+    assertEquals("overwriting short message", ((PatternRule)orRules.get(1)).getShortMessage());
+    assertEquals("short message on rule group", ((PatternRule)orRules.get(2)).getShortMessage());
+    
+    // make sure URLs don't leak to the next rule:
+    final List<Rule> orRules2 = getRulesById("OR_GROUPS", rules);
+    for (Rule rule : orRules2) {
+      assertNull("http://fake-server.org/rule-group-url", rule.getUrl());
+    }
+    final Rule nextRule = getRuleById("DEMO_CHUNK_RULE", rules);
+    assertNull("http://fake-server.org/rule-group-url", nextRule.getUrl());
   }
 
   private Set<String> getCategoryNames(List<PatternRule> rules) {

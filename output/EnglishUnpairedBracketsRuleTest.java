@@ -1,4 +1,4 @@
-/* LanguageTool, a natural language style checker 
+/* LanguageTool, a natural language style checker
  * Copyright (C) 2010 Daniel Naber (http://www.languagetool.org)
  * 
  * This library is free software; you can redistribute it and/or
@@ -19,30 +19,29 @@
 
 package org.languagetool.rules.en;
 
-import java.io.IOException;
-import java.util.List;
-
 import junit.framework.TestCase;
-
 import org.languagetool.JLanguageTool;
 import org.languagetool.TestTools;
 import org.languagetool.language.English;
-import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.TextLevelRule;
+
+import java.io.IOException;
+import java.util.Collections;
 
 public class EnglishUnpairedBracketsRuleTest extends TestCase {
 
-  private Rule rule;
+  private TextLevelRule rule;
   private JLanguageTool langTool;
-  
+
   @Override
   public void setUp() throws IOException {
     rule = new EnglishUnpairedBracketsRule(TestTools.getEnglishMessages(), new English());
     langTool = new JLanguageTool(new English());
   }
-  
+
   public void testRule() throws IOException {
-    
+
     // correct sentences:
     assertCorrect("(This is a test sentence).");
     assertCorrect("This is a word 'test'.");
@@ -71,8 +70,15 @@ public class EnglishUnpairedBracketsRuleTest extends TestCase {
     assertCorrect("(Ketab fi Isti'mal al-'Adad al-Hindi)");
     assertCorrect("On their 'host' societies.");
     assertCorrect("On their 'host society'.");
-    //Should be correct!
-    //assertCorrect("On their 'host societies'.");   
+    assertCorrect("Burke-rostagno the Richard S. Burkes' home in Wayne may be the setting for the wedding reception for their daughter.");
+    assertCorrect("The '49 team was off to a so-so 5-5 beginning");
+    assertCorrect("The best reason that can be advanced for the state adopting the practice was the advent of expanded highway construction during the 1920s and '30s.");
+    assertCorrect("A Republican survey says Kennedy won the '60 election on the religious issue.");
+    assertCorrect("Economy class seats have a seat pitch of 31-33\", with newer aircraft having thinner seats that have a 31\" pitch.");
+    assertCorrect("\"02\" will sort before \"10\" as expected so it will have size of 10\".");
+    assertCorrect("\"02\" will sort before \"10\" as expected so it will have size of 10\""); // inch symbol is at the sentence end
+    assertCorrect("\"02\" will sort before \"10\""); // quotation mark is at the sentence end
+    assertCorrect("On their 'host societies'.");
 
     // incorrect sentences:
     assertIncorrect("(This is a test sentence.");
@@ -85,41 +91,37 @@ public class EnglishUnpairedBracketsRuleTest extends TestCase {
     assertIncorrect("Some text (and some funny remark :-) with more text to follow");
 
     RuleMatch[] matches;
-    matches = rule.match(langTool.getAnalyzedSentence("(This is a test” sentence."));
+    matches = rule.match(Collections.singletonList(langTool.getAnalyzedSentence("(This is a test” sentence.")));
     assertEquals(2, matches.length);
-    matches = rule.match(langTool.getAnalyzedSentence("This [is (a test} sentence."));
+    matches = rule.match(Collections.singletonList(langTool.getAnalyzedSentence("This [is (a test} sentence.")));
     assertEquals(3, matches.length);
   }
 
   private void assertCorrect(String sentence) throws IOException {
-    final RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence(sentence));
+    final RuleMatch[] matches = rule.match(Collections.singletonList(langTool.getAnalyzedSentence(sentence)));
     assertEquals(0, matches.length);
   }
 
   private void assertIncorrect(String sentence) throws IOException {
-    final RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence(sentence));
+    final RuleMatch[] matches = rule.match(Collections.singletonList(langTool.getAnalyzedSentence(sentence)));
     assertEquals(1, matches.length);
   }
-  
-  public void testMultipleSentences() throws IOException {
-    final JLanguageTool tool = new JLanguageTool(new English());
-    tool.enableRule("EN_UNPAIRED_BRACKETS");
 
-    List<RuleMatch> matches;
-    matches = tool
-        .check("This is multiple sentence text that contains a bracket: "
-            + "[This is bracket. With some text.] and this continues.\n");
-    assertEquals(0, matches.size());
-    matches = tool
-        .check("This is multiple sentence text that contains a bracket: "
-            + "[This is bracket. With some text. And this continues.\n\n");
-    assertEquals(1, matches.size());
-    // now with a paragraph end inside - we get two alarms because of paragraph
-    // resetting
-    matches = tool
-        .check("This is multiple sentence text that contains a bracket. "
-            + "(This is bracket. \n\n With some text.) and this continues.");
-    assertEquals(2, matches.size());
+  public void testMultipleSentences() throws IOException {
+    final JLanguageTool lt = new JLanguageTool(new English());
+
+    assertEquals(0, getMatches("This is multiple sentence text that contains a bracket: "
+                             + "[This is bracket. With some text.] and this continues.\n", lt));
+
+    assertEquals(0, getMatches("This is multiple sentence text that contains a bracket. "
+                             + "(This is bracket. \n\n With some text.) and this continues.", lt));
+
+    assertEquals(1, getMatches("This is multiple sentence text that contains a bracket: "
+                             + "[This is bracket. With some text. And this continues.\n\n", lt));
+  }
+
+  private int getMatches(String input, JLanguageTool lt) throws IOException {
+    return lt.check(input).size();
   }
 
 }

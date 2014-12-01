@@ -18,34 +18,28 @@
  */
 package org.languagetool.language;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ResourceBundle;
 
+import de.abelssoft.wordtools.jwordsplitter.AbstractWordSplitter;
+import de.abelssoft.wordtools.jwordsplitter.impl.GermanWordSplitter;
 import org.languagetool.Language;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.GenericUnpairedBracketsRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.WhitespaceRule;
-import org.languagetool.rules.de.AgreementRule;
-import org.languagetool.rules.de.CaseRule;
-import org.languagetool.rules.de.CompoundRule;
-import org.languagetool.rules.de.DashRule;
-import org.languagetool.rules.de.GermanDoublePunctuationRule;
-import org.languagetool.rules.de.GermanWordRepeatBeginningRule;
-import org.languagetool.rules.de.GermanWordRepeatRule;
-import org.languagetool.rules.de.GermanWrongWordInContextRule;
-import org.languagetool.rules.de.VerbAgreementRule;
-import org.languagetool.rules.de.WiederVsWiderRule;
-import org.languagetool.rules.de.WordCoherencyRule;
+import org.languagetool.rules.*;
+import org.languagetool.rules.de.*;
+import org.languagetool.rules.de.SentenceWhitespaceRule;
 import org.languagetool.synthesis.GermanSynthesizer;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.de.GermanTagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tagging.disambiguation.rules.de.GermanRuleDisambiguator;
+import org.languagetool.tokenizers.CompoundWordTokenizer;
 import org.languagetool.tokenizers.SRXSentenceTokenizer;
 import org.languagetool.tokenizers.SentenceTokenizer;
+import org.languagetool.tokenizers.de.GermanCompoundTokenizer;
 
 /**
  * Support for German - use the sub classes {@link GermanyGerman}, {@link SwissGerman}, or {@link AustrianGerman}
@@ -57,6 +51,9 @@ public class German extends Language {
   private Synthesizer synthesizer;
   private SentenceTokenizer sentenceTokenizer;
   private Disambiguator disambiguator;
+  private String name = "German";
+  private CompoundWordTokenizer compoundTokenizer;
+  private GermanCompoundTokenizer strictCompoundTokenizer;
 
   @Override
   public Language getDefaultLanguageVariant() {
@@ -64,7 +61,7 @@ public class German extends Language {
   }
   
   @Override
-  public final Disambiguator getDisambiguator() {
+  public Disambiguator getDisambiguator() {
     if (disambiguator == null) {
       disambiguator = new GermanRuleDisambiguator();
     }
@@ -73,7 +70,12 @@ public class German extends Language {
 
   @Override
   public String getName() {
-    return "German";
+    return name;
+  }
+
+  @Override
+  public void setName(String name) {
+    this.name = name;
   }
 
   @Override
@@ -98,14 +100,16 @@ public class German extends Language {
 
   @Override
   public Tagger getTagger() {
-    if (tagger == null) {
+    Tagger t = tagger;
+    if (t == null) {
       synchronized (this) {
-        if (tagger == null) {
-          tagger = new GermanTagger();
+        t = tagger;
+        if (t == null) {
+          tagger = t = new GermanTagger();
         }
       }
     }
-    return tagger;
+    return t;
   }
 
   @Override
@@ -134,25 +138,63 @@ public class German extends Language {
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            GermanDoublePunctuationRule.class,
-            GenericUnpairedBracketsRule.class,
-            UppercaseSentenceStartRule.class,
-            WhitespaceRule.class,
+            new CommaWhitespaceRule(messages),
+            new GenericUnpairedBracketsRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),
+            new MultipleWhitespaceRule(messages, this),
             // specific to German:
-            GermanWordRepeatRule.class,
-            GermanWordRepeatBeginningRule.class,
-            GermanWrongWordInContextRule.class,
-            AgreementRule.class,
-            CaseRule.class,
-            CompoundRule.class,
-            DashRule.class,
-            VerbAgreementRule.class,
-            WordCoherencyRule.class,
-            WiederVsWiderRule.class
+            new SentenceWhitespaceRule(messages),
+            new GermanDoublePunctuationRule(messages),
+            new MissingVerbRule(messages, this),
+            new GermanWordRepeatRule(messages, this),
+            new GermanWordRepeatBeginningRule(messages, this),
+            new GermanWrongWordInContextRule(messages),
+            new AgreementRule(messages, this),
+            new CaseRule(messages, this),
+            new CompoundRule(messages),
+            new DashRule(messages),
+            new VerbAgreementRule(messages, this),
+            new WordCoherencyRule(messages),
+            new WiederVsWiderRule(messages)
     );
   }
 
+  /**
+   * @since 2.7
+   */
+  public CompoundWordTokenizer getNonStrictCompoundSplitter() {
+    if (compoundTokenizer == null) {
+      try {
+        final AbstractWordSplitter wordSplitter = new GermanWordSplitter(false);
+        wordSplitter.setStrictMode(false); // there's a spelling mistake in (at least) one part, so strict mode wouldn't split the word
+        ((GermanWordSplitter)wordSplitter).setMinimumWordLength(3);
+        compoundTokenizer = new CompoundWordTokenizer() {
+          @Override
+          public List<String> tokenize(String word) {
+            return new ArrayList<>(wordSplitter.splitWord(word));
+          }
+        };
+      } catch (IOException e) {
+        throw new RuntimeException("Could not set up German compound splitter", e);
+      }
+    }
+    return compoundTokenizer;
+  }
+
+  /**
+   * @since 2.7
+   */
+  public GermanCompoundTokenizer getStrictCompoundTokenizer() {
+    if (strictCompoundTokenizer == null) {
+      try {
+        strictCompoundTokenizer = new GermanCompoundTokenizer();
+      } catch (IOException e) {
+        throw new RuntimeException("Could not set up strict German compound splitter", e);
+      }
+    }
+    return strictCompoundTokenizer;
+  }
+  
 }

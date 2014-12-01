@@ -20,14 +20,10 @@ package org.languagetool.language;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.ResourceBundle;
 
 import org.languagetool.Language;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.DoublePunctuationRule;
-import org.languagetool.rules.GenericUnpairedBracketsRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.WhitespaceRule;
+import org.languagetool.rules.*;
 import org.languagetool.rules.spelling.hunspell.HunspellNoSuggestionRule;
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
@@ -41,19 +37,25 @@ public class Danish extends Language {
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
   private Disambiguator disambiguator;
-  
+  private String name = "Danish";
+
   @Override
-  public final String getName() {
-    return "Danish";
+  public String getName() {
+    return name;
   }
 
   @Override
-  public final String getShortName() {
+  public void setName(String name) {
+    this.name = name;
+  }
+
+  @Override
+  public String getShortName() {
     return "da";
   }
 
   @Override
-  public final String[] getCountries() {
+  public String[] getCountries() {
     return new String[]{"DK"};
   }
   
@@ -68,7 +70,7 @@ public class Danish extends Language {
   }
   
   @Override
-  public final Tagger getTagger() {
+  public Tagger getTagger() {
     if (tagger == null) {
       tagger = new DanishTagger();
     }
@@ -84,7 +86,7 @@ public class Danish extends Language {
   }
   
   @Override
-  public final Disambiguator getDisambiguator() {
+  public Disambiguator getDisambiguator() {
     if (disambiguator == null) {
       disambiguator = new XmlRuleDisambiguator(new Danish());
     }
@@ -92,20 +94,20 @@ public class Danish extends Language {
   }
 
   @Override
-  public final Contributor[] getMaintainers() {
+  public Contributor[] getMaintainers() {
     return new Contributor[] {new Contributor("Esben Aaberg"), new Contributor("Henrik Bendt") };
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            DoublePunctuationRule.class,
-            GenericUnpairedBracketsRule.class,  // correction for genitive apostrophes eg. "Lis' hund" made in UnpairedQuotesBracketsRule
-            HunspellNoSuggestionRule.class,
-            UppercaseSentenceStartRule.class,  // abbreviation exceptions, done in DanishSentenceTokenizer
+            new CommaWhitespaceRule(messages),
+            new DoublePunctuationRule(messages),
+            new GenericUnpairedBracketsRule(messages, this),  // correction for genitive apostrophes eg. "Lis' hund" made in UnpairedQuotesBracketsRule
+            new HunspellNoSuggestionRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),  // abbreviation exceptions, done in DanishSentenceTokenizer
             // "WORD_REPEAT_RULE" implemented in grammar.xml
-            WhitespaceRule.class
+            new MultipleWhitespaceRule(messages, this)
     );
   }
 

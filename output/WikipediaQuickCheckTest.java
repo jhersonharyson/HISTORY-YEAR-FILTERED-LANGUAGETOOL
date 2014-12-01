@@ -60,7 +60,8 @@ public class WikipediaQuickCheckTest extends TestCase {
             "Eine kleine Auswahl von Fehlern.\n\n" +
             "Das Komma ist richtig, wegen dem Leerzeichen.";
     final MediaWikiContent wikiContent = new MediaWikiContent(markup, "2012-11-11T20:00:00");
-    final MarkupAwareWikipediaResult result = check.checkWikipediaMarkup(new URL("http://fake-url.org"), wikiContent, new German());
+    final ErrorMarker errorMarker = new ErrorMarker("<err>", "</err>");
+    final MarkupAwareWikipediaResult result = check.checkWikipediaMarkup(new URL("http://fake-url.org"), wikiContent, new German(), errorMarker);
     assertThat(result.getLastEditTimestamp(), is("2012-11-11T20:00:00"));
     final List<AppliedRuleMatch> appliedMatches = result.getAppliedRuleMatches();
     // even though this error has no suggestion, there's a (pseudo) correction:
@@ -69,9 +70,9 @@ public class WikipediaQuickCheckTest extends TestCase {
     assertThat(firstAppliedMatch.getRuleMatchApplications().size(), is(1));
     RuleMatchApplication ruleMatchApplication = firstAppliedMatch.getRuleMatchApplications().get(0);
     assertTrue("Got: " + ruleMatchApplication.getTextWithCorrection(),
-            ruleMatchApplication.getTextWithCorrection().contains("<span class=\"error\">wegen dem</span> Leerzeichen."));
-    assertThat(ruleMatchApplication.getOriginalErrorContext(10), is(" richtig, <span class=\"error\">wegen dem</span> Le"));
-    assertThat(ruleMatchApplication.getCorrectedErrorContext(10), is(" richtig, <span class=\"error\">wegen dem</span> Le"));
+            ruleMatchApplication.getTextWithCorrection().contains("<err>wegen dem</err> Leerzeichen."));
+    assertThat(ruleMatchApplication.getOriginalErrorContext(12), is("st richtig, <err>wegen dem</err> Leerz"));
+    assertThat(ruleMatchApplication.getCorrectedErrorContext(12), is("st richtig, <err>wegen dem</err> Leerz"));
   }
 
   public void testGetPlainText() {
@@ -81,7 +82,7 @@ public class WikipediaQuickCheckTest extends TestCase {
                     "</normalized><pages><page pageid=\"143424\" ns=\"3\" title=\"Benutzer Diskussion:Dnaber\"><revisions><rev xml:space=\"preserve\">\n" +
                     "Test [[Link]] Foo&amp;nbsp;bar.\n" +
                     "</rev></revisions></page></pages></query></api>");
-    assertEquals("Test Link Foo bar.", filteredContent);
+    assertEquals("Test Link Foo\u00A0bar.", filteredContent);
   }
 
   public void testGetPlainTextMapping() {
@@ -93,7 +94,7 @@ public class WikipediaQuickCheckTest extends TestCase {
                     text +
                     "</rev></revisions></page></pages></query></api>");
 
-    assertEquals("Test Link und noch einer und external link Foo bar.", filteredContent.getPlainText());
+    assertEquals("Test Link und noch einer und external link Foo\u00A0bar.", filteredContent.getPlainText());
     assertEquals(1, filteredContent.getOriginalTextPositionFor(1).line);
     assertEquals(1, filteredContent.getOriginalTextPositionFor(1).column);
     assertEquals(filteredContent.getPlainText().charAt(0), text.charAt(0));
@@ -151,10 +152,15 @@ public class WikipediaQuickCheckTest extends TestCase {
 
   public void testRemoveInterLanguageLinks() {
     final WikipediaQuickCheck check = new WikipediaQuickCheck();
-    assertEquals("foo  bar", check.removeInterLanguageLinks("foo [[pt:Some Article]] bar"));
-    assertEquals("foo [[some link]] bar", check.removeInterLanguageLinks("foo [[some link]] bar"));
-    assertEquals("foo [[Some Link]] bar ", check.removeInterLanguageLinks("foo [[Some Link]] bar [[pt:Some Article]]"));
-    assertEquals("foo [[zh-min-nan:Linux]] bar", check.removeInterLanguageLinks("foo [[zh-min-nan:Linux]] bar"));  // known limitation
+    assertEquals("foo  bar", check.removeWikipediaLinks("foo [[pt:Some Article]] bar"));
+    assertEquals("foo [[some link]] bar", check.removeWikipediaLinks("foo [[some link]] bar"));
+    assertEquals("foo [[Some Link]] bar ", check.removeWikipediaLinks("foo [[Some Link]] bar [[pt:Some Article]]"));
+    assertEquals("foo [[zh-min-nan:Linux]] bar", check.removeWikipediaLinks("foo [[zh-min-nan:Linux]] bar"));  // known limitation
+    assertEquals("[[Scultura bronzea di Gaudí mentre osserva il suo ''[[Il Capriccio|Capriccio]]'']]", check.removeWikipediaLinks("[[File:Gaudì-capriccio.JPG|thumb|left|Scultura bronzea di Gaudí mentre osserva il suo ''[[Il Capriccio|Capriccio]]'']]"));
+    assertEquals("[[[[Palau de la Música Catalana]], entrada]]", check.removeWikipediaLinks("[[Fitxer:Palau_de_musica_2.JPG|thumb|[[Palau de la Música Catalana]], entrada]]"));
+    assertEquals("foo  bar", check.removeWikipediaLinks("foo [[Kategorie:Kurgebäude]] bar"));
+    assertEquals("foo [[''Kursaal Palace'' in San Sebastián]] bar", check.removeWikipediaLinks("foo [[Datei:FestivalSS.jpg|miniatur|''Kursaal Palace'' in San Sebastián]] bar"));
+    assertEquals("[[Yupana, emprat pels [[Inques]].]]", check.removeWikipediaLinks("[[Fitxer:Yupana 1.GIF|thumb|Yupana, emprat pels [[Inques]].]]"));
   }
 
 }

@@ -23,29 +23,40 @@ import org.languagetool.rules.*;
 import org.languagetool.rules.ml.MorfologikMalayalamSpellerRule;
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.ml.MalayalamTagger;
+import org.languagetool.tokenizers.SRXSentenceTokenizer;
+import org.languagetool.tokenizers.SentenceTokenizer;
 import org.languagetool.tokenizers.Tokenizer;
 import org.languagetool.tokenizers.ml.MalayalamWordTokenizer;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ResourceBundle;
 
 public class Malayalam extends Language {
 
+  private SentenceTokenizer sentenceTokenizer;
   private Tagger tagger;
   private Tokenizer wordTokenizer;
+  private String name = "Malayalam";
 
   @Override
-  public final String getName() {
-    return "Malayalam";
+  public String getName() {
+    return name;
   }
 
   @Override
-  public final String getShortName() {
+  public void setName(String name) {
+    this.name = name;
+  }
+
+  @Override
+  public String getShortName() {
     return "ml";
   }
 
   @Override
-  public final Tokenizer getWordTokenizer() {
+  public Tokenizer getWordTokenizer() {
     if (wordTokenizer == null) {
       wordTokenizer = new MalayalamWordTokenizer();
     }
@@ -53,12 +64,20 @@ public class Malayalam extends Language {
   }
   
   @Override
-  public final String[] getCountries() {
+  public String[] getCountries() {
     return new String[]{"IN"};
+  }
+
+  @Override
+  public SentenceTokenizer getSentenceTokenizer() {
+    if (sentenceTokenizer == null) {
+      sentenceTokenizer = new SRXSentenceTokenizer(this);
+    }
+    return sentenceTokenizer;
   }
   
   @Override
-  public final Tagger getTagger() {
+  public Tagger getTagger() {
     if (tagger == null) {
       tagger = new MalayalamTagger();
     }
@@ -66,20 +85,20 @@ public class Malayalam extends Language {
   }
     
   @Override
-  public final Contributor[] getMaintainers() {
+  public Contributor[] getMaintainers() {
     return new Contributor[] { new Contributor("Jithesh.V.S") };
   }
 
   @Override
-  public List<Class<? extends Rule>> getRelevantRules() {
+  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            CommaWhitespaceRule.class,
-            DoublePunctuationRule.class,
-            GenericUnpairedBracketsRule.class,
-            MorfologikMalayalamSpellerRule.class,
-            UppercaseSentenceStartRule.class,
-            WordRepeatRule.class,
-            WhitespaceRule.class
+            new CommaWhitespaceRule(messages),
+            new DoublePunctuationRule(messages),
+            new GenericUnpairedBracketsRule(messages, this),
+            new MorfologikMalayalamSpellerRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this),
+            new WordRepeatRule(messages, this),
+            new MultipleWhitespaceRule(messages, this)
     );
   }
 
