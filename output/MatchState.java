@@ -23,18 +23,20 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 import org.apache.commons.lang.StringUtils;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.rules.patterns.Match.IncludeRange;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.tools.StringTools;
+
+import static org.languagetool.JLanguageTool.PARAGRAPH_END_TAGNAME;
+import static org.languagetool.JLanguageTool.SENTENCE_END_TAGNAME;
+import static org.languagetool.JLanguageTool.SENTENCE_START_TAGNAME;
 
 /**
  * The state of a matching process. This state is <strong>NOT</strong> thread-safe.
@@ -106,8 +108,8 @@ public class MatchState {
     final List<AnalyzedToken> l = new ArrayList<>();
     if (formattedToken != null) {
       if (match.isStaticLemma()) {
-        matchedToken.leaveReading(new AnalyzedToken(matchedToken
-            .getToken(), match.getPosTag(), formattedToken.getToken()));
+        matchedToken.leaveReading(new AnalyzedToken(matchedToken.getToken(),
+                match.getPosTag(), formattedToken.getToken()));
         formattedToken = matchedToken;
       }
       String token = formattedToken.getToken();
@@ -127,9 +129,9 @@ public class MatchState {
           String posTagReplace = match.getPosTagReplace();
           String targetPosTag;
           for (int i = 0; i < numRead; i++) {
-            final String tst = formattedToken.getAnalyzedToken(i).getPOSTag();
-            if (tst != null && pPosRegexMatch.matcher(tst).matches()) {
-              targetPosTag = formattedToken.getAnalyzedToken(i).getPOSTag();
+            final String testTag = formattedToken.getAnalyzedToken(i).getPOSTag();
+            if (testTag != null && pPosRegexMatch.matcher(testTag).matches()) {
+              targetPosTag = testTag;
               if (posTagReplace != null) {
                 targetPosTag = pPosRegexMatch.matcher(targetPosTag).replaceAll(posTagReplace);
               }
@@ -144,13 +146,12 @@ public class MatchState {
         } else {
           l.addAll(getNewToken(numRead, token));
         }
+        String lemma = formattedToken.getAnalyzedToken(0).getLemma();
         if (formattedToken.isSentenceEnd()) {
-          l.add(new AnalyzedToken(formattedToken.getToken(),
-              JLanguageTool.SENTENCE_END_TAGNAME, formattedToken.getAnalyzedToken(0).getLemma()));
+          l.add(new AnalyzedToken(formattedToken.getToken(), SENTENCE_END_TAGNAME, lemma));
         }
         if (formattedToken.isParagraphEnd()) {
-          l.add(new AnalyzedToken(formattedToken.getToken(),
-              JLanguageTool.PARAGRAPH_END_TAGNAME, formattedToken.getAnalyzedToken(0).getLemma()));
+          l.add(new AnalyzedToken(formattedToken.getToken(), PARAGRAPH_END_TAGNAME, lemma));
         }
 
       }
@@ -173,44 +174,12 @@ public class MatchState {
 
   /**
    * Converts case of the string token according to match element attributes.
-   *
    * @param s Token to be converted.
-   * @param sample the sample string used to determine how the original string looks like (used on case preservation)
+   * @param sample the sample string used to determine how the original string looks like (used only on case preservation)
    * @return Converted string.
    */
   String convertCase(final String s, String sample, Language lang) {
-    if (StringTools.isEmpty(s)) {
-      return s;
-    }
-    String token = s;
-    switch (match.getCaseConversionType()) {
-    case NONE:
-      break;
-    case PRESERVE:
-      if (StringTools.startsWithUppercase(sample)) {
-        if (StringTools.isAllUppercase(sample)) {
-          token = token.toUpperCase(Locale.ENGLISH);
-        } else {
-          token = StringTools.uppercaseFirstChar(token, lang);
-        }
-      }
-      break;
-    case STARTLOWER:
-      token = token.substring(0, 1).toLowerCase() + token.substring(1);
-      break;
-    case STARTUPPER:
-      token = StringTools.uppercaseFirstChar(token, lang);
-      break;
-    case ALLUPPER:
-      token = token.toUpperCase(Locale.ENGLISH);
-      break;
-    case ALLLOWER:
-      token = token.toLowerCase();
-      break;
-    default:
-      break;
-    }
-    return token;
+    return CaseConversionHelper.convertCase(match.getCaseConversionType(), s, sample, lang);
   }
 
   private List<AnalyzedToken> getNewToken(final int numRead, final String token) {
@@ -218,9 +187,9 @@ public class MatchState {
     final List<AnalyzedToken> list = new ArrayList<>();
     String lemma = "";
     for (int j = 0; j < numRead; j++) {
-      if (formattedToken.getAnalyzedToken(j).getPOSTag() != null) {
-        if (formattedToken.getAnalyzedToken(j).getPOSTag().equals(posTag)
-            && formattedToken.getAnalyzedToken(j).getLemma() != null) {
+      String tempPosTag = formattedToken.getAnalyzedToken(j).getPOSTag();
+      if (tempPosTag != null) {
+        if (tempPosTag.equals(posTag) && formattedToken.getAnalyzedToken(j).getLemma() != null) {
           lemma = formattedToken.getAnalyzedToken(j).getLemma();
         }
         if (StringTools.isEmpty(lemma)) {
@@ -236,7 +205,6 @@ public class MatchState {
 
   /**
    * Gets all strings formatted using the match element.
-   * @throws IOException in case of synthesizer-related I/O problems
    */
   public final String[] toFinalString(Language lang) throws IOException {
     String[] formattedString = new String[1];
@@ -259,15 +227,14 @@ public class MatchState {
           boolean oneForm = false;
           for (int k = 0; k < readingCount; k++) {
             if (formattedToken.getAnalyzedToken(k).getLemma() == null) {
-              final String posUnique = formattedToken
-                  .getAnalyzedToken(k).getPOSTag();
+              final String posUnique = formattedToken.getAnalyzedToken(k).getPOSTag();
               if (posUnique == null) {
                 wordForms.add(formattedToken.getToken());
                 oneForm = true;
               } else {
-                if (JLanguageTool.SENTENCE_START_TAGNAME.equals(posUnique)
-                    || JLanguageTool.SENTENCE_END_TAGNAME.equals(posUnique)
-                    || JLanguageTool.PARAGRAPH_END_TAGNAME.equals(posUnique)) {
+                if (SENTENCE_START_TAGNAME.equals(posUnique)
+                    || SENTENCE_END_TAGNAME.equals(posUnique)
+                    || PARAGRAPH_END_TAGNAME.equals(posUnique)) {
                   if (!oneForm) {
                     wordForms.add(formattedToken.getToken());
                   }
@@ -300,8 +267,7 @@ public class MatchState {
         } else {
           final TreeSet<String> wordForms = new TreeSet<>();
           for (int i = 0; i < readingCount; i++) {
-            final String[] possibleWordForms = synthesizer
-                .synthesize(formattedToken.getAnalyzedToken(i), posTag);
+            final String[] possibleWordForms = synthesizer.synthesize(formattedToken.getAnalyzedToken(i), posTag);
             if (possibleWordForms != null) {
               wordForms.addAll(Arrays.asList(possibleWordForms));
             }
@@ -322,7 +288,7 @@ public class MatchState {
     // TODO should case conversion happen before or after including skipped tokens?
     IncludeRange includeSkipped = match.getIncludeSkipped();
     if (includeSkipped != IncludeRange.NONE && skippedTokens != null
-        && !"".equals(skippedTokens)) {
+        && !skippedTokens.isEmpty()) {
       final String[] helper = new String[formattedString.length];
       for (int i = 0; i < formattedString.length; i++) {
         if (formattedString[i] == null) {
@@ -333,16 +299,13 @@ public class MatchState {
       formattedString = helper;
     }
     if (match.checksSpelling() && lang != null) {
-      final List<String> formattedStringElements = Arrays
-          .asList(formattedString);
+      final List<String> formattedStringElements = Arrays.asList(formattedString);
       // tagger-based speller
       final List<AnalyzedTokenReadings> analyzed = lang.getTagger().tag(
           formattedStringElements);
       for (int i = 0; i < formattedString.length; i++) {
-        final AnalyzedToken analyzedToken = analyzed.get(i)
-            .getAnalyzedToken(0);
-        if (analyzedToken.getLemma() == null
-            && analyzedToken.hasNoTag()) {
+        final AnalyzedToken analyzedToken = analyzed.get(i).getAnalyzedToken(0);
+        if (analyzedToken.getLemma() == null && analyzedToken.hasNoTag()) {
           formattedString[i] = "";
         }
       }
@@ -412,19 +375,11 @@ public class MatchState {
   /**
    * Method for getting the formatted match as a single string. In case of
    * multiple matches, it joins them using a regular expression operator "|".
-   *
    * @return Formatted string of the matched token.
    */
-  public final String toTokenString() throws IOException {
-    final StringBuilder output = new StringBuilder();
-    final String[] stringToFormat = toFinalString(null);
-    for (int i = 0; i < stringToFormat.length; i++) {
-      output.append(stringToFormat[i]);
-      if (i + 1 < stringToFormat.length) {
-        output.append('|');
-      }
-    }
-    return output.toString();
+  final String toTokenString() throws IOException {
+    String[] stringToFormat = toFinalString(null);
+    return String.join("|", Arrays.asList(stringToFormat));
   }
 
   public Match getMatch() {

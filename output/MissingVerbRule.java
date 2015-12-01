@@ -25,7 +25,7 @@ import org.languagetool.language.German;
 import org.languagetool.rules.Category;
 import org.languagetool.rules.Example;
 import org.languagetool.rules.RuleMatch;
-import org.languagetool.rules.patterns.Element;
+import org.languagetool.rules.patterns.PatternToken;
 import org.languagetool.rules.patterns.PatternRule;
 import org.languagetool.tools.StringTools;
 
@@ -53,14 +53,12 @@ public class MissingVerbRule extends GermanRule {
   public MissingVerbRule(ResourceBundle messages, German language) {
     this.language = language;
     rule1 = new PatternRule("internal", language, Arrays.asList(
-            new Element("Vielen", true, false, false),
-            new Element("Dank", true, false, false)), "", "", "");
+            new PatternToken("Vielen", true, false, false),
+            new PatternToken("Dank", true, false, false)), "", "", "");
     rule2 = new PatternRule("internal", language, Arrays.asList(
-            new Element("Herzlichen", true, false, false),
-            new Element("Glückwunsch", true, false, false)), "", "", "");
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_grammar")));
-    }
+            new PatternToken("Herzlichen", true, false, false),
+            new PatternToken("Glückwunsch", true, false, false)), "", "", "");
+    super.setCategory(new Category(messages.getString("category_grammar")));
     setDefaultOff();
     addExamplePair(Example.wrong("<marker>In diesem Satz kein Wort.</marker>"),
                    Example.fixed("In diesem Satz <marker>fehlt</marker> kein Wort."));
@@ -89,16 +87,18 @@ public class MissingVerbRule extends GermanRule {
     int i = 0;
     for (AnalyzedTokenReadings readings : sentence.getTokensWithoutWhitespace()) {
       if (readings.hasPartialPosTag("VER") || (!readings.isTagged() && !StringTools.isCapitalizedWord(readings.getToken()))) {  // ignore unknown words to avoid false alarms
+        //System.out.println("Found verb: " + readings.getToken());
         verbFound = true;
         break;
       } else if (i == 1 && verbAtSentenceStart(readings)) {
+        //System.out.println("Found verb: " + readings.getToken());
         verbFound = true;
         break;
       }
       lastToken = readings;
       i++;
     }
-    if (!verbFound && lastToken != null && i - 1 >= MIN_TOKENS_FOR_ERROR) {
+    if (!verbFound && lastToken != null && sentence.getTokensWithoutWhitespace().length >= MIN_TOKENS_FOR_ERROR) {
       RuleMatch match = new RuleMatch(this, 0, lastToken.getStartPos() + lastToken.getToken().length(), "Dieser Satz scheint kein Verb zu enthalten");
       return new RuleMatch[]{ match };
     }

@@ -34,21 +34,14 @@ import java.util.List;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.Query;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.Sort;
-import org.apache.lucene.search.SortField;
-import org.apache.lucene.search.TermQuery;
-import org.apache.lucene.search.TimeLimitingCollector;
-import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.search.TopFieldCollector;
+import org.apache.lucene.search.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.SimpleFSDirectory;
 import org.apache.lucene.util.Counter;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.patterns.PatternRule;
@@ -65,7 +58,7 @@ import org.languagetool.tools.ContextTools;
  */
 public class Searcher {
 
-  private static boolean WIKITEXT_OUTPUT = false;
+  private static final boolean WIKITEXT_OUTPUT = false;
   
   private final Directory directory;
 
@@ -130,7 +123,7 @@ public class Searcher {
     // when not doing so...
     open();
     try {
-      final PatternRuleQueryBuilder patternRuleQueryBuilder = new PatternRuleQueryBuilder(language);
+      final PatternRuleQueryBuilder patternRuleQueryBuilder = new PatternRuleQueryBuilder(language, indexSearcher);
       final Query query = patternRuleQueryBuilder.buildRelaxedQuery(rule);
       if (query == null) {
         throw new NullPointerException("Cannot search on null query for rule: " + rule.getId());
@@ -143,7 +136,7 @@ public class Searcher {
       try {
         // using a TimeLimitingCollector is not enough, as it doesn't cover all time required to
         // search for a complicated regex, so interrupt the whole thread instead:
-        if (limitSearch) { //FIXME: I don't know a simpler way to achieve this
+        if (limitSearch) { // I don't know a simpler way to achieve this...
           searchThread.join(maxSearchTimeMillis);
         } else {
           searchThread.join(Integer.MAX_VALUE);
@@ -182,8 +175,8 @@ public class Searcher {
     }
   }
 
-  private PossiblyLimitedTopDocs getTopDocs(Query query, Sort sort) throws IOException {
-    final TopFieldCollector topCollector = TopFieldCollector.create(sort, maxHits, true, false, false, false);
+  private PossiblyLimitedTopDocs getTopDocs(Query query) throws IOException {
+    final TopScoreDocCollector topCollector = TopScoreDocCollector.create(maxHits);
     final Counter clock = Counter.newCounter(true);
     final int waitMillis = 1000;
     // TODO: if we interrupt the whole thread anyway, do we still need the TimeLimitingCollector?
@@ -223,7 +216,6 @@ public class Searcher {
   List<PatternRule> getRuleById(String ruleId, Language language) throws IOException {
     List<PatternRule> rules = new ArrayList<>();
     JLanguageTool langTool = new JLanguageTool(language);
-    langTool.activateDefaultPatternRules();
     for (Rule rule : langTool.getAllRules()) {
       if (rule.getId().equals(ruleId) && rule instanceof PatternRule) {
         rules.add((PatternRule) rule);
@@ -264,7 +256,9 @@ public class Searcher {
   private JLanguageTool getLanguageToolWithOneRule(Language lang, PatternRule patternRule) {
     final JLanguageTool langTool = new JLanguageTool(lang);
     for (Rule rule : langTool.getAllActiveRules()) {
-      langTool.disableRule(rule.getId());
+      if (!rule.getId().equals(patternRule.getId())) {
+        langTool.disableRule(rule.getId());
+      }
     }
     langTool.addRule(patternRule);
     langTool.enableDefaultOffRule(patternRule.getId()); // rule might be off by default
@@ -314,12 +308,11 @@ public class Searcher {
     @Override
     public void run() {
       try {
-        final Sort sort = new Sort(new SortField("docCount", SortField.Type.INT));  // do not sort by relevance as this will move the shortest documents to the top
         final long t1 = System.currentTimeMillis();
         final JLanguageTool languageTool = getLanguageToolWithOneRule(language, rule);
         final long langToolCreationTime = System.currentTimeMillis() - t1;
         final long t2 = System.currentTimeMillis();
-        final PossiblyLimitedTopDocs limitedTopDocs = getTopDocs(query, sort);
+        final PossiblyLimitedTopDocs limitedTopDocs = getTopDocs(query);
         final long luceneTime = System.currentTimeMillis() - t2;
         final long t3 = System.currentTimeMillis();
         luceneMatchCount = limitedTopDocs.topDocs.totalHits;
@@ -367,10 +360,10 @@ public class Searcher {
     final long startTime = System.currentTimeMillis();
     final String[] ruleIds = args[0].split(",");
     final String languageCode = args[1];
-    final Language language = Language.getLanguageForShortName(languageCode);
+    final Language language = Languages.getLanguageForShortName(languageCode);
     final File indexDir = new File(args[2]);
     final boolean limitSearch = args.length > 3 && "--no_limit".equals(args[3]);
-    final Searcher searcher = new Searcher(new SimpleFSDirectory(indexDir));
+    final Searcher searcher = new Searcher(new SimpleFSDirectory(indexDir.toPath()));
     if (!limitSearch) {
       searcher.setMaxHits(100_000);
     }
@@ -380,7 +373,7 @@ public class Searcher {
     for (String ruleId : ruleIds) {
       final long ruleStartTime = System.currentTimeMillis();
       for (PatternRule rule : searcher.getRuleById(ruleId, language)) {
-        System.out.println("===== " + ruleId + "[" + rule.getSubId() + "] =========================================================");
+        System.out.println("===== " + rule.getFullId() + " =========================================================");
         final SearcherResult searcherResult = searcher.findRuleMatchesOnIndex(rule, language);
         int i = 1;
         if (searcherResult.getMatchingSentences().size() == 0) {

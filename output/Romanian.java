@@ -52,16 +52,10 @@ public class Romanian extends Language {
   private Disambiguator disambiguator;
   private Tokenizer wordTokenizer;
   private SentenceTokenizer sentenceTokenizer;
-  private String name = "Romanian";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Romanian";
   }
 
   @Override
@@ -75,16 +69,6 @@ public class Romanian extends Language {
   }
 
   @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "„", "«", "»" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "”", "»", "«" };
-  }
-  
-  @Override
   public Tagger getTagger() {
     if (tagger == null) {
       tagger = new RomanianTagger();
@@ -94,9 +78,9 @@ public class Romanian extends Language {
 
   @Override
   public Contributor[] getMaintainers() {
-    Contributor contributor = new Contributor("Ionuț Păduraru");
-    contributor.setUrl("http://www.archeus.ro");
-    return new Contributor[] { contributor };
+    return new Contributor[] {
+            new Contributor("Ionuț Păduraru", "http://www.archeus.ro")
+    };
   }
 
   @Override
@@ -106,7 +90,9 @@ public class Romanian extends Language {
             new DoublePunctuationRule(messages),
             new UppercaseSentenceStartRule(messages, this),
             new MultipleWhitespaceRule(messages, this),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "„", "«", "»"),
+                    Arrays.asList("]", ")", "}", "”", "»", "«")),
             new WordRepeatRule(messages, this),
             // specific to Romanian:
             new MorfologikRomanianSpellerRule(messages, this),

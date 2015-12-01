@@ -19,10 +19,12 @@
 package org.languagetool.synthesis.pl;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -98,8 +100,9 @@ public class PolishSynthesizer implements Synthesizer {
     String posTag = pos;
     if (posTagRegExp) {
       if (possibleTags == null) {
-        possibleTags = SynthesizerTools.loadWords(JLanguageTool.getDataBroker().
-            getFromResourceDirAsStream(TAGS_FILE_NAME));
+        try (InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(TAGS_FILE_NAME)) {
+          possibleTags = SynthesizerTools.loadWords(stream);
+        }
       }
       final IStemmer synthesizer = new DictionaryLookup(getDictionary());
       final List<String> results = new ArrayList<>();
@@ -116,7 +119,6 @@ public class PolishSynthesizer implements Synthesizer {
         posTag = posTag.replaceAll(NEGATION_TAG, POTENTIAL_NEGATION_TAG + "?");
       }
 
-  
       final Pattern p = Pattern.compile(posTag.replace('+', '|'));
       for (final String tag : possibleTags) {
         final Matcher m = p.matcher(tag);
@@ -128,7 +130,7 @@ public class PolishSynthesizer implements Synthesizer {
         }
       }
       //remove duplicates
-      HashSet<String> hs = new HashSet<>();
+      Set<String> hs = new HashSet<>();
       hs.addAll(results);
       results.clear();
       results.addAll(hs);     
@@ -172,7 +174,7 @@ public class PolishSynthesizer implements Synthesizer {
           + posTag.replaceFirst(NEGATION_TAG, POTENTIAL_NEGATION_TAG));
       if (wordForms != null) {                      
         for (WordData wd : wordForms) {
-          forms.add("nie" + wd.getStem().toString());
+          forms.add("nie" + wd.getStem());
         }
       }
     } else {
@@ -183,7 +185,6 @@ public class PolishSynthesizer implements Synthesizer {
         }
       }      
     }
-    
     return forms;
   }
 

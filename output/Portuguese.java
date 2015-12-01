@@ -21,6 +21,7 @@ package org.languagetool.language;
 import org.languagetool.Language;
 import org.languagetool.rules.*;
 import org.languagetool.rules.pt.PreReformPortugueseCompoundRule;
+import org.languagetool.rules.pt.PortugueseReplaceRule;
 import org.languagetool.rules.spelling.hunspell.HunspellNoSuggestionRule;
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.pt.PortugueseTagger;
@@ -37,18 +38,14 @@ import java.util.ResourceBundle;
  */
 public class Portuguese extends Language {
 
+  private static final Language PORTUGAL_PORTUGUESE = new PortugalPortuguese();
+  
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
-  private String name = "Portuguese";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Portuguese";
   }
 
   @Override
@@ -63,14 +60,14 @@ public class Portuguese extends Language {
 
   @Override
   public Language getDefaultLanguageVariant() {
-    return new PortugalPortuguese();
+    return PORTUGAL_PORTUGUESE;
   }
 
   @Override
   public Contributor[] getMaintainers() {
-    Contributor contributor = new Contributor("Marco A.G. Pinto");
-    contributor.setUrl("http://www.marcoagpinto.com/");
-    return new Contributor[] { contributor };
+    return new Contributor[] {
+            new Contributor("Marco A.G. Pinto", "http://www.marcoagpinto.com/")
+    };
   }
 
   @Override
@@ -94,14 +91,15 @@ public class Portuguese extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages),
             new HunspellNoSuggestionRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
             new WordRepeatRule(messages, this),
             new MultipleWhitespaceRule(messages, this),
             new SentenceWhitespaceRule(messages),
             //Specific to Portuguese:
-            new PreReformPortugueseCompoundRule(messages)
+            new PreReformPortugueseCompoundRule(messages),
+            new PortugueseReplaceRule(messages)
     );
   }
 

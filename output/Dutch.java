@@ -47,16 +47,10 @@ public class Dutch extends Language {
   private Synthesizer synthesizer;
   private Disambiguator disambiguator;
   private Tokenizer wordTokenizer;
-  private String name= "Dutch";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Dutch";
   }
 
   @Override
@@ -69,16 +63,6 @@ public class Dutch extends Language {
     return new String[]{"NL", "BE"};
   }
 
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "“", "\u2039", "\u201c", "\u201e" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "”", "\u203a", "\u201d", "\u201d" };
-  }
-  
   @Override
   public Tagger getTagger() {
     if (tagger == null) {
@@ -121,11 +105,10 @@ public class Dutch extends Language {
 
   @Override
   public Contributor[] getMaintainers() {
-    Contributor contributor1 = new Contributor("OpenTaal");
-    contributor1.setUrl("http://www.opentaal.org");
-    Contributor contributor2 = new Contributor("TaalTik");
-    contributor2.setUrl("http://www.taaltik.nl");
-    return new Contributor[] { contributor1, contributor2 };
+    return new Contributor[] {
+            new Contributor("OpenTaal", "http://www.opentaal.org"),
+            new Contributor("TaalTik", "http://www.taaltik.nl")
+    };
   }
 
   @Override
@@ -133,7 +116,9 @@ public class Dutch extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "“", "‹", "“", "„"),
+                    Arrays.asList("]", ")", "}", "”", "›", "”", "”")),
             new UppercaseSentenceStartRule(messages, this),
             new MorfologikDutchSpellerRule(messages, this),
             new MultipleWhitespaceRule(messages, this),

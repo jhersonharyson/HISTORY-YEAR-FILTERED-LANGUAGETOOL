@@ -20,19 +20,27 @@ package org.languagetool.rules;
 
 import java.io.IOException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.ResourceBundle;
+import java.util.*;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedSentence;
+import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.rules.patterns.PatternToken;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 
 /**
  * Abstract rule class. A Rule describes a language error and can test whether a
- * given pre-analyzed text contains that error using the {@link Rule#match(org.languagetool.AnalyzedSentence)}
+ * given pre-analyzed text contains that error using the {@link Rule#match(AnalyzedSentence)}
  * method.
+ *
+ * <p>Rules are created whenever a {@link JLanguageTool} or
+ * a {@link org.languagetool.MultiThreadedJLanguageTool} object is created.
+ * As these objects are not thread-safe, this can happen often. Rules should thus
+ * make sure that their initialization works fast. For example, if a rule needs
+ * to load data from disk, it should store it in a static variable to make sure
+ * the loading happens only once.
  * 
  * @author Daniel Naber
  */
@@ -92,6 +100,51 @@ public abstract class Rule {
   public abstract void reset();
 
   /**
+   * Overwrite this to avoid false alarms by ignoring these patterns -
+   * note that your {@link #match(AnalyzedSentence)} method needs to
+   * call {@link #getSentenceWithImmunization} for this to be used
+   * and you need to check {@link AnalyzedTokenReadings#isImmunized()}
+   * @since 3.1
+   */
+  public List<DisambiguationPatternRule> getAntiPatterns() {
+    return Collections.emptyList();
+  }
+
+  /**
+   * To be called from {@link #match(AnalyzedSentence)} for rules that want
+   * {@link #getAntiPatterns()} to be considered.
+   * @since 3.1
+   */
+  protected AnalyzedSentence getSentenceWithImmunization(AnalyzedSentence sentence) {
+    if (!getAntiPatterns().isEmpty()) {
+      //we need a copy of the sentence, not reference to the old one
+      AnalyzedSentence immunizedSentence = sentence.copy(sentence);
+      for (DisambiguationPatternRule patternRule : getAntiPatterns()) {
+        try {
+          immunizedSentence = patternRule.replace(immunizedSentence);
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+      }
+      return immunizedSentence;
+    }
+    return sentence;
+  }
+
+  /**
+   * Helper for implementing {@link #getAntiPatterns()}.
+   * @since 3.1
+   */
+  protected List<DisambiguationPatternRule> makeAntiPatterns(List<List<PatternToken>> patternList, Language language) {
+    List<DisambiguationPatternRule> rules = new ArrayList<>();
+    for (List<PatternToken> patternTokens : patternList) {
+      rules.add(new DisambiguationPatternRule("INTERNAL_ANTIPATTERN", "(no description)", language,
+              patternTokens, null, null, DisambiguationPatternRule.DisambiguatorAction.IMMUNIZE));
+    }
+    return Collections.unmodifiableList(rules);
+  }
+  
+  /**
    * Whether this rule can be used for text in the given language.
    * Since LanguageTool 2.6, this also works {@link org.languagetool.rules.patterns.PatternRule}s
    * (before, it used to always return {@code false} for those).
@@ -141,14 +194,13 @@ public abstract class Rule {
    * Get example sentences that are correct and thus will not match this rule.
    */
   public final List<String> getCorrectExamples() {
-    return correctExamples;
+    return Collections.unmodifiableList(correctExamples);
   }
 
   /**
    * Set the examples that are incorrect and thus do trigger the rule.
    */
-  public final void setIncorrectExamples(
-      final List<IncorrectExample> incorrectExamples) {
+  public final void setIncorrectExamples(final List<IncorrectExample> incorrectExamples) {
     this.incorrectExamples = Objects.requireNonNull(incorrectExamples);
   }
 
@@ -156,7 +208,7 @@ public abstract class Rule {
    * Get example sentences that are incorrect and thus will match this rule.
    */
   public final List<IncorrectExample> getIncorrectExamples() {
-    return incorrectExamples;
+    return Collections.unmodifiableList(incorrectExamples);
   }
 
   public final Category getCategory() {
@@ -198,6 +250,7 @@ public abstract class Rule {
    * with explanations and examples. Will return {@code null} for rules that have no URL.
    * @since 1.8
    */
+  @Nullable
   public URL getUrl() {
     return url;
   }

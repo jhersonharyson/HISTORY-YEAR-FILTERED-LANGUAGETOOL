@@ -21,6 +21,7 @@ package org.languagetool.dev;
 import org.apache.commons.lang.StringUtils;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 import org.languagetool.language.Contributor;
 import org.languagetool.tools.StringTools;
 import org.languagetool.tools.Tools;
@@ -41,7 +42,7 @@ import java.util.*;
 public final class RuleOverview {
 
   private static final List<String> LANGUAGES_WITH_NEW_MAINTAINER_NEED = 
-          Arrays.asList("en", "ja", "is", "sv", "lt", "ro", "ml");
+          Arrays.asList("en", "ja", "is", "sv", "lt", "ro", "ml", "nl");
   private static final List<String> LANGUAGES_WITH_CO_MAINTAINER_NEED = 
           Arrays.asList("da", "be", "zh", "gl");
 
@@ -142,8 +143,7 @@ public final class RuleOverview {
       // false friends:
       final int count = countFalseFriendRules(falseFriendRules, lang);
       System.out.print("<td valign=\"top\" align=\"right\">" + count + "</td>");
-      //System.out.print("<td valign=\"top\">" + (isAutoDetected(lang.getShortName()) ? "yes" : "-") + "</td>");
-      
+
       // activity:
       int commits = activity.getActivityFor(lang, 365/2);
       int width = (int) Math.max(commits * 0.5, 1);
@@ -156,18 +156,23 @@ public final class RuleOverview {
       System.out.print("<td valign=\"top\" align=\"right\"><span style='display:none'>" + commits + "</span>" + images + "</td>");
       
       // maintainer information:
-      final StringBuilder maintainerInfo = getMaintainerInfo(lang);
-      final String maintainerText;
+      String maintainerInfo = getMaintainerInfo(lang);
+      String maintainerText;
+      boolean greyOutMaintainer = false;
       if (langCode.equals("pt")) {
-        maintainerText = " - <span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for a maintainer for Brazilian Portuguese</a></span>";
+        maintainerText = "<span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for a maintainer for Brazilian Portuguese</a></span> - ";
       } else if (LANGUAGES_WITH_NEW_MAINTAINER_NEED.contains(langCode)) {
-        maintainerText = " - <span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for new maintainer</a></span>";
+        maintainerText = "<span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for new maintainer</a></span> - ";
+        greyOutMaintainer = true;
       } else if (LANGUAGES_WITH_CO_MAINTAINER_NEED.contains(langCode)) {
-        maintainerText = " - <span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for co-maintainer</a></span>";
+        maintainerText = "<span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for co-maintainer</a></span> - ";
       } else {
         maintainerText = "";
       }
-      System.out.print("<td valign=\"top\" align=\"left\">" + maintainerInfo.toString() + maintainerText + "</td>");
+      if (greyOutMaintainer) {
+        maintainerInfo = "<span class='previousMaintainer'><br>previous maintainer: " + maintainerInfo + "</span>";
+      }
+      System.out.print("<td valign=\"top\" align=\"left\">" + maintainerText + maintainerInfo + "</td>");
       
       System.out.println("</tr>");    
     }
@@ -211,13 +216,8 @@ public final class RuleOverview {
   }
 
   private List<Language> getSortedLanguages() {
-    final List<Language> sortedLanguages = Arrays.asList(Language.REAL_LANGUAGES);
-    Collections.sort(sortedLanguages, new Comparator<Language>() {
-      @Override
-      public int compare(Language o1, Language o2) {
-        return o1.getName().compareTo(o2.getName());
-      }
-    });
+    final List<Language> sortedLanguages = new ArrayList<>(Languages.get());
+    Collections.sort(sortedLanguages, (o1, o2) -> o1.getName().compareTo(o2.getName()));
     return sortedLanguages;
   }
 
@@ -260,7 +260,7 @@ public final class RuleOverview {
     return count;
   }
 
-  private StringBuilder getMaintainerInfo(Language lang) {
+  private String getMaintainerInfo(Language lang) {
     final StringBuilder maintainerInfo = new StringBuilder();
     if (lang.getMaintainers() != null) {
       for (Contributor contributor : lang.getMaintainers()) {
@@ -276,30 +276,16 @@ public final class RuleOverview {
         if (contributor.getUrl() != null) {
           maintainerInfo.append("</a>");
         }
-        if (contributor.getRemark() != null) {
-          maintainerInfo.append("&nbsp;(" + contributor.getRemark() + ")");
-        }
       }
     }
-    return maintainerInfo;
+    return maintainerInfo.toString();
   }
 
-  /*private boolean isAutoDetected(String code) {
-    if (LanguageIdentifier.getSupportedLanguages().contains(code)) {
-      return true;
-    }
-    final Set<String> additionalCodes = new HashSet<String>(Arrays.asList(LanguageIdentifierTools.ADDITIONAL_LANGUAGES));
-    if (additionalCodes.contains(code)) {
-      return true;
-    }
-    return false;
-  }*/
-
-  private class JavaFilter implements FileFilter {
+  private static class JavaFilter implements FileFilter {
 
     private final String langName;
 
-    public JavaFilter(String langName) {
+    JavaFilter(String langName) {
       this.langName = langName;
     }
 

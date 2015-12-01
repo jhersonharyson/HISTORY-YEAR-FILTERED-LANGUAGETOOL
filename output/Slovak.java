@@ -23,7 +23,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
 
+import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.databroker.ResourceDataBroker;
 import org.languagetool.rules.*;
 import org.languagetool.rules.sk.CompoundRule;
 import org.languagetool.rules.sk.MorfologikSlovakSpellerRule;
@@ -36,19 +38,17 @@ import org.languagetool.tokenizers.SentenceTokenizer;
 
 public class Slovak extends Language {
 
+  private static final List<String> RULE_FILES = Arrays.asList(
+    "grammar-typography.xml"
+  );
+
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
   private Synthesizer synthesizer;
-  private String name = "Slovak";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Slovak";
   }
 
   @Override
@@ -61,16 +61,6 @@ public class Slovak extends Language {
     return new String[]{"SK"};
   }
 
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "„", "»", "«", "\"" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "“", "«", "»", "\"" };
-  }
-  
   @Override
   public Tagger getTagger() {
     if (tagger == null) {
@@ -97,9 +87,9 @@ public class Slovak extends Language {
   
   @Override
   public Contributor[] getMaintainers() {
-    Contributor contributor = new Contributor("Zdenko Podobný");
-    contributor.setUrl("http://sk-spell.sk.cx");
-    return new Contributor[] { contributor };
+    return new Contributor[] {
+            new Contributor("Zdenko Podobný", "http://sk-spell.sk.cx")
+    };
   }
 
   @Override
@@ -107,7 +97,9 @@ public class Slovak extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "„", "»", "«", "\""),
+                    Arrays.asList("]", ")", "}", "“", "«", "»", "\"")),
             new UppercaseSentenceStartRule(messages, this),
             new WordRepeatRule(messages, this),
             new MultipleWhitespaceRule(messages, this),
@@ -116,6 +108,17 @@ public class Slovak extends Language {
             new MorfologikSlovakSpellerRule(messages, this)
             //new SlovakVesRule(messages)
     );
+  }
+
+  @Override
+  public List<String> getRuleFileNames() {
+    List<String> ruleFileNames = super.getRuleFileNames();
+    ResourceDataBroker dataBroker = JLanguageTool.getDataBroker();
+    String dirBase = dataBroker.getRulesDir() + "/" + getShortName() + "/";
+    for (String ruleFile : RULE_FILES) {
+      ruleFileNames.add(dirBase + ruleFile);
+    }
+    return ruleFileNames;
   }
 
 }

@@ -24,17 +24,14 @@ import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.BytesRef;
 import org.languagetool.JLanguageTool;
-import org.languagetool.languagemodel.LuceneLanguageModel;
-import org.languagetool.rules.ConfusionProbabilityRule;
+import org.languagetool.languagemodel.LuceneSingleIndexLanguageModel;
+import org.languagetool.rules.ConfusionSet;
 import org.languagetool.rules.ConfusionSetLoader;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Dump the occurrences of homophone 3grams to STDOUT. Useful to have a more
@@ -43,7 +40,7 @@ import java.util.Set;
  * thus slow.
  * @since 2.8
  */
-class HomophoneOccurrenceDumper extends LuceneLanguageModel {
+class HomophoneOccurrenceDumper extends LuceneSingleIndexLanguageModel {
 
   private static final int MIN_COUNT = 1000;
 
@@ -67,7 +64,7 @@ class HomophoneOccurrenceDumper extends LuceneLanguageModel {
         if (term.contains(" " + token + " ")) {
           String[] split = term.split(" ");
           if (split.length == 3) {
-            long count = getCount(split[0], split[1], split[2]);
+            long count = getCount(Arrays.asList(split[0], split[1], split[2]));
             result.put(term, count);
           }
         }
@@ -79,11 +76,11 @@ class HomophoneOccurrenceDumper extends LuceneLanguageModel {
     return result;
   }
 
-  private void run(String homophonePath) throws IOException {
-    System.err.println("Loading homophones from " + homophonePath + ", minimum occurrence: " + MIN_COUNT);
+  private void run(String confusionSetPath) throws IOException {
+    System.err.println("Loading confusion sets from " + confusionSetPath + ", minimum occurrence: " + MIN_COUNT);
     ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader();
-    InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(homophonePath);
-    Map<String,ConfusionProbabilityRule.ConfusionSet> map = confusionSetLoader.loadConfusionSet(inputStream);
+    InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(confusionSetPath);
+    Map<String,List<ConfusionSet>> map = confusionSetLoader.loadConfusionSet(inputStream);
     Set<String> confusionTerms = map.keySet();
     dumpOccurrences(confusionTerms);
   }
@@ -99,7 +96,7 @@ class HomophoneOccurrenceDumper extends LuceneLanguageModel {
       if (split.length == 3) {
         String token = split[1];
         if (tokens.contains(token)) {
-          long count = getCount(split[0], split[1], split[2]);
+          long count = getCount(Arrays.asList(split[0], split[1], split[2]));
           if (count >= MIN_COUNT) {
             System.out.println(token + "\t" + count + "\t" + split[0] + " " + split[1] + " " + split[2]);
           }
@@ -116,7 +113,7 @@ class HomophoneOccurrenceDumper extends LuceneLanguageModel {
     LuceneSearcher luceneSearcher = getLuceneSearcher(3);
     Fields fields = MultiFields.getFields(luceneSearcher.getReader());
     Terms terms = fields.terms("ngram");
-    return terms.iterator(null);
+    return terms.iterator();
   }
 
   public static void main(String[] args) throws IOException {
@@ -124,7 +121,13 @@ class HomophoneOccurrenceDumper extends LuceneLanguageModel {
       System.out.println("Usage: " + HomophoneOccurrenceDumper.class.getSimpleName() + " <indexDir>");
       System.exit(1);
     }
-    HomophoneOccurrenceDumper dumper = new HomophoneOccurrenceDumper(new File(args[0]));
-    dumper.run("/en/homophones.txt");
+    try (HomophoneOccurrenceDumper dumper = new HomophoneOccurrenceDumper(new File(args[0]))) {
+      dumper.run("/en/confusion_sets.txt");
+    }
+  }
+
+  @Override
+  public long getTotalTokenCount() {
+    throw new RuntimeException("not implemented");
   }
 }

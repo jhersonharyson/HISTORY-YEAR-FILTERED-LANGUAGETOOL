@@ -25,6 +25,7 @@ import java.util.List;
 import junit.framework.TestCase;
 
 import org.languagetool.JLanguageTool;
+import org.languagetool.TestTools;
 import org.languagetool.language.German;
 import org.languagetool.rules.RuleMatch;
 
@@ -41,19 +42,11 @@ public class AgreementRuleTest extends TestCase {
   
   @Override
   public void setUp() throws IOException {
-    rule = new AgreementRule(null, new German());
+    rule = new AgreementRule(TestTools.getMessages("de"), new German());
     langTool = new JLanguageTool(new German());
   }
   
   public void testDetNounRule() throws IOException {
-
-    /* debugging:
-    RuleMatch[] rm = rule.match(langTool.getAnalyzedSentence("Wer für die Kosten"));
-    System.err.println(rm[0]);
-    if (true)
-      return;
-    */
-
     // correct sentences:
     assertGood("So ist es in den USA.");
     assertGood("Das ist der Tisch.");
@@ -73,6 +66,20 @@ public class AgreementRuleTest extends TestCase {
     assertGood("Sie erreichten 5 Prozent.");
     assertGood("Sie erreichten mehrere Prozent Zustimmung.");
     assertGood("Die Bestandteile, aus denen Schwefel besteht.");
+    assertGood("Ich tat für ihn, was kein anderer Autor für ihn tat.");
+    assertGood("Ich tat für ihn, was keine andere Autorin für ihn tat.");
+    assertGood("Ich tat für ihn, was kein anderes Kind für ihn tat.");
+    assertGood("Ich tat für ihn, was dieser andere Autor für ihn tat.");
+    assertGood("Ich tat für ihn, was diese andere Autorin für ihn tat.");
+    assertGood("Ich tat für ihn, was dieses andere Kind für ihn tat.");
+    assertGood("Ich tat für ihn, was jener andere Autor für ihn tat.");
+    assertGood("Ich tat für ihn, was jeder andere Autor für ihn tat.");
+    assertGood("Ich tat für ihn, was jede andere Autorin für ihn tat.");
+    assertGood("Ich tat für ihn, was jedes andere Kind für ihn tat.");
+    assertGood("Klebe ein Preisschild auf jedes einzelne Produkt.");
+    assertGood("Eine Stadt, in der zurzeit eine rege Bautätigkeit herrscht.");
+    assertGood("... wo es zu einer regen Bautätigkeit kam.");
+    assertGood("Mancher ausscheidende Politiker hinterlässt eine Lücke.");
 
     assertGood("Das Dach von meinem Auto.");
     assertGood("Das Dach von meinen Autos.");
@@ -120,6 +127,8 @@ public class AgreementRuleTest extends TestCase {
     assertGood("Der Mann, in dem quadratische Fische schwammen.");
     assertGood("Der Mann, durch den quadratische Fische schwammen.");
     assertGood("Gutenberg, der quadratische Mann.");
+    assertGood("Die größte Stuttgarter Grünanlage ist der Friedhof.");
+    assertGood("Die meisten Lebensmittel enthalten das.");  // Lebensmittel has NOG as gender in Morphy
     // TODO: not detected, because "die" is considered a relative pronoun:
     //assertBad("Gutenberg, die Genie.");
     
@@ -181,6 +190,26 @@ public class AgreementRuleTest extends TestCase {
     
     assertBad("Ich habe einen Feder gefunden.", "eine Feder", "einer Feder");
 
+    assertGood("Wenn die Gott zugeschriebenen Eigenschaften stimmen, dann...");
+    assertGood("Dieses Grünkern genannte Getreide ist aber nicht backbar.");
+    assertGood("Außerdem unterstützt mich Herr Müller beim abheften");
+    assertGood("Außerdem unterstützt mich Frau Müller beim abheften");
+    assertBad("Der Zustand meiner Gehirns.");
+    
+    assertBad("Ich gebe dir ein kleine Kaninchen.");
+    assertBad("Ich gebe dir ein kleinen Kaninchen.");
+    assertBad("Ich gebe dir ein kleinem Kaninchen.");
+    assertBad("Ich gebe dir ein kleiner Kaninchen.");
+    //assertBad("Ich gebe dir ein klein Kaninchen.");  // already detected by MEIN_KLEIN_HAUS
+    assertGood("Ich gebe dir ein kleines Kaninchen.");
+
+    assertBad("Ich gebe dir das kleinen Kaninchen.");
+    assertBad("Ich gebe dir das kleinem Kaninchen.");
+    assertBad("Ich gebe dir das kleiner Kaninchen.");
+    //assertBad("Ich gebe dir das kleines Kaninchen.");  // already detected by ART_ADJ_SOL
+    //assertBad("Ich gebe dir das klein Kaninchen.");  // already detected by MEIN_KLEIN_HAUS
+    assertGood("Ich gebe dir das kleine Kaninchen.");
+
     // TODO: not yet detected:
     //assertBad("Erst recht wir fleißiges Arbeiter.");
     //assertBad("Erst recht ich fleißiges Arbeiter.");
@@ -220,11 +249,10 @@ public class AgreementRuleTest extends TestCase {
   }
   
   public void testRegression() throws IOException {
-      JLanguageTool gramCheckerEngine = new JLanguageTool(new German());
-      gramCheckerEngine.activateDefaultPatternRules();
+      JLanguageTool lt = new JLanguageTool(new German());
       // used to be not detected > 1.0.1:
       String str = "Und so.\r\nDie Bier.";
-      List<RuleMatch> matches = gramCheckerEngine.check(str);
+      List<RuleMatch> matches = lt.check(str);
       assertEquals(1, matches.size());
   }
   

@@ -26,12 +26,17 @@ import org.languagetool.language.German;
 import org.languagetool.rules.Category;
 import org.languagetool.rules.Example;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.patterns.PatternToken;
+import org.languagetool.rules.patterns.PatternTokenBuilder;
 import org.languagetool.tagging.de.GermanTagger;
 import org.languagetool.tagging.de.GermanToken;
 import org.languagetool.tagging.de.GermanToken.POSType;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.languagetool.tools.StringTools;
 
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -51,16 +56,45 @@ public class CaseRule extends GermanRule {
   // wenn hinter diesen Wörtern ein Verb steht, ist es wohl ein substantiviertes Verb,
   // muss also groß geschrieben werden:
   private static final Set<String> nounIndicators = new HashSet<>();
+  
+  // also see case_rule_exception.txt:
+  private static final List<List<PatternToken>> ANTI_PATTERNS = Arrays.asList(
+    Arrays.asList(
+      regex("Vereinigte[ns]?"),
+      regex("Staaten|Königreiche?s?")
+    ),
+    Arrays.asList(
+      token("Hin"),
+      token("und"),
+      token("Her")
+    ),
+    Arrays.asList(
+      // "... weshalb ihr das wissen wollt."
+      pos("VER:INF:NON"),
+      pos("VER:MOD:2:PLU:PRÄ")
+    )
+  );
+
+  private static PatternToken token(String token) {
+    return new PatternTokenBuilder().tokenRegex(token).build();
+  }
+
+  private static PatternToken regex(String regex) {
+    return new PatternTokenBuilder().tokenRegex(regex).build();
+  }
+
+  private static PatternToken pos(String posTag) {
+    return new PatternTokenBuilder().pos(posTag).build();
+  }
+
   static {
     nounIndicators.add("das");
     nounIndicators.add("sein");
-    //indicator.add("seines");    // TODO: ?
-    //nounIndicators.add("ihr");    // would cause false alarm e.g. "Auf ihr stehen die Ruinen..."
+    //nounIndicators.add("ihr");    // would cause false alarm e.g. "Auf ihr stehen die Ruinen...", "Ich dachte, dass ihr kommen würdet.", "Ich verdanke ihr meinen Erfolg."
     nounIndicators.add("mein");
     nounIndicators.add("dein");
     nounIndicators.add("euer");
-    //indicator.add("ihres");
-    //indicator.add("ihren");
+    nounIndicators.add("unser");
   }
   
   private static final Set<String> sentenceStartExceptions = new HashSet<>();
@@ -75,213 +109,217 @@ public class CaseRule extends GermanRule {
     sentenceStartExceptions.add("»");
     sentenceStartExceptions.add(".");
   }
-  
-  private static final Set<String> exceptions = new HashSet<>();
-  static {
-    /*
-     * These are words that Morphy only knows as non-nouns. The proper
-     * solution is to add all those to our Morphy data, but as a simple
-     * workaround to avoid false alarms, these words can be added here.
-     */
-    exceptions.add("Beschäftigter");
-    exceptions.add("Beschäftigte");
-    exceptions.add("Beschäftigten");
-    exceptions.add("Üblichen");
-    exceptions.add("Bekannter");
-    exceptions.add("Bekannte");
-    exceptions.add("Tel");  // Tel. = Telefon
-    exceptions.add("Unschuldiger");
-    exceptions.add("Vorgesetzter");
-    exceptions.add("Abs");   // Abs. = Abkürzung für Absatz, Absender, ...
-    exceptions.add("Klappe");
-    exceptions.add("Vorfahre");
-    exceptions.add("Mittler");
-    exceptions.add("Hr");   // Hr. = Abkürzung für Herr
-    exceptions.add("Schwarz");
-    exceptions.add("Genese");
-    exceptions.add("Rosa");
-    exceptions.add("Auftrieb");
-    exceptions.add("Zuschnitt");
-    exceptions.add("Geschossen");
-    exceptions.add("Vortrieb");
-    exceptions.add("Abtrieb");
-    exceptions.add("Gesandter");
-    exceptions.add("Durchfahrt");
-    exceptions.add("Durchgriff");
-    exceptions.add("Überfahrt");
-    exceptions.add("Zeche");
-    exceptions.add("Sparte");
-    exceptions.add("Sparten");
-    exceptions.add("Heiliger");
-    exceptions.add("Reisender");
-    exceptions.add("Hochdeutsch");
-    exceptions.add("Pest");
-    exceptions.add("Schwinge");
-    exceptions.add("Verlies");
-    exceptions.add("Nachfolge");
-    exceptions.add("Stift");
-    exceptions.add("Belange");
-    exceptions.add("Geistlicher");
-    exceptions.add("Jenseits");
-    exceptions.add("Abends");
-    exceptions.add("Abgeordneter");
-    exceptions.add("Angestellter");
-    exceptions.add("Liberaler");
-    exceptions.add("Abriss");
-    exceptions.add("Ahne");
-    exceptions.add("Ähnlichem");
-    exceptions.add("Ähnliches");   // je nach Kontext groß (TODO), z.B. "Er hat Ähnliches erlebt" 
-    exceptions.add("Allerlei");
-    exceptions.add("Anklang");
-    exceptions.add("Anstrich");
-    exceptions.add("Armes");
-    exceptions.add("Aus");    // "vor dem Aus stehen"
-    exceptions.add("Ausdrücke");
-    exceptions.add("Auswüchsen");
-    exceptions.add("Bände");
-    exceptions.add("Bänden");
-    exceptions.add("Beauftragter");
-    exceptions.add("Belange");
-    exceptions.add("besonderes");   // je nach Kontext groß (TODO): "etwas Besonderes" 
-    exceptions.add("Biss");
-    exceptions.add("De");    // "De Morgan" etc
-    exceptions.add("Dr");
-    exceptions.add("Durcheinander");
-    exceptions.add("Eindrücke");
-    exceptions.add("Erwachsener");
-    exceptions.add("Flöße");
-    exceptions.add("Folgendes");   // je nach Kontext groß (TODO)...
-    exceptions.add("Fort");
-    exceptions.add("Fraß");
-    exceptions.add("Für");      // "das Für und Wider"
-    exceptions.add("Genüge");
-    exceptions.add("Gläubiger");
-    exceptions.add("Goldener");    // Goldener Schnitt
-    exceptions.add("Guten");    // das Kap der Guten Hoffnung
-    exceptions.add("Hechte");
-    exceptions.add("Herzöge");
-    exceptions.add("Herzögen");
-    exceptions.add("Hinfahrt");
-    exceptions.add("Hundert");   // je nach Kontext groß (TODO) 
-    exceptions.add("Ihnen");
-    exceptions.add("Ihr");
-    exceptions.add("Ihre");
-    exceptions.add("Ihrem");
-    exceptions.add("Ihren");
-    exceptions.add("Ihrer");
-    exceptions.add("Ihres");
-    exceptions.add("Infrarot");
-    exceptions.add("Jenseits");
-    exceptions.add("Jugendlicher");
-    exceptions.add("Jünger");
-    exceptions.add("Klaue");
-    exceptions.add("Kleine");    // der Kleine Bär
-    exceptions.add("Konditional");
-    exceptions.add("Krähe");
-    exceptions.add("Kurzem");
-    exceptions.add("Landwirtschaft");
-    exceptions.add("Langem");
-    exceptions.add("Längerem");
-    exceptions.add("Las");   // Las Vegas, nicht "lesen"
-    exceptions.add("Le");    // "Le Monde" etc
-    exceptions.add("Letzt");
-    exceptions.add("Letzt");      // "zu guter Letzt"
-    exceptions.add("Letztere");
-    exceptions.add("Letzterer");
-    exceptions.add("Letzteres");
-    exceptions.add("Link");
-    exceptions.add("Links");
-    exceptions.add("Löhne");
-    exceptions.add("Luden");
-    exceptions.add("Mitfahrt");
-    exceptions.add("Mr");
-    exceptions.add("Mrd");
-    exceptions.add("Mrs");
-    exceptions.add("Nachfrage");
-    exceptions.add("Nachts");   // "des Nachts", "eines Nachts"
-    exceptions.add("Nähte");
-    exceptions.add("Nähten");
-    exceptions.add("Neuem");
-    exceptions.add("Nr");
-    exceptions.add("Nutze");   // zu Nutze
-    exceptions.add("Obdachloser");
-    exceptions.add("Oder");   // der Fluss
-    exceptions.add("Patsche");
-    exceptions.add("Pfiffe");
-    exceptions.add("Pfiffen");
-    exceptions.add("Prof");
-    exceptions.add("Puste");
-    exceptions.add("Sachverständiger");
-    exceptions.add("Sankt");
-    exceptions.add("Scheine");
-    exceptions.add("Scheiße");
-    exceptions.add("Schuft");
-    exceptions.add("Schufte");
-    exceptions.add("Schuld");
-    exceptions.add("Schwärme");
-    exceptions.add("Schwarzes");    // Schwarzes Brett
-    exceptions.add("Sie");
-    exceptions.add("Spitz");
-    exceptions.add("St");   // Paris St. Germain
-    exceptions.add("Stereotyp");
-    exceptions.add("Störe");
-    exceptions.add("Tausend");   // je nach Kontext groß (TODO) 
-    exceptions.add("Toter");
-    exceptions.add("tun");   // "Sie müssen das tun"
-    exceptions.add("Übrigen");   // je nach Kontext groß (TODO), z.B. "im Übrigen" 
-    exceptions.add("Unvorhergesehenes");   // je nach Kontext groß (TODO), z.B. "etwas Unvorhergesehenes" 
-    exceptions.add("Verantwortlicher");
-    exceptions.add("Verwandter");
-    exceptions.add("Vielfaches");
-    exceptions.add("Vorsitzender");
-    exceptions.add("Fraktionsvorsitzender");
-    exceptions.add("Weitem");
-    exceptions.add("Weiteres");
-    exceptions.add("Wicht");
-    exceptions.add("Wichtiges");
-    exceptions.add("Wider");    // "das Für und Wider"
-    exceptions.add("Wild");
-    exceptions.add("Zeche");
-    exceptions.add("Zusage");
-    exceptions.add("Zwinge");
-    exceptions.add("Tertiär");  // geologischer Zeitabschnitt
 
-    exceptions.add("Erster");   // "er wurde Erster im Langlauf"
-    exceptions.add("Zweiter");
-    exceptions.add("Dritter");
-    exceptions.add("Vierter");
-    exceptions.add("Fünfter");
-    exceptions.add("Sechster");
-    exceptions.add("Siebter");
-    exceptions.add("Achter");
-    exceptions.add("Neunter");
-    exceptions.add("Erste");   // "sie wurde Erste im Langlauf"
-    exceptions.add("Zweite");
-    exceptions.add("Dritte");
-    exceptions.add("Vierte");
-    exceptions.add("Fünfte");
-    exceptions.add("Sechste");
-    exceptions.add("Siebte");
-    exceptions.add("Achte");
-    exceptions.add("Neunte");
+  /*
+   * These are words that Morphy only knows as non-nouns (or not at all).
+   * The proper solution is to add all those to our Morphy data, but as a simple
+   * workaround to avoid false alarms, these words can be added here.
+   */
+  private static final Set<String> exceptions = new HashSet<>(Arrays.asList(
+    "Genaueres",
+    "Äußersten",
+    "Dienstreisender",
+    "Verletzte",
+    "Vermisste",
+    "Äußeres",
+    "Abseits",
+    "Beschäftigter",
+    "Beschäftigte",
+    "Beschäftigten",
+    "Üblichen",
+    "Bekannter",
+    "Bekannte",
+    "Tel",  // Tel. = Telefon
+    "Unschuldiger",
+    "Vorgesetzter",
+    "Abs",   // Abs. = Abkürzung für Absatz, Absender, ...
+    "Klappe",
+    "Vorfahre",
+    "Mittler",
+    "Hr",   // Hr. = Abkürzung für Herr
+    "Schwarz",
+    "Genese",
+    "Rosa",
+    "Auftrieb",
+    "Zuschnitt",
+    "Geschossen",
+    "Vortrieb",
+    "Abtrieb",
+    "Gesandter",
+    "Durchfahrt",
+    "Durchgriff",
+    "Überfahrt",
+    "Zeche",
+    "Sparte",
+    "Sparten",
+    "Heiliger",
+    "Reisender",
+    "Hochdeutsch",
+    "Pest",
+    "Schwinge",
+    "Verlies",
+    "Nachfolge",
+    "Stift",
+    "Belange",
+    "Geistlicher",
+    "Jenseits",
+    "Abends",
+    "Abgeordneter",
+    "Angestellter",
+    "Liberaler",
+    "Abriss",
+    "Ahne",
+    "Ähnlichem",
+    "Ähnliches",   // je nach Kontext groß (TODO), z.B. "Er hat Ähnliches erlebt" 
+    "Allerlei",
+    "Anklang",
+    "Anstrich",
+    "Armes",
+    "Aus",    // "vor dem Aus stehen"
+    "Ausdrücke",
+    "Auswüchsen",
+    "Bände",
+    "Bänden",
+    "Beauftragter",
+    "Belange",
+    "besonderes",   // je nach Kontext groß (TODO): "etwas Besonderes" 
+    "Biss",
+    "De",    // "De Morgan" etc
+    "Dr",
+    "Durcheinander",
+    "Eindrücke",
+    "Erwachsener",
+    "Flöße",
+    "Folgendes",   // je nach Kontext groß (TODO)...
+    "Fort",
+    "Fraß",
+    "Für",      // "das Für und Wider"
+    "Genüge",
+    "Gläubiger",
+    "Goldener",    // Goldener Schnitt
+    "Guten",    // das Kap der Guten Hoffnung
+    "Hechte",
+    "Herzöge",
+    "Herzögen",
+    "Hinfahrt",
+    "Hundert",   // je nach Kontext groß (TODO) 
+    "Ihnen",
+    "Ihr",
+    "Ihre",
+    "Ihrem",
+    "Ihren",
+    "Ihrer",
+    "Ihres",
+    "Infrarot",
+    "Jenseits",
+    "Jugendlicher",
+    "Jünger",
+    "Klaue",
+    "Konditional",
+    "Krähe",
+    "Kurzem",
+    "Landwirtschaft",
+    "Langem",
+    "Längerem",
+    "Le",    // "Le Monde" etc
+    "Letzt",
+    "Letzt",      // "zu guter Letzt"
+    "Letztere",
+    "Letzterer",
+    "Letzteres",
+    "Link",
+    "Links",
+    "Löhne",
+    "Luden",
+    "Mitfahrt",
+    "Mr",
+    "Mrd",
+    "Mrs",
+    "Nachfrage",
+    "Nachts",   // "des Nachts", "eines Nachts"
+    "Nähte",
+    "Nähten",
+    "Neuem",
+    "Nr",
+    "Nutze",   // zu Nutze
+    "Obdachloser",
+    "Oder",   // der Fluss
+    "Patsche",
+    "Pfiffe",
+    "Pfiffen",
+    "Prof",
+    "Puste",
+    "Sachverständiger",
+    "Sankt",
+    "Scheine",
+    "Scheiße",
+    "Schuft",
+    "Schufte",
+    "Schuld",
+    "Schwärme",
+    "Schwarzes",    // Schwarzes Brett
+    "Sie",
+    "Spitz",
+    "St",   // Paris St. Germain
+    "Stereotyp",
+    "Störe",
+    "Tausend",   // je nach Kontext groß (TODO) 
+    "Toter",
+    "tun",   // "Sie müssen das tun"
+    "Übrigen",   // je nach Kontext groß (TODO), z.B. "im Übrigen" 
+    "Unvorhergesehenes",   // je nach Kontext groß (TODO), z.B. "etwas Unvorhergesehenes" 
+    "Verantwortlicher",
+    "Verwandter",
+    "Vielfaches",
+    "Vorsitzender",
+    "Fraktionsvorsitzender",
+    "Weitem",
+    "Weiteres",
+    "Wicht",
+    "Wichtiges",
+    "Wider",    // "das Für und Wider"
+    "Wild",
+    "Zeche",
+    "Zusage",
+    "Zwinge",
+    "Tertiär",  // geologischer Zeitabschnitt
+
+    "Erster",   // "er wurde Erster im Langlauf"
+    "Zweiter",
+    "Dritter",
+    "Vierter",
+    "Fünfter",
+    "Sechster",
+    "Siebter",
+    "Achter",
+    "Neunter",
+    "Erste",   // "sie wurde Erste im Langlauf"
+    "Zweite",
+    "Dritte",
+    "Vierte",
+    "Fünfte",
+    "Sechste",
+    "Siebte",
+    "Achte",
+    "Neunte",
 
     // Änderungen an der Rechtschreibreform 2006 erlauben hier Großschreibung:
-    exceptions.add("Dein");
-    exceptions.add("Deine");
-    exceptions.add("Deinem");
-    exceptions.add("Deinen");
-    exceptions.add("Deiner");
-    exceptions.add("Deines");
-    exceptions.add("Dich");
-    exceptions.add("Dir");
-    exceptions.add("Du");
-    exceptions.add("Euch");
-    exceptions.add("Euer");
-    exceptions.add("Eure");
-    exceptions.add("Eurem");
-    exceptions.add("Euren");
-    exceptions.add("Eures");
-  }
+    "Dein",
+    "Deine",
+    "Deinem",
+    "Deinen",
+    "Deiner",
+    "Deines",
+    "Dich",
+    "Dir",
+    "Du",
+    "Euch",
+    "Euer",
+    "Eure",
+    "Eurem",
+    "Euren",
+    "Eures"
+  ));
   
   private static final Set<String> languages = new HashSet<>();
     static {
@@ -336,102 +374,12 @@ public class CaseRule extends GermanRule {
     languages.add("Weißrussisch");
   }
   
-  private static final Set<String> myExceptionPhrases = new HashSet<>();
-  static {
-    // use proper upper/lowercase spelling here:
-    myExceptionPhrases.add("Arabische Halbinsel");
-    myExceptionPhrases.add("Arabischen Halbinsel");
-    myExceptionPhrases.add("Naher Osten");
-    myExceptionPhrases.add("Nahen Osten");
-    myExceptionPhrases.add("Mittlerer Osten");
-    myExceptionPhrases.add("Mittleren Osten");
-    myExceptionPhrases.add("Ferne Osten");
-    myExceptionPhrases.add("Fernen Osten");
-    myExceptionPhrases.add("Ferner Osten");
-    myExceptionPhrases.add("Europäische Union");
-    myExceptionPhrases.add("Europäischen Union");
-    myExceptionPhrases.add("Russische Föderation");
-    myExceptionPhrases.add("Russischen Föderation");
-    myExceptionPhrases.add("Internationaler Währungsfonds");
-    myExceptionPhrases.add("Internationale Währungsfonds");
-    myExceptionPhrases.add("Internationalen Währungsfonds");
-    myExceptionPhrases.add("Japanische Meer");
-    myExceptionPhrases.add("Japanisches Meer");
-    myExceptionPhrases.add("Japanischen Meer");
-    myExceptionPhrases.add("Japanische Alpen");  // http://www.duden.de/sprachwissen/rechtschreibregeln/namen#K140
-    myExceptionPhrases.add("Japanischen Alpen");
-    myExceptionPhrases.add("Chinesische Mauer");
-    myExceptionPhrases.add("Chinesischen Mauer");
-    myExceptionPhrases.add("Französische Revolution");
-    myExceptionPhrases.add("Französischen Revolution");
-    myExceptionPhrases.add("Süddeutsche Zeitung");
-    myExceptionPhrases.add("Süddeutschen Zeitung");
-    myExceptionPhrases.add("nichts Wichtigeres");
-    myExceptionPhrases.add("nichts Schöneres");
-    myExceptionPhrases.add("ohne Wenn und Aber");
-    myExceptionPhrases.add("Große Koalition");
-    myExceptionPhrases.add("Großen Koalition");
-    myExceptionPhrases.add("Alexander der Große");
-    myExceptionPhrases.add("Großer Bär");  // Sternbild
-    myExceptionPhrases.add("Große Bär");  // Sternbild
-    myExceptionPhrases.add("im Großen und Ganzen");
-    myExceptionPhrases.add("Im Großen und Ganzen");
-    myExceptionPhrases.add("im Guten wie im Schlechten");
-    myExceptionPhrases.add("Im Guten wie im Schlechten");
-    myExceptionPhrases.add("Russisches Reich");
-    myExceptionPhrases.add("Russischen Reich");
-    myExceptionPhrases.add("Russischen Reichs");
-    myExceptionPhrases.add("Russischen Reiches");
-    myExceptionPhrases.add("Tel Aviv");
-    myExceptionPhrases.add("Dreißigjährige Krieg");
-    myExceptionPhrases.add("Dreißigjährigen Kriegs");
-    myExceptionPhrases.add("Dreißigjährigen Krieges");
-    myExceptionPhrases.add("Erster Weltkrieg");
-    myExceptionPhrases.add("Ersten Weltkriegs");
-    myExceptionPhrases.add("Ersten Weltkrieg");
-    myExceptionPhrases.add("Ersten Weltkrieges");
-    myExceptionPhrases.add("Erstem Weltkrieg");
-    myExceptionPhrases.add("Zweiter Weltkrieg");
-    myExceptionPhrases.add("Zweiten Weltkrieg");
-    myExceptionPhrases.add("Zweiten Weltkriegs");
-    myExceptionPhrases.add("Zweiten Weltkrieges");
-    myExceptionPhrases.add("Zweitem Weltkrieg");
-    myExceptionPhrases.add("Vielfaches");
-    myExceptionPhrases.add("Auswärtiges Amt");
-    myExceptionPhrases.add("Auswärtigen Amt");
-    myExceptionPhrases.add("Auswärtigen Amts");
-    myExceptionPhrases.add("Auswärtigen Amtes");
-    myExceptionPhrases.add("Bürgerliches Gesetzbuch");
-    myExceptionPhrases.add("Bürgerlichen Gesetzbuch");
-    myExceptionPhrases.add("Bürgerlichen Gesetzbuchs");
-    myExceptionPhrases.add("Bürgerlichen Gesetzbuches");
-    myExceptionPhrases.add("Haute Couture");
-    myExceptionPhrases.add("aus dem Nichts");
-    myExceptionPhrases.add("Kleiner Bär");   // das Sternbild
-    myExceptionPhrases.add("Zehn Gebote");
-    myExceptionPhrases.add("Heiliges Römisches Reich");
-    myExceptionPhrases.add("Heilige Römische Reich");
-    myExceptionPhrases.add("Römische Reich Deutscher Nation");
-    myExceptionPhrases.add("ein absolutes Muss");
-    myExceptionPhrases.add("ein Muss");
-    myExceptionPhrases.add("nichts Neues");
-    myExceptionPhrases.add("etwas Neues");
-    myExceptionPhrases.add("kaum Neues");
-    myExceptionPhrases.add("wenig Neues");
-    myExceptionPhrases.add("viel Neues");
-    myExceptionPhrases.add("Vereinigte Staaten");
-    myExceptionPhrases.add("Vereinigten Staaten");
-    myExceptionPhrases.add("Vereinten Nationen");
-    myExceptionPhrases.add("im Weiteren");
-    myExceptionPhrases.add("Im Weiteren");
-    myExceptionPhrases.add("Roter Riese");
-    myExceptionPhrases.add("Roten Riesen");
-    myExceptionPhrases.add("als Erstes");  // aber: als erstes Kind...
-    myExceptionPhrases.add("Als Erstes");
-  }
+  private static final Set<String> myExceptionPhrases = CaseRuleExceptions.getExceptions();
 
   private static final Set<String> substVerbenExceptions = new HashSet<>();
   static {
+    substVerbenExceptions.add("hinziehen");
+    substVerbenExceptions.add("helfen");
     substVerbenExceptions.add("lassen");
     substVerbenExceptions.add("passieren");  // "das Schlimmste, das passieren könnte"
     substVerbenExceptions.add("machen");  // "Du kannst das machen."
@@ -470,11 +418,11 @@ public class CaseRule extends GermanRule {
   }
 
   private final GermanTagger tagger;
-  
+  private final German german;
+
   public CaseRule(final ResourceBundle messages, final German german) {
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_case")));
-    }
+    this.german = german;
+    super.setCategory(new Category(messages.getString("category_case")));
     this.tagger = (GermanTagger) german.getTagger();
     addExamplePair(Example.wrong("<marker>Das laufen</marker> fällt mir schwer."),
                    Example.fixed("<marker>Das Laufen</marker> fällt mir schwer."));
@@ -486,6 +434,15 @@ public class CaseRule extends GermanRule {
   }
 
   @Override
+  public URL getUrl() {
+    try {
+      return new URL("http://www.canoo.net/services/GermanSpelling/Regeln/Gross-klein/index.html");
+    } catch (MalformedURLException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  @Override
   public String getDescription() {
     return "Großschreibung von Nomen und substantivierten Verben";
   }
@@ -493,7 +450,7 @@ public class CaseRule extends GermanRule {
   @Override
   public RuleMatch[] match(final AnalyzedSentence sentence) throws IOException {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
+    final AnalyzedTokenReadings[] tokens = getSentenceWithImmunization(sentence).getTokensWithoutWhitespace();
     
     boolean prevTokenIsDas = false;
     for (int i = 0; i < tokens.length; i++) {
@@ -503,7 +460,7 @@ public class CaseRule extends GermanRule {
         continue;
       }
       if (i == 1) {   // don't care about first word, UppercaseSentenceStartRule does this already
-        if (nounIndicators.contains(tokens[i].getToken().toLowerCase())) {
+        if (nounIndicators.contains(tokens[1].getToken().toLowerCase())) {
           prevTokenIsDas = true;
         }
         continue;
@@ -513,31 +470,34 @@ public class CaseRule extends GermanRule {
       }
       final AnalyzedTokenReadings analyzedToken = tokens[i];
       final String token = analyzedToken.getToken();
-      List<AnalyzedToken> readings = analyzedToken.getReadings();
-      
+
+      markLowerCaseNounErrors(ruleMatches, tokens, i, analyzedToken);
+
       boolean isBaseform = analyzedToken.getReadingsLength() >= 1 && analyzedToken.hasLemma(token);
-      if ((readings == null || analyzedToken.getAnalyzedToken(0).getPOSTag() == null || GermanHelper.hasReadingOfType(analyzedToken, GermanToken.POSType.VERB))
+      if ((analyzedToken.getAnalyzedToken(0).getPOSTag() == null || GermanHelper.hasReadingOfType(analyzedToken, GermanToken.POSType.VERB))
           && isBaseform) {
-        // no match, e.g. for "Groß": try if there's a match for the lowercased word:
-        AnalyzedTokenReadings lowercaseReadings = tagger.lookup(token.toLowerCase());
-        if (lowercaseReadings != null) {
-          readings = lowercaseReadings.getReadings();
-        }
         boolean nextTokenIsPersonalPronoun = false;
         if (i < tokens.length - 1) {
           // avoid false alarm for "Das haben wir getan." etc:
           nextTokenIsPersonalPronoun = tokens[i + 1].hasPartialPosTag("PRO:PER") || tokens[i + 1].getToken().equals("Sie");
+          if (tokens[i + 1].hasLemma("lassen")) {
+            // avoid false alarm for "Ihr sollt mich das wissen lassen."
+            continue;
+          }
+          if (tokens[i + 1].isSentenceEnd()) {
+            // avoid false alarm for "So sollte das funktionieren." (might also remove true alarms...)
+            continue;
+          }
+        }
+        if (isPrevProbablyRelativePronoun(tokens, i)) {
+          continue;
         }
         potentiallyAddLowercaseMatch(ruleMatches, tokens[i], prevTokenIsDas, token, nextTokenIsPersonalPronoun);
       }
       prevTokenIsDas = nounIndicators.contains(tokens[i].getToken().toLowerCase());
-      if (readings == null) {
-        continue;
-      }
       if (hasNounReading(analyzedToken)) {  // it's the spell checker's task to check that nouns are uppercase
         continue;
       }
-      // TODO: this lookup should only happen once:
       AnalyzedTokenReadings lowercaseReadings = tagger.lookup(token.toLowerCase());
       if (analyzedToken.getAnalyzedToken(0).getPOSTag() == null && lowercaseReadings == null) {
         continue;
@@ -551,17 +511,74 @@ public class CaseRule extends GermanRule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  @Override
+  public List<DisambiguationPatternRule> getAntiPatterns() {
+    return makeAntiPatterns(ANTI_PATTERNS, german);
+  }
+
+  private void markLowerCaseNounErrors(List<RuleMatch> ruleMatches, AnalyzedTokenReadings[] tokens, int i, AnalyzedTokenReadings analyzedToken) throws IOException {
+    // commented out, too many false alarms...
+    /*if (i > 0 && i + 1 < tokens.length) {
+      AnalyzedTokenReadings prevToken = tokens[i - 1];
+      AnalyzedTokenReadings nextToken = tokens[i + 1];
+      String prevTokenStr = prevToken.getToken();
+      if (!nextToken.hasPartialPosTag("SUB:") &&
+          !analyzedToken.getToken().matches("bitte|einen|sein|habe") &&
+          !analyzedToken.hasPartialPosTag("ADJ:") &&
+          !prevTokenStr.matches("einen|zu") && 
+          (prevToken.hasPartialPosTag("PRP:") ||
+           prevToken.matchesPosTagRegex("^ART:.*") ||
+           prevToken.getToken().matches("seiner|seine|seinen|seinem|seines"))) {
+        if (!StringTools.startsWithUppercase(analyzedToken.getToken())
+                && analyzedToken.matchesPosTagRegex("^VER:.*") 
+                && !analyzedToken.matchesPosTagRegex("^PA2:.*")) {
+          String ucToken = StringTools.uppercaseFirstChar(analyzedToken.getToken());
+          AnalyzedTokenReadings ucLookup = tagger.lookup(ucToken);
+          if (ucLookup != null && ucLookup.hasPartialPosTag("SUB:")) {
+            String msg = "Wenn '" + analyzedToken.getToken() + "' hier als Nomen benutzt wird, muss es großgeschrieben werden.";
+            RuleMatch ucMatch = new RuleMatch(this, analyzedToken.getStartPos(), analyzedToken.getEndPos(), msg);
+            ucMatch.setSuggestedReplacement(ucToken);
+            ruleMatches.add(ucMatch);
+          }
+        }
+      }
+    }*/
+  }
+
+  // e.g. "Ein Kaninchen, das zaubern kann" - avoid false alarm here
+  //                          ^^^^^^^
+  private boolean isPrevProbablyRelativePronoun(AnalyzedTokenReadings[] tokens, int i) {
+    if (i >= 3) {
+      AnalyzedTokenReadings prev1 = tokens[i-1];
+      AnalyzedTokenReadings prev2 = tokens[i-2];
+      AnalyzedTokenReadings prev3 = tokens[i-3];
+      if (prev1.getToken().equals("das") &&
+          prev2.getToken().equals(",") &&
+          prev3.matchesPosTagRegex("SUB:...:SIN:NEU")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private boolean isSalutation(String token) {
     return token.equals("Herr") || token.equals("Herrn") || token.equals("Frau");
   }
 
   private boolean hasNounReading(AnalyzedTokenReadings readings) {
     // "Die Schöne Tür": "Schöne" also has a noun reading but like "SUB:AKK:SIN:FEM:ADJ", ignore that:
-    for (AnalyzedToken reading : readings) {
-      String posTag = reading.getPOSTag();
-      if (posTag != null && posTag.contains("SUB:") && !posTag.contains(":ADJ")) {
-        return true;
+    try {
+      AnalyzedTokenReadings allReadings = tagger.lookup(readings.getToken());  // unification in disambiguation.xml removes reading, so look up again
+      if (allReadings != null) {
+        for (AnalyzedToken reading : allReadings) {
+          String posTag = reading.getPOSTag();
+          if (posTag != null && posTag.contains("SUB:") && !posTag.contains(":ADJ")) {
+            return true;
+          }
+        }
       }
+    } catch (IOException e) {
+      throw new RuntimeException("Could not lookup " + readings.getToken(), e);
     }
     return false;
   }
@@ -570,10 +587,9 @@ public class CaseRule extends GermanRule {
     if (prevTokenIsDas && !nextTokenIsPersonalPronoun) {
       // e.g. essen -> Essen
       if (Character.isLowerCase(token.charAt(0)) && !substVerbenExceptions.contains(token) && tokenReadings.hasPartialPosTag("VER:INF")
-              && !tokenReadings.isIgnoredBySpeller()) {
+              && !tokenReadings.isIgnoredBySpeller() && !tokenReadings.isImmunized()) {
         final String msg = "Substantivierte Verben werden großgeschrieben.";
-        final RuleMatch ruleMatch = new RuleMatch(this, tokenReadings.getStartPos(),
-            tokenReadings.getStartPos() + token.length(), msg);
+        final RuleMatch ruleMatch = new RuleMatch(this, tokenReadings.getStartPos(), tokenReadings.getEndPos(), msg);
         final String word = tokenReadings.getToken();
         final String fixedWord = StringTools.uppercaseFirstChar(word);
         ruleMatch.setSuggestedReplacement(fixedWord);
@@ -586,9 +602,10 @@ public class CaseRule extends GermanRule {
     if (Character.isUpperCase(token.charAt(0)) &&
         token.length() > 1 &&     // length limit = ignore abbreviations
         !tokens[i].isIgnoredBySpeller() &&
+        !tokens[i].isImmunized() &&
         !sentenceStartExceptions.contains(tokens[i - 1].getToken()) &&
-        !StringTools.isAllUppercase(token) &&
         !exceptions.contains(token) &&
+        !StringTools.isAllUppercase(token) &&
         !isLanguage(i, tokens) &&
         !isProbablyCity(i, tokens) &&
         !GermanHelper.hasReadingOfType(analyzedToken, POSType.PROPER_NOUN) &&
@@ -601,8 +618,7 @@ public class CaseRule extends GermanRule {
         !isAdjectiveAsNoun(i, tokens) &&
         !isExceptionPhrase(i, tokens)) {
       final String msg = "Außer am Satzanfang werden nur Nomen und Eigennamen großgeschrieben";
-      final RuleMatch ruleMatch = new RuleMatch(this, tokens[i].getStartPos(),
-          tokens[i].getStartPos() + token.length(), msg);
+      final RuleMatch ruleMatch = new RuleMatch(this, tokens[i].getStartPos(), tokens[i].getEndPos(), msg);
       final String word = tokens[i].getToken();
       final String fixedWord = Character.toLowerCase(word.charAt(0)) + word.substring(1);
       ruleMatch.setSuggestedReplacement(fixedWord);
@@ -613,13 +629,13 @@ public class CaseRule extends GermanRule {
   // e.g. "a) bla bla"
   private boolean isNumbering(int i, AnalyzedTokenReadings[] tokens) {
     return i >= 2
-            && (tokens[i-1].getToken().equals(")") || (tokens[i-1].getToken().equals("]")))
+            && (tokens[i-1].getToken().equals(")") || tokens[i-1].getToken().equals("]"))
             && NUMERALS_EN.matcher(tokens[i-2].getToken()).matches();
   }
 
   private boolean isEllipsis(int i, AnalyzedTokenReadings[] tokens) {
-    return ( (tokens[i-1].getToken().equals("]") || tokens[i-1].getToken().equals(")")) && // sentence starts with […]
-       ( (i == 4 && tokens[i-2].getToken().equals("…")) || (i == 6 && tokens[i-2].getToken().equals(".")) ) );
+    return (tokens[i-1].getToken().equals("]") || tokens[i-1].getToken().equals(")")) && // sentence starts with […]
+           ((i == 4 && tokens[i-2].getToken().equals("…")) || (i == 6 && tokens[i-2].getToken().equals(".")));
   }
 
   private boolean isNominalization(int i, AnalyzedTokenReadings[] tokens) {
@@ -629,13 +645,22 @@ public class CaseRule extends GermanRule {
     // TODO: wir finden den Fehler in "Die moderne Wissenschaftlich" nicht, weil nicht alle
     // Substantivierungen in den Morphy-Daten stehen (z.B. "Größte" fehlt) und wir deshalb nur
     // eine Abfrage machen, ob der erste Buchstabe groß ist.
-    if (StringTools.startsWithUppercase(token) && !isNumber(token) && !hasNounReading(nextReadings)) {
+    if (StringTools.startsWithUppercase(token) && !isNumber(token) && !hasNounReading(nextReadings) && !token.matches("Alle[nm]")) {
       // Ignore "das Dümmste, was je..." but not "das Dümmste Kind"
       AnalyzedTokenReadings prevToken = i > 0 ? tokens[i-1] : null;
-      AnalyzedTokenReadings prevPrevToken = i > 1 ? tokens[i-2] : null;
-      return (prevToken != null && ("irgendwas".equals(prevToken.getToken()) || "aufs".equals(prevToken.getToken()))) ||
-             hasPartialTag(prevToken, "PRO") ||  // z.B. "etwas Verrücktes"
-             (hasPartialTag(prevPrevToken, "PRO") && hasPartialTag(prevToken, "ADJ", "ADV")); // z.B. "etwas schön Verrücktes"
+      AnalyzedTokenReadings prevPrevToken = i >= 2 ? tokens[i-2] : null;
+      AnalyzedTokenReadings prevPrevPrevToken = i >= 3 ? tokens[i-3] : null;
+      String prevTokenStr = prevToken != null ? prevToken.getToken() : "";
+      if (prevToken != null && ("und".equals(prevTokenStr) || "oder".equals(prevTokenStr))) {
+        if (prevPrevToken != null && tokens[i].hasPartialPosTag("SUB") && tokens[i].hasPartialPosTag(":ADJ")) {
+          // "das dabei Erlernte und Erlebte ist ..." -> 'Erlebte' is correct here
+          return true;
+        }
+      }
+      return (prevToken != null && ("irgendwas".equals(prevTokenStr) || "aufs".equals(prevTokenStr) || "als".equals(prevTokenStr))) ||
+         hasPartialTag(prevToken, "PRO") ||  // "etwas Verrücktes"
+         (hasPartialTag(prevPrevToken, "PRO", "PRP") && hasPartialTag(prevToken, "ADJ", "ADV", "PA2")) ||  // "etwas schön Verrücktes", "mit aufgewühltem Innerem"
+         (hasPartialTag(prevPrevPrevToken, "PRO", "PRP") && hasPartialTag(prevPrevToken, "ADJ", "ADV") && hasPartialTag(prevToken, "ADJ", "ADV", "PA2"));  // "etwas ganz schön Verrücktes"
     }
     return false;
   }
@@ -717,10 +742,10 @@ public class CaseRule extends GermanRule {
   }
 
   private boolean isExceptionPhrase(int i, AnalyzedTokenReadings[] tokens) {
-    for (String exc : myExceptionPhrases) {
-      final String[] parts = exc.split(" ");
+    for (String phrase : myExceptionPhrases) {
+      final String[] parts = phrase.split(" ");
       for (int j = 0; j < parts.length; j++) {
-        if (parts[j].equals(tokens[i].getToken())) {
+        if (tokens[i].getToken().matches(parts[j])) {
           final int startIndex = i-j;
           if (compareLists(tokens, startIndex, startIndex+parts.length-1, parts)) {
             return true;
@@ -741,7 +766,7 @@ public class CaseRule extends GermanRule {
       if (i >= parts.length || j >= tokens.length) {
         return false;
       }
-      if (!tokens[j].getToken().equals(parts[i])) {
+      if (!tokens[j].getToken().matches(parts[i])) {
         return false;
       }
       i++;

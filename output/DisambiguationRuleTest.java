@@ -29,21 +29,15 @@ import javax.xml.parsers.ParserConfigurationException;
 
 import junit.framework.TestCase;
 
-import org.languagetool.AnalyzedSentence;
-import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.TestTools;
-import org.languagetool.XMLValidator;
+import org.languagetool.*;
 import org.languagetool.rules.patterns.PatternTestTools;
 import org.languagetool.tagging.disambiguation.xx.DemoDisambiguator;
-import org.languagetool.tools.StringTools;
 import org.xml.sax.SAXException;
 
 public class DisambiguationRuleTest extends TestCase {
 
   /**
-   * To be called from standalone - calling it here in core doesn't make
+   * To be called from standalone or language modules - calling it here in core doesn't make
    * much sense actually as we don't have any languages.
    */
   public void testDisambiguationRulesFromXML() throws Exception {
@@ -52,7 +46,7 @@ public class DisambiguationRuleTest extends TestCase {
 
   private void testDisambiguationRulesFromXML(final Set<Language> ignoredLanguages)
       throws IOException, ParserConfigurationException, SAXException {
-    for (final Language lang : Language.REAL_LANGUAGES) {
+    for (final Language lang : Languages.getWithDemoLanguage()) {
       if (ignoredLanguages != null && ignoredLanguages.contains(lang)) {
         continue;
       }
@@ -66,7 +60,7 @@ public class DisambiguationRuleTest extends TestCase {
         final List<DisambiguationPatternRule> rules = ruleLoader
             .getRules(ruleLoader.getClass().getResourceAsStream(name));
         for (DisambiguationPatternRule rule : rules) {
-          PatternTestTools.warnIfRegexpSyntaxNotKosher(rule.getElements(),
+          PatternTestTools.warnIfRegexpSyntaxNotKosher(rule.getPatternTokens(),
               rule.getId(), rule.getSubId(), lang);
         }
         testDisambiguationRulesFromXML(rules, languageTool, lang);
@@ -77,13 +71,10 @@ public class DisambiguationRuleTest extends TestCase {
 
   private void validateRuleFile(String filePath) throws IOException {
     final XMLValidator validator = new XMLValidator();
-    final InputStream stream = this.getClass().getResourceAsStream(filePath);
-    try {
+    try (InputStream stream = this.getClass().getResourceAsStream(filePath)) {
       if (stream != null) {
         validator.validateWithXmlSchema(filePath, JLanguageTool.getDataBroker().getResourceDir() + "/disambiguation.xsd");
       }
-    } finally {
-      if (stream != null) { stream.close(); }
     }
   }
 
@@ -95,7 +86,7 @@ public class DisambiguationRuleTest extends TestCase {
     final String forms = wordForms.substring(wordForms.indexOf('[') + 1, wordForms.length() -1);
     final String[] formToSort = forms.split(",");
     Arrays.sort(formToSort);
-    return word + StringTools.listToString(Arrays.asList(formToSort), ",") + "]";
+    return word + String.join(",", Arrays.asList(formToSort)) + "]";
   }
 
   private void testDisambiguationRulesFromXML(
@@ -120,7 +111,7 @@ public class DisambiguationRuleTest extends TestCase {
           //in AnalyzedSentence, and during equal test they are set for the
           //left-hand side
           assertEquals("The untouched example (" + goodSentence + ") for " + lang.getName() +
-              " rule " + id +"["+ rule.getSubId() +"] was touched!",
+              " rule " + rule + "] was touched!",
               sent.toString(), rule.replace(sentToReplace).toString());
         }
       }
@@ -140,7 +131,7 @@ public class DisambiguationRuleTest extends TestCase {
           final String inputForms = example.getAmbiguous();
           assertTrue("No input form found for: " + id, inputForms != null);
           assertTrue(inputForms.trim().length() > 0);
-          assertTrue("Input and output forms for rule " + id + "are the same!",
+          assertTrue("Input and output forms for rule " + id + " are the same!",
               !outputForms.equals(inputForms));
           final AnalyzedSentence cleanInput = languageTool
               .getRawAnalyzedSentence(cleanXML(example.getExample()));
@@ -166,15 +157,17 @@ public class DisambiguationRuleTest extends TestCase {
               final AnalyzedTokenReadings[] r = { readings };
               reading = new AnalyzedSentence(r).toShortString(",");
               annotations = readings.getHistoricalAnnotations();
+              int startPos = readings.getStartPos();
+              int endPos = readings.getEndPos();
               assertTrue(
-                  "Wrong marker position in the example for the rule " + id,
-                  readings.getStartPos() == expectedMatchStart
-                  && readings.getStartPos() + readings.getToken().length() == expectedMatchEnd);
+                  "Wrong marker position in the example for the rule " + id +
+                  ": got " + startPos + "-" + endPos + ", expected " + expectedMatchStart + "-" + expectedMatchEnd,
+                  startPos == expectedMatchStart && endPos == expectedMatchEnd);
               break;
             }
           }
           assertEquals("The input form for the rule " + id + " in the example: "
-              + example.toString() + " is different than expected (expected "
+              + example + " is different than expected (expected "
               + inputForms + " but got " + sortForms(reading) + "). The token has been changed by the disambiguator: " + annotations,
               inputForms, sortForms(reading));
           for (final AnalyzedTokenReadings readings : disambiguatedSent.getTokens()) {
@@ -185,12 +178,12 @@ public class DisambiguationRuleTest extends TestCase {
               final AnalyzedTokenReadings[] r = { readings };
               reading = new AnalyzedSentence(r).toShortString(",");
               assertTrue(readings.getStartPos() == expectedMatchStart
-                  && readings.getStartPos() + readings.getToken().length() == expectedMatchEnd);
+                  && readings.getEndPos() == expectedMatchEnd);
               break;
             }
           }
           assertEquals("The output form for the rule " + id + " in the example: "
-              + example.toString() + " is different than expected (expected "
+              + example + " is different than expected (expected "
               + outputForms + " but got " + sortForms(reading) + "). The token has been changed by the disambiguator: " + annotations,
               outputForms, sortForms(reading));
         }

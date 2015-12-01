@@ -35,16 +35,10 @@ public class Asturian extends Language {
 
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
-  private String name = "Asturian";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Asturian";
   }
 
   @Override
@@ -67,7 +61,7 @@ public class Asturian extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages),
             new MorfologikAsturianSpellerRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
             new MultipleWhitespaceRule(messages, this)

@@ -52,14 +52,13 @@ public abstract class SpellingCheckRule extends Rule {
   protected final Language language;
 
   private static final String SPELLING_IGNORE_FILE = "/hunspell/ignore.txt";
+  private static final String SPELLING_FILE = "/hunspell/spelling.txt";
   private static final String SPELLING_PROHIBIT_FILE = "/hunspell/prohibit.txt";
 
   private final Set<String> wordsToBeIgnored = new HashSet<>();
   private final Set<String> wordsToBeProhibited = new HashSet<>();
 
-  private boolean wordsWithDotsPresent = false;
   private boolean considerIgnoreWords = true;
-
   private boolean convertsCase = false;
 
   public SpellingCheckRule(final ResourceBundle messages, final Language language) {
@@ -101,22 +100,10 @@ public abstract class SpellingCheckRule extends Rule {
   }
 
   /**
-   * Reset the list of words to be ignored, by re-loading it from the "ignore.txt" file.
-   */
-  public void resetIgnoreTokens() {
-    wordsToBeIgnored.clear();
-    try {
-      init();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-  /**
    * Get additional suggestions added before other suggestions (note the rule may choose to
    * re-order the suggestions anyway).
    */
-  protected List<String> getAdditionalTopSuggestions(List<String> suggestions, String word) {
+  protected List<String> getAdditionalTopSuggestions(List<String> suggestions, String word) throws IOException {
     List<String> moreSuggestions = new ArrayList<>();
     if ("Languagetool".equals(word) && !suggestions.contains(LANGUAGETOOL)) {
       moreSuggestions.add(LANGUAGETOOL);
@@ -145,24 +132,26 @@ public abstract class SpellingCheckRule extends Rule {
 
   /**
    * Returns true iff the word should be ignored by the spell checker.
-   * If possible, use {@link #ignoreToken(org.languagetool.AnalyzedTokenReadings[], int)} instead.
+   * If possible, use {@link #ignoreToken(AnalyzedTokenReadings[], int)} instead.
    */
   protected boolean ignoreWord(String word) throws IOException {
     if (!considerIgnoreWords) {
       return false;
     }
-    if (!wordsWithDotsPresent) {
-      // TODO?: this is needed at least for German as Hunspell tokenization includes the dot:
-      word = word.endsWith(".") ? word.substring(0, word.length() - 1) : word;
+    if (word.endsWith(".") && !wordsToBeIgnored.contains(word)) {
+      return isIgnoredNoCase(word.substring(0, word.length()-1));  // e.g. word at end of sentence
     }
-    return (wordsToBeIgnored.contains(word)
-        || (convertsCase &&
-        wordsToBeIgnored.contains(word.toLowerCase(language.getLocale()))));
+    return isIgnoredNoCase(word);
+  }
+
+  private boolean isIgnoredNoCase(String word) {
+    return wordsToBeIgnored.contains(word) ||
+           (convertsCase && wordsToBeIgnored.contains(word.toLowerCase(language.getLocale())));
   }
 
   /**
    * Returns true iff the word at the given position should be ignored by the spell checker.
-   * If possible, use {@link #ignoreToken(org.languagetool.AnalyzedTokenReadings[], int)} instead.
+   * If possible, use {@link #ignoreToken(AnalyzedTokenReadings[], int)} instead.
    * @since 2.6
    */
   protected boolean ignoreWord(List<String> words, int idx) throws IOException {
@@ -191,22 +180,32 @@ public abstract class SpellingCheckRule extends Rule {
 
 
   protected boolean isUrl(String token) {
-    for (String protocol : WordTokenizer.getProtocols()) {
-      if (token.startsWith(protocol + "://")) {
-        return true;
-      }
-    }
-    return false;
+    return WordTokenizer.isUrl(token);
   }
   
   protected void init() throws IOException {
     loadWordsToBeIgnored(getIgnoreFileName());
+    loadWordsToBeIgnored(getSpellingFileName());
     loadWordsToBeProhibited(getProhibitFileName());
   }
 
-  /** @since 2.7 */
+  /**
+   * Get the name of the ignore file, which lists words to be accepted, even
+   * when the spell checker would not accept them. Unlike with {@link #getSpellingFileName()}
+   * the words in this file will not be used for creating suggestions for misspelled words.
+   * @since 2.7
+   */
   protected String getIgnoreFileName() {
     return language.getShortName() + SPELLING_IGNORE_FILE;
+  }
+
+  /**
+   * Get the name of the spelling file, which lists words to be accepted
+   * and used for suggestions, even when the spell checker would not accept them.
+   * @since 2.9
+   */
+  protected String getSpellingFileName() {
+    return language.getShortName() + SPELLING_FILE;
   }
 
   /**
@@ -244,44 +243,61 @@ public abstract class SpellingCheckRule extends Rule {
     if (!JLanguageTool.getDataBroker().resourceExists(ignoreFile)) {
       return;
     }
-    try (InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(ignoreFile)) {
-      try (Scanner scanner = new Scanner(inputStream, "utf-8")) {
-        while (scanner.hasNextLine()) {
-          final String line = scanner.nextLine();
-          final boolean isComment = line.startsWith("#");
-          if (isComment) {
-            continue;
-          }
-          if (language.getShortNameWithCountryAndVariant().equals("de-CH")) {
-            // hack: Swiss German doesn't use "ß" but always "ss" - replace this, otherwise
-            // misspellings (from Swiss point-of-view) like "äußere" wouldn't be found:
-            wordsToBeIgnored.add(line.replace("ß", "ss"));
-          } else {
-            wordsToBeIgnored.add(line);
-          }
-          if (line.endsWith(".")) {
-            wordsWithDotsPresent = true;
-          }
+    try (InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(ignoreFile);
+         Scanner scanner = new Scanner(inputStream, "utf-8")) {
+      while (scanner.hasNextLine()) {
+        final String line = scanner.nextLine();
+        if (isComment(line)) {
+          continue;
         }
+        failOnSpace(ignoreFile, line);
+        addIgnoreWords(line, wordsToBeIgnored);
       }
     }
+  }
+
+  /**
+   * @param line the line as read from {@code spelling.txt}.
+   * @param wordsToBeIgnored the set of words to be ignored
+   * @since 2.9
+   */
+  protected void addIgnoreWords(String line, Set<String> wordsToBeIgnored) {
+    wordsToBeIgnored.add(line);
+  }
+
+  /**
+   * Expand suffixes in a line. By default, the line is not expanded.
+   * Implementations might e.g. turn {@code bicycle/S} into {@code [bicycle, bicycles]}.
+   * @since 3.0
+   */
+  protected List<String> expandLine(String line) {
+    return Collections.singletonList(line);
   }
 
   private void loadWordsToBeProhibited(String prohibitFile) throws IOException {
     if (!JLanguageTool.getDataBroker().resourceExists(prohibitFile)) {
       return;
     }
-    try (InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(prohibitFile)) {
-      try (Scanner scanner = new Scanner(inputStream, "utf-8")) {
-        while (scanner.hasNextLine()) {
-          String line = scanner.nextLine();
-          boolean isComment = line.startsWith("#");
-          if (isComment) {
-            continue;
-          }
-          wordsToBeProhibited.add(line);
+    try (InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(prohibitFile);
+         Scanner scanner = new Scanner(inputStream, "utf-8")) {
+      while (scanner.hasNextLine()) {
+        String line = scanner.nextLine();
+        if (isComment(line)) {
+          continue;
         }
+        failOnSpace(prohibitFile, line);
+        wordsToBeProhibited.addAll(expandLine(line));
       }
+    }
+  }
+
+  private boolean isComment(String line) {
+    return line.startsWith("#");
+  }
+
+  private void failOnSpace(String fileName, String line) {
+    if (line.contains(" ")) {
+      throw new RuntimeException("No space expected in " + fileName + ": '" + line + "'");
     }
   }
 

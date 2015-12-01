@@ -18,15 +18,19 @@
  */
 package org.languagetool.language;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
 
-import de.abelssoft.wordtools.jwordsplitter.AbstractWordSplitter;
-import de.abelssoft.wordtools.jwordsplitter.impl.GermanWordSplitter;
+import org.jetbrains.annotations.NotNull;
 import org.languagetool.Language;
+import org.languagetool.chunking.Chunker;
+import org.languagetool.chunking.GermanChunker;
+import org.languagetool.languagemodel.LanguageModel;
+import org.languagetool.languagemodel.LuceneLanguageModel;
 import org.languagetool.rules.*;
 import org.languagetool.rules.de.*;
 import org.languagetool.rules.de.SentenceWhitespaceRule;
@@ -45,19 +49,30 @@ import org.languagetool.tokenizers.de.GermanCompoundTokenizer;
  * Support for German - use the sub classes {@link GermanyGerman}, {@link SwissGerman}, or {@link AustrianGerman}
  * if you need spell checking.
  */
-public class German extends Language {
+public class German extends Language implements AutoCloseable {
 
+  private static final Language GERMANY_GERMAN = new GermanyGerman();
+  
   private Tagger tagger;
   private Synthesizer synthesizer;
   private SentenceTokenizer sentenceTokenizer;
   private Disambiguator disambiguator;
-  private String name = "German";
+  private GermanChunker chunker;
   private CompoundWordTokenizer compoundTokenizer;
   private GermanCompoundTokenizer strictCompoundTokenizer;
+  private LanguageModel languageModel;
 
+  /**
+   * @deprecated use {@link GermanyGerman}, {@link AustrianGerman}, or {@link SwissGerman} instead -
+   *  they have rules for spell checking, this class doesn't (deprecated since 3.2)
+   */
+  @Deprecated
+  public German() {
+  }
+  
   @Override
   public Language getDefaultLanguageVariant() {
-    return new GermanyGerman();
+    return GERMANY_GERMAN;
   }
   
   @Override
@@ -68,14 +83,20 @@ public class German extends Language {
     return disambiguator;
   }
 
+  /**
+   * @since 2.9
+   */
   @Override
-  public String getName() {
-    return name;
+  public Chunker getPostDisambiguationChunker() {
+    if (chunker == null) {
+      chunker = new GermanChunker();
+    }
+    return chunker;
   }
 
   @Override
-  public void setName(String name) {
-    this.name = name;
+  public String getName() {
+    return "German";
   }
 
   @Override
@@ -86,16 +107,6 @@ public class German extends Language {
   @Override
   public String[] getCountries() {
     return new String[]{"LU", "LI", "BE"};
-  }
-
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "„", "»", "«" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "“", "«", "»" };
   }
 
   @Override
@@ -113,6 +124,7 @@ public class German extends Language {
   }
 
   @Override
+  @NotNull
   public Synthesizer getSynthesizer() {
     if (synthesizer == null) {
       synthesizer = new GermanSynthesizer();
@@ -141,7 +153,9 @@ public class German extends Language {
   public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "„", "»", "«"),
+                    Arrays.asList("]", ")", "}", "“", "«", "»")),
             new UppercaseSentenceStartRule(messages, this),
             new MultipleWhitespaceRule(messages, this),
             // specific to German:
@@ -156,7 +170,9 @@ public class German extends Language {
             new CompoundRule(messages),
             new DashRule(messages),
             new VerbAgreementRule(messages, this),
+            new SubjectVerbAgreementRule(messages, this),
             new WordCoherencyRule(messages),
+            new SimilarNameRule(messages),
             new WiederVsWiderRule(messages)
     );
   }
@@ -167,15 +183,8 @@ public class German extends Language {
   public CompoundWordTokenizer getNonStrictCompoundSplitter() {
     if (compoundTokenizer == null) {
       try {
-        final AbstractWordSplitter wordSplitter = new GermanWordSplitter(false);
-        wordSplitter.setStrictMode(false); // there's a spelling mistake in (at least) one part, so strict mode wouldn't split the word
-        ((GermanWordSplitter)wordSplitter).setMinimumWordLength(3);
-        compoundTokenizer = new CompoundWordTokenizer() {
-          @Override
-          public List<String> tokenize(String word) {
-            return new ArrayList<>(wordSplitter.splitWord(word));
-          }
-        };
+        final GermanCompoundTokenizer tokenizer = new GermanCompoundTokenizer(false);  // there's a spelling mistake in (at least) one part, so strict mode wouldn't split the word
+        compoundTokenizer = word -> new ArrayList<>(tokenizer.tokenize(word));
       } catch (IOException e) {
         throw new RuntimeException("Could not set up German compound splitter", e);
       }
@@ -196,5 +205,32 @@ public class German extends Language {
     }
     return strictCompoundTokenizer;
   }
-  
+
+  @Override
+  public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
+    if (languageModel == null) {
+      languageModel = new LuceneLanguageModel(new File(indexDir, getShortName()));
+      // for testing:
+      //languageModel = new BerkeleyRawLanguageModel(new File("/media/Data/berkeleylm/google_books_binaries/ger.blm.gz"));
+      //languageModel = new BerkeleyLanguageModel(new File("/media/Data/berkeleylm/google_books_binaries/ger.blm.gz"));
+    }
+    return languageModel;
+  }
+
+  /** @since 3.1 */
+  @Override
+  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+    return Arrays.<Rule>asList(
+            new GermanConfusionProbabilityRule(messages, languageModel, this)
+    );
+  }
+
+  /** @since 3.1 */
+  @Override
+  public void close() throws Exception {
+    if (languageModel != null) {
+      languageModel.close();
+    }
+  }
+
 }

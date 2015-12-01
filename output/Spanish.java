@@ -19,8 +19,11 @@
 package org.languagetool.language;
 
 import org.languagetool.Language;
+import org.languagetool.languagemodel.LanguageModel;
+import org.languagetool.languagemodel.LuceneLanguageModel;
 import org.languagetool.rules.*;
 import org.languagetool.rules.es.MorfologikSpanishSpellerRule;
+import org.languagetool.rules.es.SpanishConfusionProbabilityRule;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.es.SpanishSynthesizer;
 import org.languagetool.tagging.Tagger;
@@ -32,28 +35,24 @@ import org.languagetool.tokenizers.SentenceTokenizer;
 import org.languagetool.tokenizers.Tokenizer;
 import org.languagetool.tokenizers.es.SpanishWordTokenizer;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
 
-public class Spanish extends Language {
+public class Spanish extends Language implements AutoCloseable{
 
   private SentenceTokenizer sentenceTokenizer;
   private Tokenizer wordTokenizer;
   private Synthesizer synthesizer;
   private Tagger tagger;
   private Disambiguator disambiguator;
-  private String name = "Spanish";
+  private LuceneLanguageModel languageModel;
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Spanish";
   }
 
   @Override
@@ -68,16 +67,6 @@ public class Spanish extends Language {
             "VE", "PE", "AR", "EC", "CL", "UY", "PY",
             "BO", "SV", "HN", "NI", "PR", "US", "CU"
     };
-  }
-  
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "“", "«", "»", "¿", "¡" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "”", "»", "«", "?", "!" };
   }
   
   @Override
@@ -122,9 +111,9 @@ public class Spanish extends Language {
   
   @Override
   public Contributor[] getMaintainers() {
-    Contributor contributor = new Contributor("Juan Martorell");
-    contributor.setUrl("http://languagetool-es.blogspot.com/");
-    return new Contributor[] { contributor };
+    return new Contributor[] {
+            new Contributor("Juan Martorell", "http://languagetool-es.blogspot.com/")
+    };
   }
 
   @Override
@@ -132,12 +121,39 @@ public class Spanish extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "“", "«", "»", "¿", "¡"),
+                    Arrays.asList("]", ")", "}", "”", "»", "«", "?", "!")),
             new MorfologikSpanishSpellerRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
             new WordRepeatRule(messages, this),
             new MultipleWhitespaceRule(messages, this)
     );
+  }
+
+  /** @since 3.1 */
+  @Override
+  public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
+    if (languageModel == null) {
+      languageModel = new LuceneLanguageModel(new File(indexDir, getShortName()));
+    }
+    return languageModel;
+  }
+
+  /** @since 3.1 */
+  @Override
+  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+    return Arrays.<Rule>asList(
+            new SpanishConfusionProbabilityRule(messages, languageModel, this)
+    );
+  }
+
+  /** @since 3.1 */
+  @Override
+  public void close() throws Exception {
+    if (languageModel != null) {
+      languageModel.close();
+    }
   }
 
 }

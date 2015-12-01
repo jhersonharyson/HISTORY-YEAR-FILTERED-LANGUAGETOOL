@@ -59,7 +59,14 @@ public class English extends Language implements AutoCloseable {
   private Disambiguator disambiguator;
   private WordTokenizer wordTokenizer;
   private LuceneLanguageModel languageModel;
-  private String name = "English";
+
+  /**
+   * @deprecated use {@link AmericanEnglish} or {@link BritishEnglish} etc. instead -
+   *  they have rules for spell checking, this class doesn't (deprecated since 3.2)
+   */
+  @Deprecated
+  public English() {
+  }
 
   @Override
   public Language getDefaultLanguageVariant() {
@@ -76,12 +83,7 @@ public class English extends Language implements AutoCloseable {
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "English";
   }
 
   @Override
@@ -140,7 +142,7 @@ public class English extends Language implements AutoCloseable {
   @Override
   public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
     if (languageModel == null) {
-      languageModel = new LuceneLanguageModel(indexDir);
+      languageModel = new LuceneLanguageModel(new File(indexDir, getShortName()));
     }
     return languageModel;
   }
@@ -172,7 +174,8 @@ public class English extends Language implements AutoCloseable {
   @Override
   public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
     return Arrays.<Rule>asList(
-        new EnglishConfusionProbabilityRule(messages, languageModel, this)
+        new EnglishConfusionProbabilityRule(messages, languageModel, this),
+        new EnglishNgramProbabilityRule(messages, languageModel, this)
     );
   }
 

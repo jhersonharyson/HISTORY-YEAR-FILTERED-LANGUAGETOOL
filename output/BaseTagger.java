@@ -28,6 +28,7 @@ import java.util.Locale;
 import morfologik.stemming.Dictionary;
 
 import morfologik.stemming.WordData;
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
@@ -40,58 +41,99 @@ import org.languagetool.tools.StringTools;
  */
 public abstract class BaseTagger implements Tagger {
 
-  protected WordTagger wordTagger;
-  protected Locale conversionLocale = Locale.getDefault();
+  protected final WordTagger wordTagger;
+  protected final Locale conversionLocale;
 
-  private boolean tagLowercaseWithUppercase = true;
-  private volatile Dictionary dictionary;
-
-  /**
-   * Get the filename, e.g., {@code /en/english.dict}.
-   */
-  public abstract String getFileName();
+  private final boolean tagLowercaseWithUppercase;
+  private final String dictionaryPath;
+  private final Dictionary dictionary;
 
   /**
    * Get the filename for manual additions, e.g., {@code /en/added.txt}, or {@code null}.
    * @since 2.8
    */
+  @Nullable
   public abstract String getManualAdditionsFileName();
 
-  public void setLocale(Locale locale) {
-    conversionLocale = locale;
+  /**
+   * Get the filename for manual removals, e.g., {@code /en/removed.txt}, or {@code null}.
+   * @since 3.2
+   */
+  @Nullable
+  public String getManualRemovalsFileName() {
+    return null;
+  }
+
+  /** @since 2.9 */
+  public BaseTagger(String filename) {
+    this(filename, Locale.getDefault(), true);
+  }
+
+  /** @since 2.9 */
+  public BaseTagger(String filename, Locale conversionLocale) {
+    this(filename, conversionLocale, true);
+  }
+
+  /** @since 2.9 */
+  public BaseTagger(String filename, Locale locale, boolean tagLowercaseWithUppercase) {
+    this.dictionaryPath = filename;
+    this.conversionLocale = locale;
+    this.tagLowercaseWithUppercase = tagLowercaseWithUppercase;
+    this.wordTagger = initWordTagger(filename);
+    try {
+      URL url = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(filename);
+      this.dictionary = Dictionary.read(url);
+    } catch (IOException e) {
+      throw new RuntimeException("Could not load dictionary from " + filename, e);
+    }
+  }
+
+  /**
+   * @since 2.9
+   */
+  public String getDictionaryPath() {
+    return dictionaryPath;
+  }
+
+  /**
+   * If true, tags from the binary dictionary (*.dict) will be overwritten by manual tags
+   * from the plain text dictionary.
+   * @since 2.9
+   */
+  public boolean overwriteWithManualTagger() {
+    return false;
   }
 
   protected WordTagger getWordTagger() {
-    if (wordTagger == null) {
-      MorfologikTagger morfologikTagger = new MorfologikTagger(getFileName());
-      try {
-        String manualFileName = getManualAdditionsFileName();
-        if (manualFileName != null) {
-          InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(manualFileName);
-          ManualTagger manualTagger = new ManualTagger(stream);
-          wordTagger = new CombiningTagger(morfologikTagger, manualTagger);
-        } else {
-          wordTagger = morfologikTagger;
-        }
-      } catch (IOException e) {
-        throw new RuntimeException("Could not load manual tagger data from " + getManualAdditionsFileName(), e);
-      }
-    }
     return wordTagger;
   }
 
-  protected Dictionary getDictionary() throws IOException {
-    Dictionary dict = dictionary;
-    if (dict == null) {
-      synchronized (this) {
-        dict = dictionary;
-        if (dict == null) {
-          final URL url = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(getFileName());
-          dictionary = dict = Dictionary.read(url);
+  private WordTagger initWordTagger(String filename) {
+    MorfologikTagger morfologikTagger = new MorfologikTagger(filename);
+    try {
+      String manualRemovalFileName = getManualRemovalsFileName();
+      ManualTagger removalTagger = null;
+      if (manualRemovalFileName != null) {
+        try (InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(manualRemovalFileName)) {
+          removalTagger = new ManualTagger(stream);
         }
       }
+      String manualAdditionFileName = getManualAdditionsFileName();
+      if (manualAdditionFileName != null) {
+        try (InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(manualAdditionFileName)) {
+          ManualTagger manualTagger = new ManualTagger(stream);
+          return new CombiningTagger(morfologikTagger, manualTagger, removalTagger, overwriteWithManualTagger());
+        }
+      } else {
+        return morfologikTagger;
+      }
+    } catch (IOException e) {
+      throw new RuntimeException("Could not load manual tagger data from " + getManualAdditionsFileName(), e);
     }
-    return dict;
+  }
+
+  protected Dictionary getDictionary() {
+    return dictionary;
   }
 
   @Override
@@ -202,15 +244,12 @@ public abstract class BaseTagger implements Tagger {
     return new AnalyzedToken(token, posTag, null);
   }
 
-  public void dontTagLowercaseWithUppercase() {
-    tagLowercaseWithUppercase = false;
-  }
-
   /**
    * Allows additional tagging in some language-dependent circumstances
    * @param word The word to tag
    * @return Returns list of analyzed tokens with additional tags, or {@code null}
    */
+  @Nullable
   protected List<AnalyzedToken> additionalTags(String word, WordTagger wordTagger) {
     return null;
   }

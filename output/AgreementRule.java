@@ -18,6 +18,7 @@
  */
 package org.languagetool.rules.de;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
@@ -26,13 +27,13 @@ import org.languagetool.language.German;
 import org.languagetool.rules.Category;
 import org.languagetool.rules.Example;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.patterns.PatternToken;
+import org.languagetool.rules.patterns.PatternTokenBuilder;
 import org.languagetool.tagging.de.AnalyzedGermanToken;
-import org.languagetool.tagging.de.GermanTagger;
 import org.languagetool.tagging.de.GermanToken;
 import org.languagetool.tagging.de.GermanToken.POSType;
-import org.languagetool.tools.StringTools;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 
-import java.io.IOException;
 import java.util.*;
 
 /**
@@ -61,41 +62,24 @@ public class AgreementRule extends GermanRule {
     NUMERUS("Numerus (Einzahl, Mehrzahl - Beispiel: 'das Fahrräder' statt 'die Fahrräder')");
     
     private final String displayName;
-    private GrammarCategory(String displayName) {
+    GrammarCategory(String displayName) {
       this.displayName = displayName;
     }
   }
 
-  /*
-   * City names are incoherently tagged in the Morphy data. To avoid
-   * false alarms on phrases like "das Berliner Auto" we have to
-   * explicitly add these adjective readings to "Berliner" and to all
-   * other potential city names:
-   */
-  private static final String[] ADJ_READINGS = {
-    // singular:
-    "ADJ:NOM:SIN:MAS:GRU", "ADJ:NOM:SIN:NEU:GRU", "ADJ:NOM:SIN:FEM:GRU",    // das Berliner Auto
-    "ADJ:GEN:SIN:MAS:GRU", "ADJ:GEN:SIN:NEU:GRU", "ADJ:GEN:SIN:FEM:GRU",    // des Berliner Autos 
-    "ADJ:DAT:SIN:MAS:GRU", "ADJ:DAT:SIN:NEU:GRU", "ADJ:DAT:SIN:FEM:GRU",    // dem Berliner Auto
-    "ADJ:AKK:SIN:MAS:GRU", "ADJ:AKK:SIN:NEU:GRU", "ADJ:AKK:SIN:FEM:GRU",    // den Berliner Bewohner
-    // plural:
-    "ADJ:NOM:PLU:MAS:GRU", "ADJ:NOM:PLU:NEU:GRU", "ADJ:NOM:PLU:FEM:GRU",    // die Berliner Autos
-    "ADJ:GEN:PLU:MAS:GRU", "ADJ:GEN:PLU:NEU:GRU", "ADJ:GEN:PLU:FEM:GRU",    // der Berliner Autos 
-    "ADJ:DAT:PLU:MAS:GRU", "ADJ:DAT:PLU:NEU:GRU", "ADJ:DAT:PLU:FEM:GRU",    // den Berliner Autos
-    "ADJ:AKK:PLU:MAS:GRU", "ADJ:AKK:PLU:NEU:GRU", "ADJ:AKK:PLU:FEM:GRU",    // den Berliner Bewohnern
-  };
-  
-  /*
-   * The heuristic of maybeAddAdjectiveReadings considers every noun ending with "er" as city name.
-   * The nouns in this list are NOT considered as city names.
-   * NOTE: Only nouns for which cutting off the final "er" produces a valid noun must be added to this list.
-   */
-  private static final Set<String> ER_TO_BE_IGNORED = new HashSet<>(Arrays.asList(
-    "Alter",
-    "Kinder",
-    "Rinder"
-  ));
-  
+  private static final List<List<PatternToken>> ANTI_PATTERNS = Arrays.asList(
+    Arrays.asList(
+      new PatternTokenBuilder().tokenRegex("(?i:ist|war)").build(),
+      new PatternTokenBuilder().token("das").build(),
+      new PatternTokenBuilder().token("Zufall").build()
+    ),
+    Arrays.asList(
+      new PatternTokenBuilder().token("von").build(),
+      new PatternTokenBuilder().tokenRegex("(vielen|allen)").build(),
+      new PatternTokenBuilder().posRegex("PA2:.*").build()  // "ein von vielen bewundertes Haus"
+    )
+  );
+
   private static final Set<String> VIELE_WENIGE_LOWERCASE = new HashSet<>(Arrays.asList(
     "viele",
     "vieler",
@@ -185,9 +169,7 @@ public class AgreementRule extends GermanRule {
     
   public AgreementRule(final ResourceBundle messages, German language) {
     this.language = language;
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_grammar")));
-    }
+    super.setCategory(new Category(messages.getString("category_grammar")));
     addExamplePair(Example.wrong("<marker>Der Haus</marker> wurde letztes Jahr gebaut."),
                    Example.fixed("<marker>Das Haus</marker> wurde letztes Jahr gebaut"));
   }
@@ -205,17 +187,18 @@ public class AgreementRule extends GermanRule {
   @Override
   public RuleMatch[] match(final AnalyzedSentence sentence) {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();    
+    final AnalyzedTokenReadings[] tokens = getSentenceWithImmunization(sentence).getTokensWithoutWhitespace();
     for (int i = 0; i < tokens.length; i++) {
       //defaulting to the first reading
       //TODO: check for all readings
-      //and replace GermanTokenReading
       final String posToken = tokens[i].getAnalyzedToken(0).getPOSTag();
       if (posToken != null && posToken.equals(JLanguageTool.SENTENCE_START_TAGNAME)) {
         continue;
       }
-      //AnalyzedGermanToken analyzedToken = new AnalyzedGermanToken(tokens[i]);
-      
+      if (tokens[i].isImmunized()) {
+        continue;
+      }
+
       final AnalyzedTokenReadings tokenReadings = tokens[i];
       final boolean relevantPronoun = isRelevantPronoun(tokens, i);
      
@@ -238,7 +221,8 @@ public class AgreementRule extends GermanRule {
       // avoid false alarm on "Art. 1" and "bisherigen Art. 1" (Art. = Artikel):
       boolean detAbbrev = i < tokens.length-2 && tokens[i+1].getToken().equals("Art") && tokens[i+2].getToken().equals(".");
       boolean detAdjAbbrev = i < tokens.length-3 && tokens[i+2].getToken().equals("Art") && tokens[i+3].getToken().equals(".");
-      boolean followingParticiple = i < tokens.length-3 && tokens[i+2].hasPartialPosTag("PA1"); //  "einen Hochwasser führenden Fluss"
+      // "einen Hochwasser führenden Fluss", "die Gott zugeschriebenen Eigenschaften":
+      boolean followingParticiple = i < tokens.length-3 && (tokens[i+2].hasPartialPosTag("PA1") || tokens[i+2].getToken().matches("zugeschriebenen?|genannten?"));
       if (detAbbrev || detAdjAbbrev || followingParticiple) {
         ignore = true;
       }
@@ -249,7 +233,6 @@ public class AgreementRule extends GermanRule {
           break;
         }
         AnalyzedTokenReadings nextToken = tokens[tokenPos];
-        nextToken = maybeAddAdjectiveReadings(nextToken, tokens, tokenPos);
         if (isNonPredicativeAdjective(nextToken) || isParticiple(nextToken)) {
           tokenPos = i + 2; 
           if (tokenPos >= tokens.length) {
@@ -270,7 +253,7 @@ public class AgreementRule extends GermanRule {
               ruleMatches.add(ruleMatch);
             }
           }
-        } else if (GermanHelper.hasReadingOfType(nextToken, POSType.NOMEN)) {
+        } else if (GermanHelper.hasReadingOfType(nextToken, POSType.NOMEN) && !"Herr".equals(nextToken.getToken())) {
           final RuleMatch ruleMatch = checkDetNounAgreement(tokens[i], tokens[i+1]);
           if (ruleMatch != null) {
             ruleMatches.add(ruleMatch);
@@ -282,10 +265,15 @@ public class AgreementRule extends GermanRule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  @Override
+  public List<DisambiguationPatternRule> getAntiPatterns() {
+    return makeAntiPatterns(ANTI_PATTERNS, language);
+  }
+
   private boolean isNonPredicativeAdjective(AnalyzedTokenReadings tokensReadings) {
     for (AnalyzedToken reading : tokensReadings.getReadings()) {
-      AnalyzedGermanToken germanReading = new AnalyzedGermanToken(reading);
-      if (germanReading.getType() == POSType.ADJEKTIV && !germanReading.getPOSTag().contains("PRD")) {
+      String posTag = reading.getPOSTag();
+      if (posTag != null && posTag.startsWith("ADJ:") && !posTag.contains("PRD")) {
         return true;
       }
     }
@@ -293,13 +281,7 @@ public class AgreementRule extends GermanRule {
   }
 
   private boolean isParticiple(AnalyzedTokenReadings tokensReadings) {
-    for (AnalyzedToken reading : tokensReadings.getReadings()) {
-      AnalyzedGermanToken germanReading = new AnalyzedGermanToken(reading);
-      if (germanReading.getType() == POSType.PARTIZIP) {
-        return true;
-      }
-    }
-    return false;
+    return tokensReadings.hasPartialPosTag("PA1") || tokensReadings.hasPartialPosTag("PA2");
   }
 
   private boolean isRelevantPronoun(AnalyzedTokenReadings[] tokens, int pos) {
@@ -313,39 +295,6 @@ public class AgreementRule extends GermanRule {
       relevantPronoun = false;
     }
     return relevantPronoun;
-  }
-
-  // see the comment at ADJ_READINGS:
-  private AnalyzedTokenReadings maybeAddAdjectiveReadings(AnalyzedTokenReadings nextToken,
-      AnalyzedTokenReadings[] tokens, int tokenPos) {
-    final String nextTerm = nextToken.getToken();
-    // Just a heuristic: nouns and proper nouns that end with "er" are considered
-    // city names:
-    if (nextTerm.endsWith("er") && tokens.length > tokenPos+1 && !ER_TO_BE_IGNORED.contains(nextTerm)) {
-      final AnalyzedTokenReadings nextNextToken = tokens[tokenPos+1];
-      final GermanTagger tagger = (GermanTagger)language.getTagger();
-      try {
-        final AnalyzedTokenReadings nextATR = tagger.lookup(nextTerm.substring(0, nextTerm.length()-2));
-        final AnalyzedTokenReadings nextNextATR = tagger.lookup(nextNextToken.getToken());
-        //System.err.println("nextATR: " + nextATR);
-        //System.err.println("nextNextATR: " + nextNextATR);
-        // "Münchner": special case as cutting off last two characters doesn't produce city name:
-        if ("Münchner".equals(nextTerm) ||
-            (nextATR != null &&
-            // tagging in Morphy for cities is not coherent:
-            (GermanHelper.hasReadingOfType(nextATR, POSType.PROPER_NOUN) || GermanHelper.hasReadingOfType(nextATR, POSType.NOMEN) &&
-            nextNextATR != null && GermanHelper.hasReadingOfType(nextNextATR, POSType.NOMEN)))) {
-          final AnalyzedToken[] adjReadings = new AnalyzedToken[ADJ_READINGS.length];
-          for (int j = 0; j < ADJ_READINGS.length; j++) {
-            adjReadings[j] = new AnalyzedToken(nextTerm, ADJ_READINGS[j], null);
-          }
-          nextToken = new AnalyzedTokenReadings(adjReadings, nextToken.getStartPos());
-        }
-      } catch (IOException e) {
-        throw new RuntimeException(e);
-      }
-    }
-    return nextToken;
   }
 
   // TODO: improve this so it only returns true for real relative clauses
@@ -373,9 +322,13 @@ public class AgreementRule extends GermanRule {
     return false;
   }
 
+  @Nullable
   private RuleMatch checkDetNounAgreement(final AnalyzedTokenReadings token1,
       final AnalyzedTokenReadings token2) {
     if (NOUNS_TO_BE_IGNORED.contains(token2.getToken())) {
+      return null;
+    }
+    if (token2.isImmunized()) {
       return null;
     }
     final Set<String> set1 = getAgreementCategories(token1);
@@ -391,12 +344,12 @@ public class AgreementRule extends GermanRule {
     if (set1.size() == 0 && !isException(token1, token2)) {
       final List<String> errorCategories = getCategoriesCausingError(token1, token2);
       final String errorDetails = errorCategories.size() > 0 ?
-              StringTools.listToString(errorCategories, " und ") : "Kasus, Genus oder Numerus";
+              String.join(" und ", errorCategories) : "Kasus, Genus oder Numerus";
       final String msg = "Möglicherweise fehlende grammatische Übereinstimmung zwischen Artikel und Nomen " +
             "bezüglich " + errorDetails + ".";
       final String shortMsg = "Möglicherweise keine Übereinstimmung bezüglich " + errorDetails;
       ruleMatch = new RuleMatch(this, token1.getStartPos(),
-              token2.getStartPos() + token2.getToken().length(), msg, shortMsg);
+              token2.getEndPos(), msg, shortMsg);
       final AgreementSuggestor suggestor = new AgreementSuggestor(language.getSynthesizer(), token1, token2);
       final List<String> suggestions = suggestor.getSuggestions();
       ruleMatch.setSuggestedReplacements(suggestions);
@@ -422,16 +375,15 @@ public class AgreementRule extends GermanRule {
 
   private RuleMatch checkDetAdjNounAgreement(final AnalyzedTokenReadings token1,
       final AnalyzedTokenReadings token2, final AnalyzedTokenReadings token3) {
-    final Set<String> set = retainCommonCategories(token1, token2, token3, null);
+    final Set<String> set = retainCommonCategories(token1, token2, token3);
     RuleMatch ruleMatch = null;
-    if (set.size() == 0) {
+    if (set == null || set.size() == 0) {
       // TODO: more detailed error message:
       final String msg = "Möglicherweise fehlende grammatische Übereinstimmung zwischen Artikel, Adjektiv und " +
             "Nomen bezüglich Kasus, Numerus oder Genus. Beispiel: 'mein kleiner Haus' " +
             "statt 'mein kleines Haus'";
       final String shortMsg = "Möglicherweise keine Übereinstimmung bezüglich Kasus, Numerus oder Genus";
-      ruleMatch = new RuleMatch(this, token1.getStartPos(), 
-          token3.getStartPos()+token3.getToken().length(), msg, shortMsg);
+      ruleMatch = new RuleMatch(this, token1.getStartPos(), token3.getEndPos(), msg, shortMsg);
     }
     return ruleMatch;
   }
@@ -455,16 +407,11 @@ public class AgreementRule extends GermanRule {
     set1.retainAll(set2);
     return set1.size() > 0;
   }
-  
-  private Set<String> retainCommonCategories(final AnalyzedTokenReadings token1, 
-      final AnalyzedTokenReadings token2, final AnalyzedTokenReadings token3,
-      final GrammarCategory categoryToRelax) {
-    final Set<GrammarCategory> categoryToRelaxSet;
-    if (categoryToRelax == null) {
-      categoryToRelaxSet = Collections.singleton(categoryToRelax);
-    } else {
-      categoryToRelaxSet = Collections.emptySet();
-    }
+
+  @Nullable
+  private Set<String> retainCommonCategories(final AnalyzedTokenReadings token1,
+                                             final AnalyzedTokenReadings token2, final AnalyzedTokenReadings token3) {
+    final Set<GrammarCategory> categoryToRelaxSet = Collections.emptySet();
     final Set<String> set1 = getAgreementCategories(token1, categoryToRelaxSet, true);
     if (set1 == null) {
       return null;  // word not known, assume it's correct
@@ -502,21 +449,43 @@ public class AgreementRule extends GermanRule {
         continue;
       }
       if (reading.getGenus() == GermanToken.Genus.ALLGEMEIN && 
-              reading.getPOSTag() != null && !reading.getPOSTag().endsWith(":STV")) {  // STV: stellvertretend (!= begleitend)
+          tmpReading.getPOSTag() != null && !tmpReading.getPOSTag().endsWith(":STV") &&  // STV: stellvertretend (!= begleitend)
+          !possessiveSpecialCase(aToken, tmpReading)) {   
         // genus=ALG in the original data. Not sure if this is allowed, but expand this so
         // e.g. "Ich Arbeiter" doesn't get flagged as incorrect:
-        set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.MASKULINUM, omit));
-        set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.FEMININUM, omit));
-        set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.NEUTRUM, omit));
+        if (reading.getDetermination() == null) {
+          // Nouns don't have the determination property (definite/indefinite), and as we don't want to
+          // introduce a special case for that, we just pretend they always fulfill both properties:
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.MASKULINUM, GermanToken.Determination.DEFINITE, omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.MASKULINUM, GermanToken.Determination.INDEFINITE, omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.FEMININUM, GermanToken.Determination.DEFINITE, omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.FEMININUM, GermanToken.Determination.INDEFINITE, omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.NEUTRUM, GermanToken.Determination.DEFINITE, omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.NEUTRUM, GermanToken.Determination.INDEFINITE, omit));
+        } else {
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.MASKULINUM, reading.getDetermination(), omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.FEMININUM, reading.getDetermination(), omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), GermanToken.Genus.NEUTRUM, reading.getDetermination(), omit));
+        }
       } else {
-        set.add(makeString(reading.getCasus(), reading.getNumerus(), reading.getGenus(), omit));
+        if (reading.getDetermination() == null || "jed".equals(tmpReading.getLemma()) || "manch".equals(tmpReading.getLemma())) {  // "jeder" etc. needs a special case to avoid false alarm
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), reading.getGenus(), GermanToken.Determination.DEFINITE, omit));
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), reading.getGenus(), GermanToken.Determination.INDEFINITE, omit));
+        } else {
+          set.add(makeString(reading.getCasus(), reading.getNumerus(), reading.getGenus(), reading.getDetermination(), omit));
+        }
       }
     }
     return set;
   }
 
+  private boolean possessiveSpecialCase(AnalyzedTokenReadings aToken, AnalyzedToken tmpReading) {
+    // would cause error misses as it contains 'ALG', e.g. in "Der Zustand meiner Gehirns."
+    return aToken.hasPartialPosTag("PRO:POS") && ("ich".equals(tmpReading.getLemma()) || "sich".equals(tmpReading.getLemma()));
+  }
+
   private String makeString(GermanToken.Kasus casus, GermanToken.Numerus num, GermanToken.Genus gen,
-      Set<GrammarCategory> omit) {
+      GermanToken.Determination determination, Set<GrammarCategory> omit) {
     final List<String> l = new ArrayList<>();
     if (casus != null && !omit.contains(GrammarCategory.KASUS)) {
       l.add(casus.toString());
@@ -527,7 +496,10 @@ public class AgreementRule extends GermanRule {
     if (gen != null && !omit.contains(GrammarCategory.GENUS)) {
       l.add(gen.toString());
     }
-    return StringTools.listToString(l, "/");
+    if (determination != null) {
+      l.add(determination.toString());
+    }
+    return String.join("/", l);
   }
 
   @Override

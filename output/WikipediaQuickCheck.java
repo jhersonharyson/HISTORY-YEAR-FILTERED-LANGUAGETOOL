@@ -18,6 +18,7 @@
  */
 package org.languagetool.dev.wikipedia;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringReader;
@@ -33,10 +34,11 @@ import javax.xml.parsers.SAXParserFactory;
 
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 import org.languagetool.MultiThreadedJLanguageTool;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
-import org.languagetool.rules.patterns.PatternRule;
+import org.languagetool.rules.patterns.AbstractPatternRule;
 import org.languagetool.tools.StringTools;
 import org.xml.sax.Attributes;
 import org.xml.sax.InputSource;
@@ -51,19 +53,33 @@ public class WikipediaQuickCheck {
   private static final Pattern WIKIPEDIA_URL_REGEX = Pattern.compile("https?://(..)\\.wikipedia\\.org/wiki/(.*)"); 
   private static final Pattern SECURE_WIKIPEDIA_URL_REGEX = Pattern.compile("https://secure\\.wikimedia\\.org/wikipedia/(..)/wiki/(.*)");
 
+  private final File ngramDir;
+  
   private List<String> disabledRuleIds = new ArrayList<>();
+
+  public WikipediaQuickCheck() {
+    this.ngramDir = null;
+  }
+
+  /**
+   * @since 3.1
+   * @param ngramDir directory with sub directories like 'en', 'de' etc that contain '1grams' etc directories with ngram data (Lucene indexes)
+   */
+  public WikipediaQuickCheck(File ngramDir) {
+    this.ngramDir = ngramDir;
+  }
 
   public String getMediaWikiContent(URL wikipediaUrl) throws IOException {
     final Language lang = getLanguage(wikipediaUrl);
     final String pageTitle = getPageTitle(wikipediaUrl);
-    final String apiUrl = "http://" + lang.getShortName() + ".wikipedia.org/w/api.php?titles=" 
+    final String apiUrl = "https://" + lang.getShortName() + ".wikipedia.org/w/api.php?titles=" 
             + URLEncoder.encode(pageTitle, "utf-8") + "&action=query&prop=revisions&rvprop=content|timestamp&format=xml";
     return getContent(new URL(apiUrl));
   }
 
   public Language getLanguage(URL url) {
     final Matcher matcher = getUrlMatcher(url.toString());
-    return Language.getLanguageForShortName(matcher.group(1));
+    return Languages.getLanguageForShortName(matcher.group(1));
   }
 
   public String getPageTitle(URL url) {
@@ -99,8 +115,7 @@ public class WikipediaQuickCheck {
    */
   public MarkupAwareWikipediaResult checkPage(URL url, ErrorMarker errorMarker) throws IOException, PageNotFoundException {
     validateWikipediaUrl(url);
-    final WikipediaQuickCheck check = new WikipediaQuickCheck();
-    final String xml = check.getMediaWikiContent(url);
+    final String xml = getMediaWikiContent(url);
     final MediaWikiContent wikiContent = getRevisionContent(xml);
     final String content = wikiContent.getContent();
     if (content.trim().isEmpty()) {
@@ -115,9 +130,14 @@ public class WikipediaQuickCheck {
   MarkupAwareWikipediaResult checkWikipediaMarkup(URL url, MediaWikiContent wikiContent, Language language, ErrorMarker errorMarker) throws IOException {
     final SwebleWikipediaTextFilter filter = new SwebleWikipediaTextFilter();
     final PlainTextMapping mapping = filter.filter(wikiContent.getContent());
-    final JLanguageTool langTool = getLanguageTool(language);
+    final MultiThreadedJLanguageTool langTool = getLanguageTool(language);
     final List<AppliedRuleMatch> appliedMatches = new ArrayList<>();
-    final List<RuleMatch> matches = langTool.check(mapping.getPlainText());
+    final List<RuleMatch> matches;
+    try {
+      matches = langTool.check(mapping.getPlainText());
+    } finally {
+      langTool.shutdown();
+    }
     int internalErrors = 0;
     for (RuleMatch match : matches) {
       final SuggestionReplacer replacer = errorMarker != null ? 
@@ -127,7 +147,7 @@ public class WikipediaQuickCheck {
         final List<RuleMatchApplication> ruleMatchApplications = replacer.applySuggestionsToOriginalText(match);
         appliedMatches.add(new AppliedRuleMatch(match, ruleMatchApplications));
       } catch (Exception e) {
-        System.err.println("Failed to apply suggestion for rule match '" + match + "' for URL " + url + ": " + e.toString());
+        System.err.println("Failed to apply suggestion for rule match '" + match + "' for URL " + url + ": " + e);
         internalErrors++;
       }
     }
@@ -135,9 +155,13 @@ public class WikipediaQuickCheck {
   }
 
   public WikipediaQuickCheckResult checkPage(String plainText, Language lang) throws IOException {
-    final JLanguageTool langTool = getLanguageTool(lang);
-    final List<RuleMatch> ruleMatches = langTool.check(plainText);
-    return new WikipediaQuickCheckResult(plainText, ruleMatches, lang.getShortName());
+    final MultiThreadedJLanguageTool langTool = getLanguageTool(lang);
+    try {
+      final List<RuleMatch> ruleMatches = langTool.check(plainText);
+      return new WikipediaQuickCheckResult(plainText, ruleMatches, lang.getShortName());
+    } finally {
+      langTool.shutdown();
+    }
   }
 
   public void validateWikipediaUrl(URL wikipediaUrl) {
@@ -190,12 +214,14 @@ public class WikipediaQuickCheck {
     return new MediaWikiContent(handler.getRevisionContent(), handler.getTimestamp());
   }
 
-  private JLanguageTool getLanguageTool(Language lang) throws IOException {
-    final JLanguageTool langTool = new MultiThreadedJLanguageTool(lang);
-    langTool.activateDefaultPatternRules();
+  private MultiThreadedJLanguageTool getLanguageTool(Language lang) throws IOException {
+    final MultiThreadedJLanguageTool langTool = new MultiThreadedJLanguageTool(lang);
     enableWikipediaRules(langTool);
     for (String disabledRuleId : disabledRuleIds) {
       langTool.disableRule(disabledRuleId);
+    }
+    if (ngramDir != null) {
+      langTool.activateLanguageModelRules(ngramDir);
     }
     disableSpellingRules(langTool);
     return langTool;
@@ -220,8 +246,9 @@ public class WikipediaQuickCheck {
   }
 
   private String getContent(URL wikipediaUrl) throws IOException {
-    final InputStream contentStream = (InputStream) wikipediaUrl.getContent();
-    return StringTools.streamToString(contentStream, "UTF-8");
+    try (InputStream contentStream = (InputStream) wikipediaUrl.getContent()) {
+      return StringTools.streamToString(contentStream, "UTF-8");
+    }
   }
 
   /*public static void mainTest(String[] args) throws IOException {
@@ -239,7 +266,7 @@ public class WikipediaQuickCheck {
     // URL examples:
     //final String urlString = "http://de.wikipedia.org/wiki/Angela_Merkel";
     //final String urlString = "https://de.wikipedia.org/wiki/Benutzer_Diskussion:Dnaber";
-    //final String urlString = "https://secure.wikimedia.org/wikipedia/de/wiki/G%C3%BCtersloh";
+    //final String urlString = "https://secure.wikimedia.org/wikipedia/de/wiki/Gütersloh";
     String urlString = args[0];
     MarkupAwareWikipediaResult result = check.checkPage(new URL(urlString), new ErrorMarker("***", "***"));
     int errorCount = 0;
@@ -251,8 +278,8 @@ public class WikipediaQuickCheck {
       String message = ruleMatch.getMessage().replace("<suggestion>", "'").replace("</suggestion>", "'");
       errorCount++;
       System.out.print(errorCount + ". " + message);
-      if (rule instanceof PatternRule) {
-        System.out.println(" (" + rule.getId() + "[" + ((PatternRule) rule).getSubId() + "])");
+      if (rule instanceof AbstractPatternRule) {
+        System.out.println(" (" + ((AbstractPatternRule) rule).getFullId() + ")");
       } else {
         System.out.println(" (" + rule.getId() + ")");
       }

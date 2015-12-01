@@ -66,9 +66,7 @@ public class TopoReplaceRule extends Rule {
 
   public TopoReplaceRule(final ResourceBundle messages) throws IOException {
     super(messages);
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_misc")));
-    }
+    super.setCategory(new Category(messages.getString("category_misc")));
     wrongWords = loadWords(JLanguageTool.getDataBroker().getFromRulesDirAsStream(getFileName()));
   }
 
@@ -97,9 +95,6 @@ public class TopoReplaceRule extends Rule {
     return " pe ";
   }
 
-  /**
-   * use case-insensitive matching.
-   */
   public boolean isCaseSensitive() {
     return true;
   }
@@ -130,25 +125,23 @@ public class TopoReplaceRule extends Rule {
   }
 
   /**
-   * Load the list of words. <br/>
-   * Same as {@link AbstractSimpleReplaceRule#loadWords} but allows multiple words.   
+   * Load the list of words. Same as {@link AbstractSimpleReplaceRule#load} but allows multiple words.   
    * @param stream the stream to load.
-   * @return the list of maps containing the error-corrections pairs. <br/>The n-th map contains key strings of (n+1) words.
+   * @return the list of maps containing the error-corrections pairs. The n-th map contains key strings of (n+1) words.
    * @see #getWordTokenizer
    */
   private List<Map<String, String>> loadWords(final InputStream stream)
           throws IOException {
     final List<Map<String, String>> list = new ArrayList<>();
-    InputStreamReader isr = null;
-    BufferedReader br = null;
-    try {
-      isr = new InputStreamReader(stream, getEncoding());
-      br = new BufferedReader(isr);
+    try (
+      InputStreamReader isr = new InputStreamReader(stream, getEncoding());
+      BufferedReader br = new BufferedReader(isr);
+    ) {
       String line;
 
       while ((line = br.readLine()) != null) {
         line = line.trim();
-        if (line.length() < 1 || line.charAt(0) == '#') { // ignore comments
+        if (line.isEmpty() || line.charAt(0) == '#') { // ignore comments
           continue;
         }
         final String[] parts = line.split("=");
@@ -172,14 +165,6 @@ public class TopoReplaceRule extends Rule {
           }
           list.get(wordCount - 1).put(wrongForm, parts[1]);
         }
-      }
-
-    } finally {
-      if (br != null) {
-        br.close();
-      }
-      if (isr != null) {
-        isr.close();
       }
     }
     // seal the result (prevent modification from outside this class)
@@ -240,7 +225,7 @@ public class TopoReplaceRule extends Rule {
           }
           msg += "?";
           final int startPos = prevTokensList.get(len - crtWordCount).getStartPos();
-          final int endPos = prevTokensList.get(len - 1).getStartPos() + prevTokensList.get(len - 1).getToken().length();
+          final int endPos = prevTokensList.get(len - 1).getEndPos();
           final RuleMatch potentialRuleMatch = new RuleMatch(this, startPos, endPos, msg, getShort());
 
           if (!isCaseSensitive() && StringTools.startsWithUppercase(crt)) {

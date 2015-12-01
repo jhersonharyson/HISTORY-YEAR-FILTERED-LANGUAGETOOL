@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.ResourceBundle;
+import java.util.regex.Pattern;
 
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
@@ -30,11 +31,13 @@ import org.languagetool.databroker.ResourceDataBroker;
 import org.languagetool.rules.CommaWhitespaceRule;
 import org.languagetool.rules.MultipleWhitespaceRule;
 import org.languagetool.rules.Rule;
+import org.languagetool.rules.uk.HiddenCharacterRule;
 import org.languagetool.rules.uk.MixedAlphabetsRule;
 import org.languagetool.rules.uk.MorfologikUkrainianSpellerRule;
 import org.languagetool.rules.uk.SimpleReplaceRule;
 import org.languagetool.rules.uk.SimpleReplaceSoftRule;
 import org.languagetool.rules.uk.TokenAgreementRule;
+import org.languagetool.rules.uk.UkrainianWordRepeatRule;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.uk.UkrainianSynthesizer;
 import org.languagetool.tagging.Tagger;
@@ -60,7 +63,14 @@ public class Ukrainian extends Language {
   private Tokenizer wordTokenizer;
   private Synthesizer synthesizer;
   private Disambiguator disambiguator;
-  private String name = "Ukrainian";
+
+  public Ukrainian() {
+  }
+
+  @Override
+  public Pattern getIgnoredCharactersRegex() {
+    return Pattern.compile("[\u00AD\u0301]");
+  }
 
   @Override
   public Locale getLocale() {
@@ -69,12 +79,7 @@ public class Ukrainian extends Language {
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Ukrainian";
   }
 
   @Override
@@ -85,16 +90,6 @@ public class Ukrainian extends Language {
   @Override
   public String[] getCountries() {
     return new String[]{"UA"};
-  }
-
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "„", "«", "»" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "“", "»", "«" };
   }
 
   @Override
@@ -156,10 +151,12 @@ public class Ukrainian extends Language {
         // TODO: does not handle dot in abbreviations in the middle of the sentence, and also !.., ?..          
         //            new UppercaseSentenceStartRule(messages),
         new MultipleWhitespaceRule(messages, this),
+        new UkrainianWordRepeatRule(messages, this),
         // specific to Ukrainian:
         new SimpleReplaceRule(messages),
         new SimpleReplaceSoftRule(messages),
-        new TokenAgreementRule(messages)
+        new TokenAgreementRule(messages),
+        new HiddenCharacterRule(messages)
     );
   }
 
@@ -168,11 +165,9 @@ public class Ukrainian extends Language {
     List<String> ruleFileNames = super.getRuleFileNames();
     ResourceDataBroker dataBroker = JLanguageTool.getDataBroker();
     String dirBase = dataBroker.getRulesDir() + "/" + getShortName() + "/";
-
-    for(String ruleFile: RULE_FILES) {
+    for (String ruleFile : RULE_FILES) {
       ruleFileNames.add(dirBase + ruleFile);
     }
-
     return ruleFileNames;
   }
 

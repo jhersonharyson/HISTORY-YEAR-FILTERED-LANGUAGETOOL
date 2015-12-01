@@ -18,22 +18,22 @@
  */
 package org.languagetool.rules.en;
 
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.ResourceBundle;
-import java.util.Scanner;
-import java.util.Set;
-import java.util.TreeSet;
-
 import org.languagetool.AnalyzedSentence;
+import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.JLanguageTool;
 import org.languagetool.rules.Category;
 import org.languagetool.rules.Example;
 import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.tools.StringTools;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.ResourceBundle;
+import java.util.regex.Pattern;
+
+import static org.languagetool.rules.en.AvsAnData.getWordsRequiringA;
+import static org.languagetool.rules.en.AvsAnData.getWordsRequiringAn;
 
 /**
  * Check if the determiner (if any) preceding a word is:
@@ -41,24 +41,20 @@ import org.languagetool.tools.StringTools;
  *   <li><i>an</i> if the next word starts with a vowel
  *   <li><i>a</i> if the next word does not start with a vowel
  * </ul>
- *  This rule loads some exceptions from external files (e.g. <i>an hour</i>).
+ *  This rule loads some exceptions from external files (e.g. for <i>an hour</i>).
  * 
  * @author Daniel Naber
  */
 public class AvsAnRule extends EnglishRule {
 
-  private static final String FILENAME_A = "/en/det_a.txt";
-  private static final String FILENAME_AN = "/en/det_an.txt";
+  enum Determiner {
+    A, AN, A_OR_AN, UNKNOWN
+  }
 
-  private final Set<String> requiresA;
-  private final Set<String> requiresAn;
+  private static final Pattern cleanupPattern = Pattern.compile("[^αa-zA-Z0-9\\.;,:']");
 
   public AvsAnRule(final ResourceBundle messages) {
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_misc")));
-    }
-    requiresA = loadWords(JLanguageTool.getDataBroker().getFromRulesDirAsStream(FILENAME_A));
-    requiresAn = loadWords(JLanguageTool.getDataBroker().getFromRulesDirAsStream(FILENAME_AN));
+    super.setCategory(new Category(messages.getString("category_misc")));
     setLocQualityIssueType(ITSIssueType.Misspelling);
     addExamplePair(Example.wrong("The train arrived <marker>a hour</marker> ago."),
                    Example.fixed("The train arrived <marker>an hour</marker> ago."));
@@ -78,79 +74,44 @@ public class AvsAnRule extends EnglishRule {
   public RuleMatch[] match(final AnalyzedSentence sentence) {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
     final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
-    String prevToken = "";
-    int prevPos = 0;
-    //ignoring token 0, i.e., SENT_START
-    for (int i = 1; i < tokens.length; i++) {
-      String token = tokens[i].getToken();
-      boolean doesRequireA = false;
-      boolean doesRequireAn = false;
-      // check for exceptions:
-      boolean isException = false;
-      final String[] parts = token.split("[-']");  // for example, in "one-way" only "one" is relevant
-      if (parts.length >= 1 && !parts[0].equalsIgnoreCase("a")) {  // avoid false alarm on "A-levels are..."
-        token = parts[0];
-      }
-      if (tokens[i].isWhitespaceBefore() || !"-".equals(token)) { //e.g., 'a- or anti- are prefixes'
-        token = token.replaceAll("[^αa-zA-Z0-9\\.;,:']", "");         // e.g. >>an "industry party"<<
-        if (StringTools.isEmpty(token)) {
-          continue;
-        }
-      }
-      final char tokenFirstChar = token.charAt(0);
-      if (requiresA.contains(token.toLowerCase()) || requiresA.contains(token)) {
-        isException = true;
-        doesRequireA = true;
-      }
-      if (requiresAn.contains(token.toLowerCase()) || requiresAn.contains(token)) {
-        if (isException) {
-          // some words allow both 'a' and 'an', e.g. 'historical':
-          isException = true;
-          doesRequireA = false;
-          doesRequireAn = false;
-        } else {
-          isException = true;
-          doesRequireAn = true;
-        }
+    int prevTokenIndex = 0;
+    for (int i = 1; i < tokens.length; i++) {  // ignoring token 0, i.e., SENT_START
+      AnalyzedTokenReadings token = tokens[i];
+      String prevTokenStr = prevTokenIndex > 0 ? tokens[prevTokenIndex].getToken() : null;
+
+      boolean isSentenceStart = prevTokenIndex == 1;
+      boolean equalsA = "a".equalsIgnoreCase(prevTokenStr);
+      boolean equalsAn = "an".equalsIgnoreCase(prevTokenStr);
+
+      if (!isSentenceStart) {
+        equalsA = "a".equals(prevTokenStr);
+        equalsAn = "an".equals(prevTokenStr);
       }
 
-      if (!isException) {
-        if (StringTools.isAllUppercase(token) || StringTools.isMixedCase(token)) {
-          // we don't know how all-uppercase and mixed case words (often abbreviations) are pronounced,
-          // so never complain about these:
-          doesRequireAn = false;
-          doesRequireA = false;
-        } else if (isVowel(tokenFirstChar)) {
-          doesRequireAn = true;
-        } else {
-          doesRequireA = true;
+      if (equalsA || equalsAn) {
+        Determiner determiner = getCorrectDeterminerFor(token);
+        String msg = null;
+        if (equalsA && determiner == Determiner.AN) {
+          String replacement = StringTools.startsWithUppercase(prevTokenStr) ? "An" : "an";
+          msg = "Use <suggestion>" + replacement + "</suggestion> instead of '" + prevTokenStr + "' if the following "+
+                  "word starts with a vowel sound, e.g. 'an article', 'an hour'";
+        } else if (equalsAn && determiner == Determiner.A) {
+          String replacement = StringTools.startsWithUppercase(prevTokenStr) ? "A" : "a";
+          msg = "Use <suggestion>" + replacement + "</suggestion> instead of '" + prevTokenStr + "' if the following "+
+                  "word doesn't start with a vowel sound, e.g. 'a sentence', 'a university'";
+        }
+        if (msg != null) {
+          RuleMatch match = new RuleMatch(
+              this, tokens[prevTokenIndex].getStartPos(), tokens[prevTokenIndex].getEndPos(), msg, "Wrong article");
+          ruleMatches.add(match);
         }
       }
-      String msg = null;
-      if (prevToken.equalsIgnoreCase("a") && doesRequireAn) {
-        String replacement = "an";
-        if (prevToken.equals("A")) {
-          replacement = "An";
-        }
-        msg = "Use <suggestion>" + replacement + "</suggestion> instead of '" + prevToken + "' if the following "+
-            "word starts with a vowel sound, e.g. 'an article', 'an hour'";
-      } else if (prevToken.equalsIgnoreCase("an") && doesRequireA) {
-        String replacement = "a";
-        if (prevToken.equals("An")) {
-          replacement = "A";
-        }
-        msg = "Use <suggestion>" + replacement + "</suggestion> instead of '" + prevToken + "' if the following "+
-            "word doesn't start with a vowel sound, e.g. 'a sentence', 'a university'";
-      }
-      if (msg != null) {
-        final RuleMatch ruleMatch = new RuleMatch(this, prevPos, prevPos + prevToken.length(), msg, "Wrong article");
-        ruleMatches.add(ruleMatch);
-      }
-      if (tokens[i].hasPosTag("DT")) {
-        prevToken = token;
-        prevPos = tokens[i].getStartPos();
+      if (token.hasPosTag("DT")) {
+        prevTokenIndex = i;
+      } else if (token.getToken().matches("[-\"()\\[\\]]+")) {
+        // skip e.g. the quote in >>an "industry party"<<
       } else {
-        prevToken = "";
+        prevTokenIndex = 0;
       }
     }
     return toRuleMatchArray(ruleMatches);
@@ -158,80 +119,65 @@ public class AvsAnRule extends EnglishRule {
 
   /**
    * Adds "a" or "an" to the English noun. Used for suggesting the proper form of the indefinite article.
-   * @param noun Word that needs an article.
+   * For the rare cases where both "a" and "an" are considered okay (e.g. for "historical"), "a" is returned.
+   * @param origWord Word that needs an article.
    * @return String containing the word with a determiner, or just the word if the word is an abbreviation.
    */
-  public final String suggestAorAn(final String noun) {
-    String word = noun;
-    boolean doesRequireA = false;
-    boolean doesRequireAn = false;
-    // check for exceptions:
-    boolean isException = false;
-    final String[] parts = word.split("[-']");  // for example, in "one-way" only "one" is relevant
-    if (parts.length >= 1 &&
-        !parts[0].equalsIgnoreCase("a")) {  // avoid false alarm on "A-levels are..."
+  public String suggestAorAn(final String origWord) {
+    AnalyzedTokenReadings token = new AnalyzedTokenReadings(new AnalyzedToken(origWord, null, null), 0);
+    Determiner determiner = getCorrectDeterminerFor(token);
+    if (determiner == Determiner.A) {
+      return "a " + origWord;
+    } else if (determiner == Determiner.AN) {
+      return "an " + origWord;
+    } else if (determiner == Determiner.A_OR_AN) {
+      return "a " + origWord;
+    } else {
+      return origWord;
+    }
+  }
+
+  Determiner getCorrectDeterminerFor(AnalyzedTokenReadings token) {
+    String word = token.getToken();
+    Determiner determiner = Determiner.UNKNOWN;
+    String[] parts = word.split("[-']");  // for example, in "one-way" only "one" is relevant
+    if (parts.length >= 1 && !parts[0].equalsIgnoreCase("a")) {  // avoid false alarm on "A-levels are..."
       word = parts[0];
     }
-    if (StringTools.isEmpty(word)) {
-      return word;
-    }
-    final char tokenFirstChar = word.charAt(0);
-    if (requiresA.contains(word.toLowerCase()) || requiresA.contains(word)) {
-      isException = true;
-      doesRequireA = true;
-    }
-    if (requiresAn.contains(word.toLowerCase()) || requiresAn.contains(word)) {
-      if (isException) {
-        throw new IllegalStateException(word + " is listed in both det_a.txt and det_an.txt");
+    if (token.isWhitespaceBefore() || !"-".equals(word)) { // e.g., 'a- or anti- are prefixes'
+      word = cleanupPattern.matcher(word).replaceAll("");         // e.g. >>an "industry party"<<
+      if (StringTools.isEmpty(word)) {
+        return Determiner.UNKNOWN;
       }
-      isException = true;
-      doesRequireAn = true;
     }
-    if (!isException) {
+    if (getWordsRequiringA().contains(word.toLowerCase()) || getWordsRequiringA().contains(word)) {
+      determiner = Determiner.A;
+    }
+    if (getWordsRequiringAn().contains(word.toLowerCase()) || getWordsRequiringAn().contains(word)) {
+      if (determiner == Determiner.A) {
+        determiner = Determiner.A_OR_AN;   // e.g. for 'historical'
+      } else {
+        determiner = Determiner.AN;
+      }
+    }
+    if (determiner == Determiner.UNKNOWN) {
+      char tokenFirstChar = word.charAt(0);
       if (StringTools.isAllUppercase(word) || StringTools.isMixedCase(word)) {
         // we don't know how all-uppercase words (often abbreviations) are pronounced,
-        // so never complain about these:
-        doesRequireAn = false;
-        doesRequireA = false;
+        // so never complain about these
+        determiner = Determiner.UNKNOWN;
       } else if (isVowel(tokenFirstChar)) {
-        doesRequireAn = true;
+        determiner = Determiner.AN;
       } else {
-        doesRequireA = true;
+        determiner = Determiner.A;
       }
     }
-    if (doesRequireA) {
-      return "a " + noun;
-    } else if (doesRequireAn) {
-      return "an " + noun;
-    } else {
-      return noun;
-    }
+    return determiner;
   }
 
-  private static boolean isVowel(char c) {
+  private boolean isVowel(char c) {
     char lc = Character.toLowerCase(c);
     return lc == 'a' || lc == 'e' || lc == 'i' || lc == 'o' || lc == 'u';
-  }
-
-  /**
-   * Load words, normalized to lowercase unless starting with '*'.
-   */
-  private Set<String> loadWords(final InputStream stream) {
-    final Set<String> set = new TreeSet<>();
-    try (Scanner scanner = new Scanner(stream, "utf-8")) {
-      while (scanner.hasNextLine()) {
-        final String line = scanner.nextLine().trim();
-        if (line.length() < 1 || line.charAt(0) == '#') {
-          continue;
-        }
-        if (line.charAt(0) == '*') {
-          set.add(line.substring(1));
-        } else {
-          set.add(line.toLowerCase());
-        }
-      }
-    }
-    return set;
   }
 
   @Override

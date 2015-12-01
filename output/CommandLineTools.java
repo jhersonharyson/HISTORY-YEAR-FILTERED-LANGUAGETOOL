@@ -26,10 +26,10 @@ import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.TextLevelRule;
 import org.languagetool.rules.bitext.BitextRule;
-import org.languagetool.rules.patterns.PatternRule;
+import org.languagetool.rules.patterns.AbstractPatternRule;
 import org.languagetool.tokenizers.SentenceTokenizer;
 import org.languagetool.tools.ContextTools;
-import org.languagetool.tools.RuleAsXmlSerializer;
+import org.languagetool.tools.RuleMatchAsXmlSerializer;
 import org.languagetool.tools.StringTools;
 import org.languagetool.tools.Tools;
 
@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -61,18 +62,23 @@ public final class CommandLineTools {
     final List<String> sentences = lt.sentenceTokenize(contents);
     for (final String sentence : sentences) {
       analyzedText = lt.getAnalyzedSentence(sentence);
-      System.out.println(analyzedText.toString());
+      System.out.println(analyzedText);
     }
   }
 
   public static int checkText(final String contents, final JLanguageTool lt) throws IOException {
-    return checkText(contents, lt, false, -1, 0, 0, StringTools.XmlPrintMode.NORMAL_XML);
+    return checkText(contents, lt, false, -1, 0, 0, StringTools.XmlPrintMode.NORMAL_XML, false, Collections.<String>emptyList());
   }
 
   public static int checkText(final String contents, final JLanguageTool lt,
                               final boolean apiFormat, final int lineOffset) throws IOException {
-    return checkText(contents, lt, apiFormat, -1, lineOffset, 0, StringTools.XmlPrintMode.NORMAL_XML);
+    return checkText(contents, lt, apiFormat, -1, lineOffset, 0, StringTools.XmlPrintMode.NORMAL_XML, false, Collections.<String>emptyList());
   }
+  
+  public static int checkText(final String contents, final JLanguageTool lt,
+          final boolean apiFormat, final int lineOffset, final boolean listUnknownWords) throws IOException {
+    return checkText(contents, lt, apiFormat, -1, lineOffset, 0, StringTools.XmlPrintMode.NORMAL_XML, listUnknownWords, Collections.<String>emptyList());
+}
 
   /**
    * Check the given text and print results to System.out.
@@ -88,7 +94,8 @@ public final class CommandLineTools {
    */
   public static int checkText(final String contents, final JLanguageTool lt,
                               final boolean apiFormat, int contextSize, final int lineOffset,
-                              final int prevMatches, final StringTools.XmlPrintMode xmlMode) throws IOException {
+                              final int prevMatches, final StringTools.XmlPrintMode xmlMode,
+                              final boolean listUnknownWords, List<String> unknownWords) throws IOException {
     if (contextSize == -1) {
       contextSize = DEFAULT_CONTEXT_SIZE;
     }
@@ -100,9 +107,12 @@ public final class CommandLineTools {
       r.setEndLine(r.getEndLine() + lineOffset);
     }
     if (apiFormat) {
-      final RuleAsXmlSerializer serializer = new RuleAsXmlSerializer();
+      if (listUnknownWords && xmlMode == StringTools.XmlPrintMode.NORMAL_XML) {
+        unknownWords = lt.getUnknownWords();
+      }
+      final RuleMatchAsXmlSerializer serializer = new RuleMatchAsXmlSerializer();
       final String xml = serializer.ruleMatchesToXml(ruleMatches, contents,
-              contextSize, lt.getLanguage());
+              contextSize, xmlMode, lt.getLanguage(), unknownWords);
       final PrintStream out = new PrintStream(System.out, true, "UTF-8");
       out.print(xml);
     } else {
@@ -150,11 +160,14 @@ public final class CommandLineTools {
     final ContextTools contextTools = new ContextTools();
     contextTools.setContextSize(contextSize);
     for (final RuleMatch match : ruleMatches) {
+      Rule rule = match.getRule();
       String output = i + prevMatches + ".) Line " + (match.getLine() + 1) + ", column "
-              + match.getColumn() + ", Rule ID: " + match.getRule().getId();
-      if (match.getRule() instanceof PatternRule) {
-        final PatternRule pRule = (PatternRule) match.getRule();
-        output += "[" + pRule.getSubId() + "]";
+              + match.getColumn() + ", Rule ID: " + rule.getId();
+      if (rule instanceof AbstractPatternRule) {
+        final AbstractPatternRule pRule = (AbstractPatternRule) rule;
+        if (pRule.getSubId() != null) {
+          output += "[" + pRule.getSubId() + "]";
+        }
       }
       System.out.println(output);
       String msg = match.getMessage();
@@ -163,13 +176,11 @@ public final class CommandLineTools {
       System.out.println("Message: " + msg);
       final List<String> replacements = match.getSuggestedReplacements();
       if (!replacements.isEmpty()) {
-        System.out.println("Suggestion: "
-                + StringTools.listToString(replacements, "; "));
+        System.out.println("Suggestion: " + String.join("; ", replacements));
       }
       System.out.println(contextTools.getPlainTextContext(match.getFromPos(), match.getToPos(), contents));
-      if (match.getRule().getUrl() != null) {
-        System.out.println("More info: " +
-                match.getRule().getUrl().toString());
+      if (rule.getUrl() != null) {
+        System.out.println("More info: " + rule.getUrl());
       }
       if (i < ruleMatches.size()) {
         System.out.println();
@@ -202,7 +213,7 @@ public final class CommandLineTools {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
     int matchCount = 0;
     int sentCount = 0;
-    final RuleAsXmlSerializer serializer = new RuleAsXmlSerializer();
+    final RuleMatchAsXmlSerializer serializer = new RuleMatchAsXmlSerializer();
     final PrintStream out = new PrintStream(System.out, true, "UTF-8");
     if (apiFormat) {
       out.print(serializer.getXmlStart(null, null));

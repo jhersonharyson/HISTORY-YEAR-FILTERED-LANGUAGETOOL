@@ -28,12 +28,11 @@ import java.util.regex.Pattern;
 import morfologik.stemming.DictionaryLookup;
 import morfologik.stemming.IStemmer;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.JLanguageTool;
 import org.languagetool.chunking.ChunkTag;
 import org.languagetool.tagging.BaseTagger;
-import org.languagetool.tagging.ManualTagger;
 import org.languagetool.tools.StringTools;
 
 /**
@@ -45,86 +44,59 @@ import org.languagetool.tools.StringTools;
  */
 public class CatalanTagger extends BaseTagger {
 
-  private static final String DICT_FILENAME = "/ca/catalan.dict";
-  private static final String USER_DICT_FILENAME = "/ca/manual-tagger.txt";
-
-  private volatile ManualTagger manualTagger;
-
   private static final Pattern ADJ_PART_FS = Pattern.compile("VMP00SF.|A[QO].[FC][SN].");
   private static final Pattern VERB = Pattern.compile("V.+");
   //private static final Pattern NOUN = Pattern.compile("NC.+");
 
-  private static final Pattern PREFIXES_FOR_VERBS = Pattern.compile("(auto)(.+)",Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
-
-  @Override
-  public final String getFileName() {
-    return DICT_FILENAME;
-  }
+  private static final Pattern PREFIXES_FOR_VERBS = Pattern.compile("(auto)(.*[aeiouàéèíòóïü].+[aeiouàéèíòóïü].*)",Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
 
   @Override
   public String getManualAdditionsFileName() {
-    return null;  // TODO: make use of this
+    return "/ca/manual-tagger.txt";
   }
 
   public CatalanTagger() {
-    super();
-    setLocale(new Locale("ca"));
-    dontTagLowercaseWithUppercase();
+    super("/ca/catalan.dict",  new Locale("ca"), false);
   }
-
-  private void initializeIfRequired() throws IOException {
-    // Lazy initialize fields when needed and only once.
-    ManualTagger mTagger = manualTagger;
-    if (mTagger == null) {
-      synchronized (this) {
-        mTagger = manualTagger;
-        if (mTagger == null) {
-          manualTagger = new ManualTagger(JLanguageTool.getDataBroker().getFromResourceDirAsStream(USER_DICT_FILENAME));
-        }
-      }
-    }
+  
+  @Override
+  public boolean overwriteWithManualTagger(){
+    return false;
   }
 
   @Override
   public List<AnalyzedTokenReadings> tag(final List<String> sentenceTokens)
       throws IOException {
-    initializeIfRequired();
 
     final List<AnalyzedTokenReadings> tokenReadings = new ArrayList<>();
     int pos = 0;
     final IStemmer dictLookup = new DictionaryLookup(getDictionary());
 
     for (String word : sentenceTokens) {
-      boolean containsTypewriterApostrophe=false;
-      if (word.length()>1) {
+      // This hack allows all rules and dictionary entries to work with
+      // typewriter apostrophe
+      boolean containsTypewriterApostrophe = false;
+      if (word.length() > 1) {
         if (word.contains("'")) {
-          containsTypewriterApostrophe=true;  
+          containsTypewriterApostrophe = true;
         }
-        word=word.replace("’", "'");
+        word = word.replace("’", "'");
       }
       final List<AnalyzedToken> l = new ArrayList<>();
       final String lowerWord = word.toLowerCase(conversionLocale);
       final boolean isLowercase = word.equals(lowerWord);
       final boolean isMixedCase = StringTools.isMixedCase(word);
-      List<AnalyzedToken> manualTaggerTokens=manualTagsAsAnalyzedTokenList(word, manualTagger.lookup(word));
-      List<AnalyzedToken> manualLowerTaggerTokens=manualTagsAsAnalyzedTokenList(word, manualTagger.lookup(lowerWord));
-
-      // normal case, manual tagger
-      addTokens(manualTaggerTokens, l);
-      // normal case, tagger dictionary
-      if (manualTaggerTokens.isEmpty()) {
-        addTokens(asAnalyzedTokenList(word, dictLookup.lookup(word)), l);
-      }
-      // tag non-lowercase words (alluppercase or startuppercase but not mixedcase)
-      // with lowercase word tags
+      List<AnalyzedToken> taggerTokens = asAnalyzedTokenListForTaggedWords(word, getWordTagger().tag(word));
+      
+      // normal case:
+      addTokens(taggerTokens, l);
+      // tag non-lowercase (alluppercase or startuppercase), but not mixedcase
+      // word with lowercase word tags:
       if (!isLowercase && !isMixedCase) {
-        // manual tagger
-        addTokens(manualLowerTaggerTokens, l);
-        // tagger dictionary
-        if (manualLowerTaggerTokens.isEmpty()) {
-          addTokens(asAnalyzedTokenList(word, dictLookup.lookup(lowerWord)), l);
-        }
+        List<AnalyzedToken> lowerTaggerTokens = asAnalyzedTokenListForTaggedWords(word, getWordTagger().tag(lowerWord));
+        addTokens(lowerTaggerTokens, l);
       }
+
       // additional tagging with prefixes
       if (l.isEmpty() && !isMixedCase) {
         addTokens(additionalTags(word, dictLookup), l);
@@ -134,13 +106,13 @@ public class CatalanTagger extends BaseTagger {
         l.add(new AnalyzedToken(word, null, null));
       }
 
-      AnalyzedTokenReadings atr= new AnalyzedTokenReadings(l, pos);
+      AnalyzedTokenReadings atr = new AnalyzedTokenReadings(l, pos);
       if (containsTypewriterApostrophe) {
         List<ChunkTag> listChunkTags = new ArrayList<>();
         listChunkTags.add(new ChunkTag("containsTypewriterApostrophe"));
         atr.setChunkTags(listChunkTags);
       }
-      
+
       tokenReadings.add(atr);
       pos += word.length();
     }
@@ -148,13 +120,9 @@ public class CatalanTagger extends BaseTagger {
     return tokenReadings;
   }
 
+  @Nullable
   protected List<AnalyzedToken> additionalTags(String word, IStemmer stemmer) {
-    final IStemmer dictLookup;
-    try {
-      dictLookup = new DictionaryLookup(getDictionary());
-    } catch (IOException e) {
-      throw new RuntimeException("Could not load Catalan dictionary from " + getFileName(), e);
-    }
+    final IStemmer dictLookup = new DictionaryLookup(getDictionary());
     List<AnalyzedToken> additionalTaggedTokens = new ArrayList<>();
     //Any well-formed adverb with suffix -ment is tagged as an adverb (RG)
     //Adjectiu femení singular o participi femení singular + -ment
@@ -220,17 +188,6 @@ public class CatalanTagger extends BaseTagger {
       return taggerTokens;
     }
     return null;
-  }
-
-  private List<AnalyzedToken> manualTagsAsAnalyzedTokenList(final String word, String[] lemmasAndTags) {
-    final List<AnalyzedToken> aTokenList = new ArrayList<>();
-    if (lemmasAndTags != null) {
-      for (int i = 0; i < lemmasAndTags.length - 1; i = i + 2) {
-        AnalyzedToken aToken = new AnalyzedToken(word, lemmasAndTags[i + 1], lemmasAndTags[i]);
-        aTokenList.add(aToken);
-      }
-    }
-    return aTokenList;
   }
 
   private void addTokens(final List<AnalyzedToken> taggedTokens, final List<AnalyzedToken> l) {

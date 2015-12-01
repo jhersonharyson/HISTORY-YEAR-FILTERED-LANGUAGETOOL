@@ -41,26 +41,23 @@ import org.xml.sax.SAXException;
 public class XmlRuleDisambiguator implements Disambiguator {
 
   private static final String DISAMBIGUATION_FILE = "disambiguation.xml";
-  
-  private List<DisambiguationPatternRule> disambiguationRules;
-  private final Language language;
+
+  private final List<DisambiguationPatternRule> disambiguationRules;
 
   public XmlRuleDisambiguator(final Language language) {
-    this.language = Objects.requireNonNull(language);
+    Objects.requireNonNull(language);
+    final String disambiguationFile =
+            JLanguageTool.getDataBroker().getResourceDir() + "/" + language.getShortName() + "/" + DISAMBIGUATION_FILE;
+    try {
+      disambiguationRules = loadPatternRules(disambiguationFile);
+    } catch (Exception e) {
+      throw new RuntimeException("Problems with loading disambiguation file: " + disambiguationFile, e);
+    }
   }
 
   @Override
   public AnalyzedSentence disambiguate(final AnalyzedSentence input) throws IOException {
     AnalyzedSentence sentence = input;
-    if (disambiguationRules == null) {
-      final String disambiguationFile =
-        JLanguageTool.getDataBroker().getResourceDir() + "/" + language.getShortName() + "/" + DISAMBIGUATION_FILE;
-      try {
-        disambiguationRules = loadPatternRules(disambiguationFile);
-      } catch (final Exception e) {
-        throw new RuntimeException("Problems with loading disambiguation file: " + disambiguationFile, e);
-      }
-    }
     for (final DisambiguationPatternRule patternRule : disambiguationRules) {
       sentence = patternRule.replace(sentence);
     }
@@ -68,7 +65,7 @@ public class XmlRuleDisambiguator implements Disambiguator {
   }
 
   /**
-   * Load disambiguation rules from an XML file. Use {@link org.languagetool.JLanguageTool#addRule} to add
+   * Load disambiguation rules from an XML file. Use {@link JLanguageTool#addRule} to add
    * these rules to the checking process.
    * 
    * @return a List of {@link DisambiguationPatternRule} objects

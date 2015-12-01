@@ -22,6 +22,7 @@ import org.apache.commons.cli.*;
 import org.apache.commons.lang.StringUtils;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 import org.languagetool.MultiThreadedJLanguageTool;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
@@ -31,9 +32,10 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.text.NumberFormat;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
- * Checks texts from one or more {@link org.languagetool.dev.dumpcheck.SentenceSource}s.
+ * Checks texts from one or more {@link SentenceSource}s.
  * @since 2.4
  */
 public class SentenceSourceChecker {
@@ -74,7 +76,8 @@ public class SentenceSourceChecker {
     String[] fileNames = commandLine.getOptionValues('f');
     File languageModelDir = commandLine.hasOption("languagemodel") ?
                             new File(commandLine.getOptionValue("languagemodel")) : null;
-    prg.run(propFile, disabledRuleIds, languageCode, Arrays.asList(fileNames), ruleIds, categoryIds, maxArticles, maxErrors, languageModelDir);
+    Pattern filter = commandLine.hasOption("filter") ? Pattern.compile(commandLine.getOptionValue("filter")) : null;
+    prg.run(propFile, disabledRuleIds, languageCode, Arrays.asList(fileNames), ruleIds, categoryIds, maxArticles, maxErrors, languageModelDir, filter);
   }
 
   private static void addDisabledRules(String languageCode, Set<String> disabledRuleIds, Properties disabledRules) {
@@ -120,10 +123,13 @@ public class SentenceSourceChecker {
     options.addOption(OptionBuilder.withLongOpt("languagemodel").withArgName("indexDir").hasArg()
             .withDescription("directory with a '3grams' sub directory that contains an ngram index")
             .create());
+    options.addOption(OptionBuilder.withLongOpt("filter").withArgName("regex").hasArg()
+            .withDescription("Consider only sentences that contain this regular expression (for speed up)")
+            .create());
     try {
       CommandLineParser parser = new GnuParser();
       return parser.parse(options, args);
-    } catch (org.apache.commons.cli.ParseException e) {
+    } catch (ParseException e) {
       System.err.println("Error: " + e.getMessage());
       HelpFormatter formatter = new HelpFormatter();
       formatter.setWidth(80);
@@ -131,14 +137,13 @@ public class SentenceSourceChecker {
       formatter.printHelp(SentenceSourceChecker.class.getSimpleName() + " [OPTION]... --file <file> --language <code>", options);
       System.exit(1);
     }
-    return null;
+    throw new IllegalStateException();
   }
 
   private void run(File propFile, Set<String> disabledRules, String langCode, List<String> fileNames, String[] ruleIds,
-                   String[] additionalCategoryIds, int maxSentences, int maxErrors, File languageModelDir) throws IOException {
-    final Language lang = Language.getLanguageForShortName(langCode);
-    final JLanguageTool languageTool = new MultiThreadedJLanguageTool(lang);
-    languageTool.activateDefaultPatternRules();
+                   String[] additionalCategoryIds, int maxSentences, int maxErrors, File languageModelDir, Pattern filter) throws IOException {
+    final Language lang = Languages.getLanguageForShortName(langCode);
+    final MultiThreadedJLanguageTool languageTool = new MultiThreadedJLanguageTool(lang);
     if (languageModelDir != null) {
       languageTool.activateLanguageModelRules(languageModelDir);
     }
@@ -146,6 +151,9 @@ public class SentenceSourceChecker {
       enableOnlySpecifiedRules(ruleIds, languageTool);
     } else {
       applyRuleDeactivation(languageTool, disabledRules);
+    }
+    if (filter != null) {
+      System.out.println("*** NOTE: only sentences that match regular expression '" + filter + "' will be checked");
     }
     activateAdditionalCategories(additionalCategoryIds, languageTool);
     disableSpellingRules(languageTool);
@@ -162,7 +170,7 @@ public class SentenceSourceChecker {
       } else {
         resultHandler = new StdoutHandler(maxSentences, maxErrors);
       }
-      MixingSentenceSource mixingSource = MixingSentenceSource.create(fileNames, lang);
+      MixingSentenceSource mixingSource = MixingSentenceSource.create(fileNames, lang, filter);
       while (mixingSource.hasNext()) {
         Sentence sentence = mixingSource.next();
         try {
@@ -179,9 +187,10 @@ public class SentenceSourceChecker {
           throw new RuntimeException("Check failed on sentence: " + StringUtils.abbreviate(sentence.getText(), 250), e);
         }
       }
-    } catch (ErrorLimitReachedException | DocumentLimitReachedException e) {
-      System.out.println(e);
+    } catch (DocumentLimitReachedException | ErrorLimitReachedException e) {
+      System.out.println(getClass().getSimpleName() + ": " + e);
     } finally {
+      languageTool.shutdown();
       if (resultHandler != null) {
         final float matchesPerSentence = (float)ruleMatchCount / sentenceCount;
         System.out.printf(lang + ": %d total matches\n", ruleMatchCount);

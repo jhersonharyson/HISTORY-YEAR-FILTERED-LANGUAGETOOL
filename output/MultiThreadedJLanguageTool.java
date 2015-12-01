@@ -26,6 +26,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 
 import org.languagetool.markup.AnnotatedText;
 import org.languagetool.rules.Rule;
@@ -34,49 +35,124 @@ import org.languagetool.rules.RuleMatch;
 /**
  * A variant of {@link JLanguageTool} that uses several threads for rule matching.
  * Use this if you want text checking to be fast and do not care about the 
- * high load that this might cause.
+ * high load that this might cause. Call {@link #shutdown()} when you don't need
+ * the object anymore.
+ * 
+ * <p>Also see the javadoc of {@link JLanguageTool}.</p>
  * 
  * <p><b>Thread-safety:</b> See the remarks at {@link JLanguageTool}.
  */
 public class MultiThreadedJLanguageTool extends JLanguageTool {
   
-  private int threadPoolSize = -1;
+  private final int threadPoolSize;
+  private final ExecutorService threadPool;
 
   public MultiThreadedJLanguageTool(Language language) {
-    super(language);
-  }
-
-  public MultiThreadedJLanguageTool(Language language, Language motherTongue) {
-    super(language, motherTongue);
+    this(language, null);
   }
 
   /**
-   * When no thread pool size is {@link #setThreadPoolSize(int) configured}, the number of available processors is returned. 
-   * 
-   * @see #setThreadPoolSize(int)
+   * @see #shutdown()
+   * @param threadPoolSize the number of concurrent threads
+   * @since 2.9
+   */
+  public MultiThreadedJLanguageTool(Language language, int threadPoolSize) {
+    this(language, null, threadPoolSize);
+  }
+
+  /**
+   * @see #shutdown()
+   */
+  public MultiThreadedJLanguageTool(Language language, Language motherTongue) {
+    this(language, motherTongue, getDefaultThreadCount());
+  }
+
+  /**
+   * @see #shutdown()
+   * @param threadPoolSize the number of concurrent threads
+   * @since 2.9
+   */
+  public MultiThreadedJLanguageTool(Language language, Language motherTongue, int threadPoolSize) {
+    super(language, motherTongue);
+    if (threadPoolSize < 1) {
+      throw new IllegalArgumentException("threadPoolSize must be >= 1: " + threadPoolSize);
+    }
+    this.threadPoolSize = threadPoolSize;
+    threadPool = Executors.newFixedThreadPool(getThreadPoolSize(), new DaemonThreadFactory());
+  }
+
+  /**
+   * Call this to shut down the internally used thread pool.
+   * @since 3.0
+   */
+  public void shutdown() {
+    threadPool.shutdownNow();
+  }
+
+  /**
+   * Call this to shut down the internally used thread pool after all running tasks are finished.
+   * @since 3.1
+   */
+  public void shutdownWhenDone() {
+    threadPool.shutdown();
+  }
+
+  private static int getDefaultThreadCount() {
+    String threadCountStr = System.getProperty("org.languagetool.thread_count_internal", "-1");
+    int threadPoolSize = Integer.parseInt(threadCountStr);
+    if (threadPoolSize == -1) {
+      threadPoolSize = Runtime.getRuntime().availableProcessors();
+    }
+    return threadPoolSize;
+  }
+
+  /**
+   * When no thread pool size is configured, the number of available processors is returned.
    */
   protected int getThreadPoolSize() {
-    int poolSize = threadPoolSize;
-    if (poolSize <= 0) {
-      return Runtime.getRuntime().availableProcessors(); 
-    } else {
-      return poolSize;
-    }
+    return threadPoolSize;
   }
   
   /**
-   * Set the amount of threads to use for checking.
-   */
-  public void setThreadPoolSize(int threadPoolSize) {
-    this.threadPoolSize = threadPoolSize;
-  }
-
-  /**
    * @return a fixed size executor with the given number of threads
    */
-  protected ExecutorService getExecutorService(int threads) {
-    return Executors.newFixedThreadPool(threads);
+  protected ExecutorService getExecutorService() {
+    return threadPool;
   }
+  
+  @Override
+  protected List<AnalyzedSentence> analyzeSentences(List<String> sentences) throws IOException {
+    final List<AnalyzedSentence> analyzedSentences = new ArrayList<>();
+    
+    final ExecutorService executorService = getExecutorService();
+
+    int j = 0;
+    
+    List<Callable<AnalyzedSentence>> callables = new ArrayList<>();
+    for (final String sentence : sentences) {
+      AnalyzeSentenceCallable analyzeSentenceCallable = 
+          ++j < sentences.size() 
+            ? new AnalyzeSentenceCallable(sentence)
+            : new ParagraphEndAnalyzeSentenceCallable(sentence);
+      callables.add(analyzeSentenceCallable);
+    }
+    
+    try {
+      List<Future<AnalyzedSentence>> futures = executorService.invokeAll(callables);
+      for (Future<AnalyzedSentence> future : futures) {
+        AnalyzedSentence analyzedSentence = future.get();
+        rememberUnknownWords(analyzedSentence);
+        printSentenceInfo(analyzedSentence);
+        analyzedSentences.add(analyzedSentence);
+      }
+      
+    } catch (InterruptedException | ExecutionException e) {
+      throw new RuntimeException(e);
+    }
+    
+    return analyzedSentences;
+  }
+  
   
   @Override
   protected List<RuleMatch> performCheck(final List<AnalyzedSentence> analyzedSentences, final List<String> sentences,
@@ -87,20 +163,17 @@ public class MultiThreadedJLanguageTool extends JLanguageTool {
     int columnCount = 1;
 
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final int threads = getThreadPoolSize();
     
-    final ExecutorService executorService = getExecutorService(threads);
+    final ExecutorService executorService = getExecutorService();
     try {
       final List<Callable<List<RuleMatch>>> callables =
-              createTextCheckCallables(paraMode, annotatedText, analyzedSentences, sentences, allRules, charCount, lineCount, columnCount, threads);
+              createTextCheckCallables(paraMode, annotatedText, analyzedSentences, sentences, allRules, charCount, lineCount, columnCount);
       final List<Future<List<RuleMatch>>> futures = executorService.invokeAll(callables);
       for (Future<List<RuleMatch>> future : futures) {
         ruleMatches.addAll(future.get());
       }
     } catch (InterruptedException | ExecutionException e) {
       throw new RuntimeException(e);
-    } finally {
-      executorService.shutdownNow();
     }
     
     return ruleMatches;
@@ -108,7 +181,8 @@ public class MultiThreadedJLanguageTool extends JLanguageTool {
 
   private List<Callable<List<RuleMatch>>> createTextCheckCallables(ParagraphHandling paraMode,
        AnnotatedText annotatedText, List<AnalyzedSentence> analyzedSentences, List<String> sentences, 
-       List<Rule> allRules, int charCount, int lineCount, int columnCount, int threads) {
+       List<Rule> allRules, int charCount, int lineCount, int columnCount) {
+    final int threads = getThreadPoolSize();
     final int totalRules = allRules.size();
     final int chunkSize = totalRules / threads;
     int firstItem = 0;
@@ -118,6 +192,7 @@ public class MultiThreadedJLanguageTool extends JLanguageTool {
     // the rules than to split the text:
     for (int i = 0; i < threads; i++) {
       final List<Rule> subRules;
+      //TODO: make sure we don't split rules with same id so RuleGroupFilter still works
       if (i == threads - 1) {
         // make sure the last rules are not lost due to rounding issues:
         subRules = allRules.subList(firstItem, totalRules);
@@ -128,5 +203,42 @@ public class MultiThreadedJLanguageTool extends JLanguageTool {
       firstItem = firstItem + chunkSize;
     }
     return callables;
+  }
+
+  private class AnalyzeSentenceCallable implements Callable<AnalyzedSentence> {
+    private final String sentence;
+
+    private AnalyzeSentenceCallable(String sentence) {
+      this.sentence = sentence;
+    }
+
+    @Override
+    public AnalyzedSentence call() throws Exception {
+      return getAnalyzedSentence(sentence);
+    }
+  }
+  
+  private final class ParagraphEndAnalyzeSentenceCallable extends AnalyzeSentenceCallable {
+    private ParagraphEndAnalyzeSentenceCallable(String sentence) {
+      super(sentence);
+    }
+
+    @Override
+    public AnalyzedSentence call() throws Exception {
+      AnalyzedSentence analyzedSentence = super.call();
+      AnalyzedTokenReadings[] anTokens = analyzedSentence.getTokens();
+      anTokens[anTokens.length - 1].setParagraphEnd();
+      analyzedSentence = new AnalyzedSentence(anTokens);  ///TODO: why???
+      return analyzedSentence;
+    }
+  }
+
+  private static final class DaemonThreadFactory implements ThreadFactory {
+    @Override
+    public Thread newThread(Runnable r) {
+      Thread thread = new Thread(r);
+      thread.setDaemon(true); // so we don't have to shut down executor explicitly
+      return thread;
+    }
   }
 }

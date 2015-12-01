@@ -22,7 +22,7 @@ import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsParameters;
 import com.sun.net.httpserver.HttpsServer;
 import org.languagetool.JLanguageTool;
-import org.languagetool.gui.Tools;
+import org.languagetool.tools.Tools;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -79,16 +79,18 @@ public class HTTPSServer extends Server {
         httpHandler.setAfterTheDeadlineMode(config.getAfterTheDeadlineLanguage());
       }
       httpHandler.setLanguageModel(config.getLanguageModelDir());
+      httpHandler.setMaxWorkQueueSize(config.getMaxWorkQueueSize());
+      httpHandler.setRulesConfigurationFile(config.getRulesConfigFile());
       server.createContext("/", httpHandler);
       executorService = getExecutorService(workQueue, config);
       server.setExecutor(executorService);
     } catch (BindException e) {
       final ResourceBundle messages = JLanguageTool.getMessageBundle();
-      final String message = Tools.makeTexti18n(messages, "https_server_start_failed", host, Integer.toString(port));
+      final String message = Tools.i18n(messages, "https_server_start_failed", host, Integer.toString(port));
       throw new PortBindingException(message, e);
     } catch (Exception e) {
       final ResourceBundle messages = JLanguageTool.getMessageBundle();
-      final String message = Tools.makeTexti18n(messages, "https_server_start_failed_unknown_reason", host, Integer.toString(port));
+      final String message = Tools.i18n(messages, "https_server_start_failed_unknown_reason", host, Integer.toString(port));
       throw new RuntimeException(message, e);
     }
   }
@@ -133,11 +135,9 @@ public class HTTPSServer extends Server {
     if (args.length == 0 || args.length > 7 || usageRequested(args)) {
       System.out.println("Usage: " + HTTPSServer.class.getSimpleName()
               + " --config propertyFile [--port|-p port] [--public]");
-      System.out.println("  --config file  a Java property file with values for:");
+      System.out.println("  --config file  a Java property file (one key=value entry per line) with values for:");
       System.out.println("                 'keystore' - a Java keystore with an SSL certificate");
       System.out.println("                 'password' - the keystore's password");
-      System.out.println("                 'mode' - 'LanguageTool' or 'AfterTheDeadline' for emulation of After the Deadline output (optional, experimental)");
-      System.out.println("                 'afterTheDeadlineLanguage' - language code like 'en' or 'en-GB' (required if mode is 'AfterTheDeadline')");
       printCommonConfigFileOptions();
       printCommonOptions();
       System.exit(1);

@@ -21,12 +21,8 @@ package org.languagetool.rules;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.JLanguageTool;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.*;
 
 /**
@@ -42,27 +38,21 @@ import java.util.*;
  */
 public abstract class AbstractWordCoherencyRule extends Rule {
 
-  private static final String FILE_ENCODING = "utf-8";
-  
   /**
-   * Get a path to a UTF-8 encoded coherency file, e.g. {@code de/coherency.txt}. This will
-   * be loaded with {@link org.languagetool.databroker.ResourceDataBroker#getFromRulesDirAsStream}.
+   * Maps words in both directions, e.g. "aufwendig -&gt; aufwändig" and "aufwändig -&gt; aufwendig".
+   * @since 3.0
    */
-  protected abstract String getFilePath();
+  protected abstract Map<String, String> getWordMap();
 
   /**
    * Get the message shown to the user if the rule matches.
    */
   protected abstract String getMessage(String word1, String word2);
   
-  private final Map<String, String> relevantWords;        // e.g. "aufwendig -> aufwändig"
   private final Map<String, RuleMatch> shouldNotAppearWord = new HashMap<>();  // e.g. aufwändig -> RuleMatch of aufwendig
 
   public AbstractWordCoherencyRule(ResourceBundle messages) throws IOException {
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_misc")));
-    }
-    relevantWords = loadWords(JLanguageTool.getDataBroker().getFromRulesDirAsStream(getFilePath()));
+    super.setCategory(new Category(messages.getString("category_misc")));
   }
   
   @Override
@@ -71,10 +61,9 @@ public abstract class AbstractWordCoherencyRule extends Rule {
     final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
     for (AnalyzedTokenReadings tmpToken : tokens) {
       String token = tmpToken.getToken();
-      final String origToken = token;
       final List<AnalyzedToken> readings = tmpToken.getReadings();
       // TODO: in theory we need to care about the other readings, too (affects e.g. German "Schenke" as a noun):
-      if (readings != null && readings.size() > 0) {
+      if (readings.size() > 0) {
         final String baseform = readings.get(0).getLemma();
         if (baseform != null) {
           token = baseform;
@@ -84,40 +73,18 @@ public abstract class AbstractWordCoherencyRule extends Rule {
         final RuleMatch otherMatch = shouldNotAppearWord.get(token);
         final String otherSpelling = otherMatch.getMessage();
         final String msg = getMessage(token, otherSpelling);
-        final RuleMatch ruleMatch = new RuleMatch(this, tmpToken.getStartPos(), tmpToken.getStartPos() + origToken.length(), msg);
+        final RuleMatch ruleMatch = new RuleMatch(this, tmpToken.getStartPos(), tmpToken.getEndPos(), msg);
         ruleMatch.setSuggestedReplacement(otherSpelling);
         ruleMatches.add(ruleMatch);
-      } else if (relevantWords.containsKey(token)) {
-        final String shouldNotAppear = relevantWords.get(token);
-        final RuleMatch potentialRuleMatch = new RuleMatch(this, tmpToken.getStartPos(), tmpToken.getStartPos() + origToken.length(), token);
+      } else if (getWordMap().containsKey(token)) {
+        final String shouldNotAppear = getWordMap().get(token);
+        final RuleMatch potentialRuleMatch = new RuleMatch(this, tmpToken.getStartPos(), tmpToken.getEndPos(), token);
         shouldNotAppearWord.put(shouldNotAppear, potentialRuleMatch);
       }
     }
     return toRuleMatchArray(ruleMatches);
   }
 
-  private Map<String, String> loadWords(InputStream stream) throws IOException {
-    final Map<String, String> map = new HashMap<>();
-    try (
-      InputStreamReader reader = new InputStreamReader(stream, FILE_ENCODING);
-      BufferedReader br = new BufferedReader(reader)
-    ) {
-      String line;
-      while ((line = br.readLine()) != null) {
-        if (line.length() < 1 || line.charAt(0) == '#') {   // ignore comments
-          continue;
-        }
-        final String[] parts = line.split(";");
-        if (parts.length != 2) {
-          throw new IOException("Format error in file " + JLanguageTool.getDataBroker().getFromRulesDirAsUrl(getFilePath()) + ", line: " + line);
-        }
-        map.put(parts[0], parts[1]);
-        map.put(parts[1], parts[0]);
-      }
-    }
-    return map;
-  }
-  
   @Override
   public void reset() {
     shouldNotAppearWord.clear();

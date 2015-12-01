@@ -46,7 +46,6 @@ public class Galician extends Language {
   private SentenceTokenizer sentenceTokenizer;
   private Synthesizer synthesizer;
   private Disambiguator disambiguator;
-  private String name = "Galician";
 
   @Override
   public SentenceTokenizer getSentenceTokenizer() {
@@ -58,12 +57,7 @@ public class Galician extends Language {
   
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Galician";
   }
 
   @Override
@@ -74,16 +68,6 @@ public class Galician extends Language {
   @Override
   public String[] getCountries() {
     return new String[]{"ES"};
-  }
-  
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "“", "«", "»", "‘", "\"", "'" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "”", "»", "«", "’", "\"", "'" };
   }
   
   @Override
@@ -128,7 +112,9 @@ public class Galician extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "“", "«", "»", "‘", "\"", "'"),
+                    Arrays.asList("]", ")", "}", "”", "»", "«", "’", "\"", "'")),
             new HunspellRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
             new MultipleWhitespaceRule(messages, this),

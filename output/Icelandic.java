@@ -38,16 +38,10 @@ public class Icelandic extends Language {
 
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
-  private String name = "Icelandic";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Icelandic";
   }
 
   @Override
@@ -86,7 +80,7 @@ public class Icelandic extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages),
             new HunspellNoSuggestionRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
             new WordRepeatRule(messages, this),

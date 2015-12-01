@@ -20,7 +20,6 @@ package org.languagetool;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -39,7 +38,6 @@ import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tokenizers.SentenceTokenizer;
 import org.languagetool.tokenizers.Tokenizer;
-import org.languagetool.tools.StringTools;
 
 import static org.junit.Assert.assertEquals;
 
@@ -56,10 +54,10 @@ public final class TestTools {
 
   public static Set<Language> getLanguagesExcept(String[] langCodes) {
     final Set<Language> languages = new HashSet<>();
-    languages.addAll(Arrays.asList(Language.LANGUAGES));
+    languages.addAll(Languages.getWithDemoLanguage());
     if (langCodes != null) {
       for (String langCode : langCodes) {
-        final Language lang = Language.getLanguageForShortName(langCode);
+        final Language lang = Languages.getLanguageForShortName(langCode);
         languages.remove(lang);
       }
     }
@@ -88,8 +86,8 @@ public final class TestTools {
     final StringBuilder inputString = new StringBuilder();
     final List<String> input = new ArrayList<>();
     Collections.addAll(input, sentences);
-    for (final String string : input) {
-      inputString.append(string);
+    for (final String s : input) {
+      inputString.append(s);
     }
     assertEquals(input, sTokenizer.tokenize(inputString.toString()));
   }
@@ -103,7 +101,7 @@ public final class TestTools {
     for (final Iterator<AnalyzedTokenReadings> iter = output.iterator(); iter.hasNext();) {
       final AnalyzedTokenReadings tokenReadings = iter.next();
       final List<String> readings = getAsStrings(tokenReadings);
-      outputStr.append(StringTools.listToString(readings, "|"));
+      outputStr.append(String.join("|", readings));
       if (iter.hasNext()) {
         outputStr.append(" -- ");
       }
@@ -151,7 +149,7 @@ public final class TestTools {
       for (int i = 0; i < output.length; i++) {
         final AnalyzedTokenReadings tokenReadings = output[i];
         final List<String> readings = getAsStrings(tokenReadings);
-        outputStr.append(StringTools.listToString(readings, "|"));
+        outputStr.append(String.join("|", readings));
         if (i < output.length - 1) {
           outputStr.append(' ');
         }
@@ -171,7 +169,7 @@ public final class TestTools {
   }
 
   public static void testDictionary(BaseTagger tagger, Language language) throws IOException {
-    final Dictionary dictionary = Dictionary.read(JLanguageTool.getDataBroker().getFromResourceDirAsUrl(tagger.getFileName()));
+    final Dictionary dictionary = Dictionary.read(JLanguageTool.getDataBroker().getFromResourceDirAsUrl(tagger.getDictionaryPath()));
     final DictionaryLookup lookup = new DictionaryLookup(dictionary);
     for (WordData wordData : lookup) {
       if (wordData.getTag() == null || wordData.getTag().length() == 0) {

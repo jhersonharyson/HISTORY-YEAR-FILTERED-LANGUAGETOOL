@@ -18,40 +18,38 @@
  */
 package org.languagetool.language;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
 
 import org.languagetool.Language;
+import org.languagetool.languagemodel.LanguageModel;
+import org.languagetool.languagemodel.LuceneLanguageModel;
 import org.languagetool.rules.*;
-// 181 +
-//import org.languagetool.rules.WordRepeatRule;
+import org.languagetool.rules.it.ItalianConfusionProbabilityRule;
 import org.languagetool.rules.it.ItalianWordRepeatRule;
-// 181 -
 import org.languagetool.rules.it.MorfologikItalianSpellerRule;
-// 3607406 +
-// 3607406 -
 
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.it.ItalianTagger;
 import org.languagetool.tokenizers.SRXSentenceTokenizer;
 import org.languagetool.tokenizers.SentenceTokenizer;
 
-public class Italian extends Language {
+import org.languagetool.tagging.disambiguation.Disambiguator;
+import org.languagetool.tagging.disambiguation.rules.it.ItalianRuleDisambiguator;
+
+public class Italian extends Language implements AutoCloseable {
 
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
-  private String name = "Italian";
-
+  private LuceneLanguageModel languageModel;
+  private Disambiguator disambiguator;
+  
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Italian";
   }
 
   @Override
@@ -64,16 +62,6 @@ public class Italian extends Language {
     return new String[]{"IT", "CH"};
   }
 
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "»", "«" /*"‘"*/ };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "«", "»" /*"’"*/ };
-  }
-  
   @Override
   public Tagger getTagger() {
     if (tagger == null) {
@@ -99,20 +87,50 @@ public class Italian extends Language {
   @Override
   public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-// 3607406 +
             new WhitespaceBeforePunctuationRule(messages),
-// 3607406 -
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "»", "«" /*"‘"*/),
+                    Arrays.asList("]", ")", "}", "«", "»" /*"’"*/)),
             new MorfologikItalianSpellerRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
-// 181 +
-//            new WordRepeatRule(messages),
             new ItalianWordRepeatRule(messages, this),
-// 181 -
             new MultipleWhitespaceRule(messages, this)
     );
+  }
+
+  /** @since 3.1 */
+  @Override
+  public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
+    if (languageModel == null) {
+      languageModel = new LuceneLanguageModel(new File(indexDir, getShortName()));
+    }
+    return languageModel;
+  }
+
+  /** @since 3.1 */
+  @Override
+  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+    return Arrays.<Rule>asList(
+            new ItalianConfusionProbabilityRule(messages, languageModel, this)
+    );
+  }
+
+  /** @since 3.1 */
+  @Override
+  public void close() throws Exception {
+    if (languageModel != null) {
+      languageModel.close();
+    }
+  }
+
+  @Override
+  public final Disambiguator getDisambiguator() {
+    if (disambiguator == null) {
+      disambiguator = new ItalianRuleDisambiguator();
+    }
+    return disambiguator;
   }
 
 }

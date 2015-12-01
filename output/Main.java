@@ -16,17 +16,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301
  * USA
  */
-
 package org.languagetool.openoffice;
 
-/** OpenOffice 3.x Integration
+/**
+ * LibreOffice/OpenOffice integration.
  * 
  * @author Marcin Miłkowski
  */
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.ResourceBundle;
@@ -37,9 +36,14 @@ import javax.swing.UIManager;
 
 import com.sun.star.lang.*;
 import com.sun.star.lang.IllegalArgumentException;
+import com.sun.star.linguistic2.LinguServiceEvent;
+import com.sun.star.linguistic2.LinguServiceEventFlags;
+import com.sun.star.text.TextMarkupType;
+
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
-import org.languagetool.MultiThreadedJLanguageTool;
+import org.languagetool.Languages;
 import org.languagetool.gui.AboutDialog;
 import org.languagetool.gui.Configuration;
 import org.languagetool.markup.AnnotatedText;
@@ -86,6 +90,12 @@ public class Main extends WeakBase implements XJobExecutor,
   // e.g. language ="qlt" country="ES" variant="ca-ES-valencia":
   private static final String LIBREOFFICE_SPECIAL_LANGUAGE_TAG = "qlt";
 
+  private static final int MAX_SUGGESTIONS = 15;
+  
+  private static boolean testMode;
+
+  private final List<XLinguServiceEventListener> xEventListeners;
+
   private Configuration config;
   private JLanguageTool langTool;
   private Language docLanguage;
@@ -95,8 +105,6 @@ public class Main extends WeakBase implements XJobExecutor,
   // or the context menu.
   private Set<String> disabledRules;
   private Set<String> disabledRulesUI;
-
-  private List<XLinguServiceEventListener> xEventListeners;
 
   // Make another instance of JLanguageTool and assign it to langTool if true.
   private boolean recheck;
@@ -124,7 +132,7 @@ public class Main extends WeakBase implements XJobExecutor,
         disabledRules = new HashSet<>();
       }
       disabledRulesUI = new HashSet<>(disabledRules);
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
     }
   }
@@ -133,23 +141,24 @@ public class Main extends WeakBase implements XJobExecutor,
     xContext = xCompContext;
   }
 
+  @Nullable
   private XComponent getXComponent() {
     try {
       final XMultiComponentFactory xMCF = xContext.getServiceManager();
       final Object desktop = xMCF.createInstanceWithContext("com.sun.star.frame.Desktop", xContext);
       final XDesktop xDesktop = UnoRuntime.queryInterface(XDesktop.class, desktop);
       return xDesktop.getCurrentComponent();
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
       return null;
     }
   }
 
   /**
-   * Checks the language under the cursor. Used for opening the configuration
-   * dialog.
+   * Checks the language under the cursor. Used for opening the configuration dialog.
    * @return the language under the visible cursor
    */
+  @Nullable
   private Language getLanguage() {
     final XComponent xComponent = getXComponent();
     final Locale charLocale;
@@ -174,19 +183,19 @@ public class Main extends WeakBase implements XJobExecutor,
       // whether the text is e.g. Khmer or Tamil (the only "complex text layout (CTL)" languages we support so far).
       // Thus we check the text itself:
       if (new KhmerDetector().isThisLanguage(xCursor.getText().getString())) {
-        return Language.getLanguageForShortName("km");
+        return Languages.getLanguageForShortName("km");
       }
       if (new TamilDetector().isThisLanguage(xCursor.getText().getString())) {
-        return Language.getLanguageForShortName("ta");
+        return Languages.getLanguageForShortName("ta");
       }
 
       final Object obj = xCursorProps.getPropertyValue("CharLocale");
       if (obj == null) {
-        return Language.getLanguageForShortName("en-US");
+        return Languages.getLanguageForShortName("en-US");
       }
       charLocale = (Locale) obj;
       boolean langIsSupported = false;
-      for (Language element : Language.LANGUAGES) {
+      for (Language element : Languages.get()) {
         if (charLocale.Language.equalsIgnoreCase(LIBREOFFICE_SPECIAL_LANGUAGE_TAG)
             && element.getShortNameWithCountryAndVariant().equalsIgnoreCase(charLocale.Variant)) {
           langIsSupported = true;
@@ -198,12 +207,12 @@ public class Main extends WeakBase implements XJobExecutor,
         }
       }
       if (!langIsSupported) {
-        final String message = org.languagetool.gui.Tools.makeTexti18n(
+        final String message = org.languagetool.tools.Tools.i18n(
             MESSAGES, "language_not_supported", charLocale.Language);
         JOptionPane.showMessageDialog(null, message);
         return null;
       }
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
       return null;
     }
@@ -213,12 +222,12 @@ public class Main extends WeakBase implements XJobExecutor,
   private Language getLanguage(Locale locale) {
     try {
       if (locale.Language.equalsIgnoreCase(LIBREOFFICE_SPECIAL_LANGUAGE_TAG)) {
-        return Language.getLanguageForShortName(locale.Variant);
+        return Languages.getLanguageForShortName(locale.Variant);
       } else {
-        return Language.getLanguageForShortName(locale.Language + "-" + locale.Country);
+        return Languages.getLanguageForShortName(locale.Language + "-" + locale.Country);
       }
     } catch (java.lang.IllegalArgumentException e) {
-      return Language.getLanguageForShortName(locale.Language);
+      return Languages.getLanguageForShortName(locale.Language);
     }
   }
 
@@ -247,7 +256,7 @@ public class Main extends WeakBase implements XJobExecutor,
       paRes.aProperties = propertyValues;
       int[] footnotePositions = getPropertyValues("FootnotePositions", propertyValues);  // since LO 4.3
       return doGrammarCheckingInternal(paraText, locale, paRes, footnotePositions);
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
       return paRes;
     }
@@ -344,7 +353,7 @@ public class Main extends WeakBase implements XJobExecutor,
             }
           }
         }
-      } catch (final Throwable t) {
+      } catch (Throwable t) {
         showError(t);
         paRes.nBehindEndOfSentencePosition = paraText.length();
       }
@@ -372,9 +381,15 @@ public class Main extends WeakBase implements XJobExecutor,
   private void initLanguageTool() {
     try {
       prepareConfig(docLanguage);
-      langTool = new MultiThreadedJLanguageTool(docLanguage, config.getMotherTongue());
-      langTool.activateDefaultPatternRules();
-      langTool.activateDefaultFalseFriendRules();
+      // not using MultiThreadedJLanguageTool here fixes "osl::Thread::Create failed", see https://bugs.documentfoundation.org/show_bug.cgi?id=90740:
+      langTool = new JLanguageTool(docLanguage, config.getMotherTongue());
+      File ngramDirectory = config.getNgramDirectory();
+      if (ngramDirectory != null) {
+        File ngramLangDir = new File(config.getNgramDirectory(), docLanguage.getShortName());
+        if (ngramLangDir.exists()) {  // user might have ngram data only for some languages and that's okay
+          langTool.activateLanguageModelRules(ngramDirectory);
+        }
+      }
       for (Rule rule : langTool.getAllActiveRules()) {
         if (rule.isDictionaryBasedSpellingRule()) {
           langTool.disableRule(rule.getId());
@@ -384,7 +399,7 @@ public class Main extends WeakBase implements XJobExecutor,
         }
       }
       recheck = false;
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
     }
   }
@@ -423,6 +438,7 @@ public class Main extends WeakBase implements XJobExecutor,
     return paraText.replaceAll("([^\\d][.!?])\\d ", "$1¹ ");
   }
 
+  @Nullable
   private synchronized SingleProofreadingError[] checkParaRules(
       final String paraText, final int startPos,
       final int endPos, final String docID) {
@@ -431,7 +447,7 @@ public class Main extends WeakBase implements XJobExecutor,
         paragraphMatches = langTool.check(paraText, false,
             JLanguageTool.ParagraphHandling.ONLYPARA);
         this.docID = docID;
-      } catch (final Throwable t) {
+      } catch (Throwable t) {
         showError(t);
       }
     }
@@ -461,7 +477,7 @@ public class Main extends WeakBase implements XJobExecutor,
   private SingleProofreadingError createOOoError(final RuleMatch ruleMatch,
       final int startIndex) {
     final SingleProofreadingError aError = new SingleProofreadingError();
-    aError.nErrorType = com.sun.star.text.TextMarkupType.PROOFREADING;
+    aError.nErrorType = TextMarkupType.PROOFREADING;
     // the API currently has no support for formatting text in comments
     aError.aFullComment = ruleMatch.getMessage()
         .replaceAll("<suggestion>", "\"").replaceAll("</suggestion>", "\"")
@@ -475,8 +491,14 @@ public class Main extends WeakBase implements XJobExecutor,
     aError.aShortComment = org.languagetool.gui.Tools
         .shortenComment(aError.aShortComment);
 
-    aError.aSuggestions = ruleMatch.getSuggestedReplacements().toArray(
-        new String[ruleMatch.getSuggestedReplacements().size()]);
+    int numSuggestions = ruleMatch.getSuggestedReplacements().size();
+    String[] allSuggestions = ruleMatch.getSuggestedReplacements().toArray(
+        new String[numSuggestions]);
+    if (numSuggestions > MAX_SUGGESTIONS) {
+      aError.aSuggestions = Arrays.copyOfRange(allSuggestions, 0, MAX_SUGGESTIONS);
+    } else {
+      aError.aSuggestions = allSuggestions;
+    }
     aError.nErrorStart = ruleMatch.getFromPos() + startIndex;
     aError.nErrorLength = ruleMatch.getToPos() - ruleMatch.getFromPos();
     aError.aRuleIdentifier = ruleMatch.getRule().getId();
@@ -522,7 +544,7 @@ public class Main extends WeakBase implements XJobExecutor,
   public final Locale[] getLocales() {
     try {
       List<Locale> locales = new ArrayList<>();
-      for (final Language lang : Language.LANGUAGES) {
+      for (final Language lang : Languages.get()) {
         if (lang.getCountries().length == 0) {
           // e.g. Esperanto
           if (lang.getVariant() != null) {
@@ -541,7 +563,7 @@ public class Main extends WeakBase implements XJobExecutor,
         }
       }
       return locales.toArray(new Locale[locales.size()]);
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
       return new Locale[0];
     }
@@ -554,7 +576,7 @@ public class Main extends WeakBase implements XJobExecutor,
   @Override
   public final boolean hasLocale(final Locale locale) {
     try {
-      for (final Language element : Language.LANGUAGES) {
+      for (final Language element : Languages.get()) {
         if (locale.Language.equalsIgnoreCase(LIBREOFFICE_SPECIAL_LANGUAGE_TAG)
             && element.getShortNameWithCountryAndVariant().equals(locale.Variant)) {
           return true;
@@ -563,7 +585,7 @@ public class Main extends WeakBase implements XJobExecutor,
           return true;
         }
       }
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
     }
     return false;
@@ -613,8 +635,8 @@ public class Main extends WeakBase implements XJobExecutor,
     if (!xEventListeners.isEmpty()) {
       for (final XLinguServiceEventListener xEvLis : xEventListeners) {
         if (xEvLis != null) {
-          final com.sun.star.linguistic2.LinguServiceEvent xEvent = new com.sun.star.linguistic2.LinguServiceEvent();
-          xEvent.nEvent = com.sun.star.linguistic2.LinguServiceEventFlags.PROOFREAD_AGAIN;
+          final LinguServiceEvent xEvent = new LinguServiceEvent();
+          xEvent.nEvent = LinguServiceEventFlags.PROOFREAD_AGAIN;
           xEvLis.processLinguServiceEvent(xEvent);
         }
       }
@@ -680,7 +702,7 @@ public class Main extends WeakBase implements XJobExecutor,
       } else {
         System.err.println("Sorry, don't know what to do, sEvent = " + sEvent);
       }
-    } catch (final Throwable e) {
+    } catch (Throwable e) {
       showError(e);
     }
   }
@@ -716,8 +738,11 @@ public class Main extends WeakBase implements XJobExecutor,
   }
 
   static void showError(final Throwable e) {
+    if (testMode) {
+      throw new RuntimeException(e);
+    }
     String msg = "An error has occurred in LanguageTool "
-        + JLanguageTool.VERSION + ":\n" + e.toString() + "\nStacktrace:\n";
+        + JLanguageTool.VERSION + ":\n" + e + "\nStacktrace:\n";
     msg += Tools.getFullStackTrace(e);
     final String metaInfo = "OS: " + System.getProperty("os.name") + " on "
         + System.getProperty("os.arch") + ", Java version "
@@ -725,21 +750,27 @@ public class Main extends WeakBase implements XJobExecutor,
         + System.getProperty("java.vm.vendor");
     msg += metaInfo;
     final DialogThread dt = new DialogThread(msg);
-    e.printStackTrace();  // without this, we see no exception if a test case fails
+    e.printStackTrace();
     dt.start();
   }
 
   private File getHomeDir() {
     final String homeDir = System.getProperty("user.home");
     if (homeDir == null) {
-      @SuppressWarnings("ThrowableInstanceNeverThrown")
-      final RuntimeException ex = new RuntimeException("Could not get home directory");
-      showError(ex);
+      showError(new RuntimeException("Could not get home directory"));
     }
     return new File(homeDir);
   }
 
-  private class AboutDialogThread extends Thread {
+  /**
+   * Will throw exception instead of showing errors as dialogs - use only for test cases.
+   * @since 2.9
+   */
+  static void setTestMode(boolean mode) {
+    testMode = mode;
+  }
+
+  private static class AboutDialogThread extends Thread {
 
     private final ResourceBundle messages;
 
@@ -749,7 +780,7 @@ public class Main extends WeakBase implements XJobExecutor,
 
     @Override
     public void run() {
-      // TODO: null can cause the dialog to appear on the wrong screen in a
+      // Note: null can cause the dialog to appear on the wrong screen in a
       // multi-monitor setup, but we just don't have a proper java.awt.Component
       // here which we could use instead:
       final AboutDialog about = new AboutDialog(messages, null);
@@ -768,7 +799,7 @@ public class Main extends WeakBase implements XJobExecutor,
     config.setDisabledRuleIds(disabledRulesUI);
     try {
       config.saveConfiguration(langTool.getLanguage());
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
     }
     recheck = true;
@@ -785,7 +816,7 @@ public class Main extends WeakBase implements XJobExecutor,
     config.setDisabledRuleIds(disabledRules);
     try {
       config.saveConfiguration(langTool.getLanguage());
-    } catch (final Throwable t) {
+    } catch (Throwable t) {
       showError(t);
     }
     recheck = true;
@@ -796,48 +827,17 @@ public class Main extends WeakBase implements XJobExecutor,
     return "LanguageTool";
   }
 
-}
+  static class DialogThread extends Thread {
+    private final String text;
 
-/**
- * A simple comparator for sorting errors by their position.
- */
-class ErrorPositionComparator implements Comparator<SingleProofreadingError> {
-
-  @Override
-  public int compare(final SingleProofreadingError match1,
-      final SingleProofreadingError match2) {
-    if (match1.aSuggestions.length == 0 && match2.aSuggestions.length > 0) {
-      return 1;
+    DialogThread(final String text) {
+      this.text = text;
     }
-    if (match2.aSuggestions.length == 0 && match1.aSuggestions.length > 0) {
-      return -1;
-    }
-    final int error1pos = match1.nErrorStart;
-    final int error2pos = match2.nErrorStart;
-    if (error1pos > error2pos) {
-      return 1;
-    } else if (error1pos < error2pos) {
-      return -1;
-    } else {
-      if (match1.aSuggestions.length != 0 && match2.aSuggestions.length != 0
-          && match1.aSuggestions.length != match2.aSuggestions.length) {
-        return ((Integer) (match1.aSuggestions.length))
-            .compareTo(match2.aSuggestions.length);
-      }
-    }
-    return match1.aRuleIdentifier.compareTo(match2.aRuleIdentifier);
-  }
-}
 
-class DialogThread extends Thread {
-  private final String text;
-
-  DialogThread(final String text) {
-    this.text = text;
+    @Override
+    public void run() {
+      JOptionPane.showMessageDialog(null, text);
+    }
   }
 
-  @Override
-  public void run() {
-    JOptionPane.showMessageDialog(null, text);
-  }
 }

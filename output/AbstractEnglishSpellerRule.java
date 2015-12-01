@@ -18,6 +18,7 @@
  */
 package org.languagetool.rules.en;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.Language;
 import org.languagetool.rules.Example;
@@ -66,6 +67,7 @@ public abstract class AbstractEnglishSpellerRule extends MorfologikSpellerRule {
   }
 
   @SuppressWarnings({"ReuseOfLocalVariable", "ControlFlowStatementWithoutBraces"})
+  @Nullable
   private IrregularForms getIrregularFormsOrNull(String word) {
     IrregularForms irregularFormsOrNull = getIrregularFormsOrNull(word, "ed", Arrays.asList("ed"), "VBD", "verb", "past tense");
     if (irregularFormsOrNull != null) return irregularFormsOrNull;
@@ -81,6 +83,7 @@ public abstract class AbstractEnglishSpellerRule extends MorfologikSpellerRule {
     return irregularFormsOrNull;
   }
 
+  @Nullable
   private IrregularForms getIrregularFormsOrNull(String word, String wordSuffix, List<String> suffixes, String posTag, String posName, String formName) {
     try {
       for (String suffix : suffixes) {
@@ -112,10 +115,11 @@ public abstract class AbstractEnglishSpellerRule extends MorfologikSpellerRule {
   }
 
   /**
+   * @throws IOException 
    * @since 2.7
    */
   @Override
-  protected List<String> getAdditionalTopSuggestions(List<String> suggestions, String word) {
+  protected List<String> getAdditionalTopSuggestions(List<String> suggestions, String word) throws IOException {
     if ("Alot".equals(word)) {
       return Arrays.asList("A lot");
     } else if ("alot".equals(word)) {
@@ -129,10 +133,10 @@ public abstract class AbstractEnglishSpellerRule extends MorfologikSpellerRule {
   }
 
   private static class IrregularForms {
-    String baseform;
-    String posName;
-    String formName;
-    List<String> forms;
+    final String baseform;
+    final String posName;
+    final String formName;
+    final List<String> forms;
     private IrregularForms(String baseform, String posName, String formName, List<String> forms) {
       this.baseform = baseform;
       this.posName = posName;

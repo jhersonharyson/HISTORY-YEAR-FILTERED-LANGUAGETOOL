@@ -19,18 +19,21 @@
 package org.languagetool;
 
 import org.apache.commons.lang.StringUtils;
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.databroker.DefaultResourceDataBroker;
 import org.languagetool.databroker.ResourceDataBroker;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.markup.AnnotatedText;
 import org.languagetool.markup.AnnotatedTextBuilder;
 import org.languagetool.rules.*;
+import org.languagetool.rules.patterns.AbstractPatternRule;
 import org.languagetool.rules.patterns.FalseFriendRuleLoader;
 import org.languagetool.rules.patterns.PatternRule;
 import org.languagetool.rules.patterns.PatternRuleLoader;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.ParserConfigurationException;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,22 +43,23 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.jar.Manifest;
+import java.util.regex.Pattern;
 
 /**
  * The main class used for checking text against different rules:
  * <ul>
- * <li>the built-in Java rules (for English: <i>a</i> vs. <i>an</i>, whitespace after commas, ...)
- * <li>pattern rules loaded from external XML files with
- * {@link #loadPatternRules(String)}
- * <li>your own implementation of the abstract {@link Rule} classes added with
- * {@link #addRule(Rule)}
+ * <li>built-in Java rules (for English: <i>a</i> vs. <i>an</i>, whitespace after commas, ...)
+ * <li>built-in pattern rules loaded from external XML files (usually called {@code grammar.xml})
+ * <li>your own implementation of the abstract {@link Rule} classes added with {@link #addRule(Rule)}
  * </ul>
  * 
- * <p>Note that the constructors create a language checker that uses the built-in
- * Java rules only. Other rules (e.g. from XML) need to be added explicitly or
- * activated using {@link #activateDefaultPatternRules()}.
- * 
  * <p>You will probably want to use the sub class {@link MultiThreadedJLanguageTool} for best performance.
+ * 
+ * <p><b>Unicode:</b> LanguageTool expects text in Normalization Form KC (NFKC). For example, the
+ * German character 'ü' (lowercase u umlaut) must be in the string as Unicode character U+00FC,
+ * not as 'u' followed by the combining diaeresis character. See 
+ * <a href="https://docs.oracle.com/javase/tutorial/i18n/text/normalizerapi.html">the Oracle docs on
+ * normalizing text</a>.</p>
  * 
  * <p><b>Thread-safety:</b> this class is not thread safe. Create one instance per thread,
  * but create the language only once (e.g. {@code new English()}) and use it for all
@@ -66,9 +70,9 @@ import java.util.jar.Manifest;
 public class JLanguageTool {
 
   /** LanguageTool version as a string like {@code 2.3} or {@code 2.4-SNAPSHOT}. */
-  public static final String VERSION = "2.9-SNAPSHOT";
+  public static final String VERSION = "3.3-SNAPSHOT";
   /** LanguageTool build date and time like {@code 2013-10-17 16:10} or {@code null} if not run from JAR. */
-  public static final String BUILD_DATE = getBuildDate();
+  @Nullable public static final String BUILD_DATE = getBuildDate();
 
   /** The name of the file with error patterns. */
   public static final String PATTERN_FILE = "grammar.xml";
@@ -86,6 +90,7 @@ public class JLanguageTool {
   /**
    * Returns the build date or {@code null} if not run from JAR.
    */
+  @Nullable
   private static String getBuildDate() {
     try {
       final URL res = JLanguageTool.class.getResource(JLanguageTool.class.getSimpleName() + ".class");
@@ -114,8 +119,8 @@ public class JLanguageTool {
   private final Set<String> enabledRules = new HashSet<>();
   private final Set<String> disabledCategories = new HashSet<>();
 
-  private Language language;
-  private Language motherTongue;
+  private final Language language;
+  private final Language motherTongue;
 
   private PrintStream printStream;
 
@@ -131,7 +136,7 @@ public class JLanguageTool {
    * <li>ONLYPARA - only paragraph-level rules</li>
    * <li>ONLYNONPARA - only sentence-level rules</li></ul>
    */
-  public static enum ParagraphHandling {
+  public enum ParagraphHandling {
     /**
      * Handle normally - all kinds of rules run.
      */
@@ -150,7 +155,7 @@ public class JLanguageTool {
   
   /**
    * Create a JLanguageTool and setup the built-in Java rules for the
-   * given language, ignoring XML-based rules and false friend rules.
+   * given language.
    *
    * @param language the language of the text to be checked
    */
@@ -159,8 +164,8 @@ public class JLanguageTool {
   }
 
   /**
-   * Create a JLanguageTool and setup the built-in Java rules for the
-   * given language, ignoring XML-based rules except false friend rules.
+   * Create a JLanguageTool and setup the built-in rules for the
+   * given language and false friend rules for the text language / mother tongue pair.
    * 
    * @param language the language of the text to be checked
    * @param motherTongue the user's mother tongue, used for false friend rules, or <code>null</code>.
@@ -171,6 +176,12 @@ public class JLanguageTool {
     this.motherTongue = motherTongue;
     final ResourceBundle messages = ResourceBundleTools.getMessageBundle(language);
     builtinRules = getAllBuiltinRules(language, messages);
+    try {
+      activateDefaultPatternRules();
+      activateDefaultFalseFriendRules();
+    } catch (Exception e) {
+      throw new RuntimeException("Could not activate rules", e);
+    }
   }
   
   /**
@@ -258,14 +269,15 @@ public class JLanguageTool {
    * @param filename path to an XML file in the classpath or in the filesystem - the classpath is checked first
    * @return a List of {@link PatternRule} objects
    */
-  public List<PatternRule> loadPatternRules(final String filename) throws IOException {
+  public List<AbstractPatternRule> loadPatternRules(final String filename) throws IOException {
     final PatternRuleLoader ruleLoader = new PatternRuleLoader();
-    final InputStream is = this.getClass().getResourceAsStream(filename);
-    if (is == null) {
-      // happens for external rules plugged in as an XML file:
-      return ruleLoader.getRules(new File(filename));
-    } else {
-      return ruleLoader.getRules(is, filename);
+    try (InputStream is = this.getClass().getResourceAsStream(filename)) {
+      if (is == null) {
+        // happens for external rules plugged in as an XML file:
+        return ruleLoader.getRules(new File(filename));
+      } else {
+        return ruleLoader.getRules(is, filename);
+      }
     }
   }
 
@@ -278,17 +290,18 @@ public class JLanguageTool {
    * @param filename path to an XML file in the classpath or in the filesystem - the classpath is checked first
    * @return a List of {@link PatternRule} objects, or an empty list if mother tongue is not set
    */
-  public List<PatternRule> loadFalseFriendRules(final String filename)
+  public List<AbstractPatternRule> loadFalseFriendRules(final String filename)
       throws ParserConfigurationException, SAXException, IOException {
     if (motherTongue == null) {
-      return new ArrayList<>();
+      return Collections.emptyList();
     }
     final FalseFriendRuleLoader ruleLoader = new FalseFriendRuleLoader();
-    final InputStream is = this.getClass().getResourceAsStream(filename);
-    if (is == null) {
-      return ruleLoader.getRules(new File(filename), language, motherTongue);
-    } else {
-      return ruleLoader.getRules(is, language, motherTongue);
+    try (InputStream is = this.getClass().getResourceAsStream(filename)) {
+      if (is == null) {
+        return ruleLoader.getRules(new File(filename), language, motherTongue);
+      } else {
+        return ruleLoader.getRules(is, language, motherTongue);
+      }
     }
   }
 
@@ -311,12 +324,12 @@ public class JLanguageTool {
    * Loads and activates the pattern rules from
    * {@code org/languagetool/rules/<languageCode>/grammar.xml}.
    */
-  public void activateDefaultPatternRules() throws IOException {
-    final List<PatternRule> patternRules = language.getPatternRules();
+  private void activateDefaultPatternRules() throws IOException {
+    final List<AbstractPatternRule> patternRules = language.getPatternRules();
     final List<String> enabledRules = language.getDefaultEnabledRulesForVariant();
     final List<String> disabledRules = language.getDefaultDisabledRulesForVariant();
     if (!enabledRules.isEmpty() || !disabledRules.isEmpty()) {
-      for (PatternRule patternRule : patternRules) {
+      for (AbstractPatternRule patternRule : patternRules) {
         if (enabledRules.contains(patternRule.getId())) {
           patternRule.setDefaultOn();
         }
@@ -332,11 +345,10 @@ public class JLanguageTool {
    * Loads and activates the false friend rules from
    * <code>rules/false-friends.xml</code>.
    */
-  public void activateDefaultFalseFriendRules()
+  private void activateDefaultFalseFriendRules()
       throws ParserConfigurationException, SAXException, IOException {
-    final String falseFriendRulesFilename = JLanguageTool.getDataBroker().getRulesDir() + "/" + FALSE_FRIEND_FILE;
-    final List<PatternRule> patternRules = loadFalseFriendRules(falseFriendRulesFilename);
-    userRules.addAll(patternRules);
+    String falseFriendRulesFilename = JLanguageTool.getDataBroker().getRulesDir() + "/" + FALSE_FRIEND_FILE;
+    userRules.addAll(loadFalseFriendRules(falseFriendRulesFilename));
   }
 
   /**
@@ -472,14 +484,21 @@ public class JLanguageTool {
     }
     final List<Rule> allRules = getAllRules();
     printIfVerbose(allRules.size() + " rules activated for language " + language);
+    // Some rules have an internal state so they can do checks over sentence
+    // boundaries. These need to be reset so the checks don't suddenly
+    // work on different texts with the same data. However, it could be useful
+    // to keep the state information if we're checking a continuous text.    
+    for (final Rule rule : allRules) {
+      rule.reset();
+    }
 
     sentenceCount = sentences.size();
     unknownWords = new HashSet<>();
     final List<AnalyzedSentence> analyzedSentences = analyzeSentences(sentences);
     
-    final List<RuleMatch> ruleMatches = performCheck(analyzedSentences, sentences, allRules, paraMode, annotatedText);
-    
-    Collections.sort(ruleMatches);
+    List<RuleMatch> ruleMatches = performCheck(analyzedSentences, sentences, allRules, paraMode, annotatedText);
+    ruleMatches = new SameRuleGroupFilter().filter(ruleMatches);
+    // no sorting: SameRuleGroupFilter sorts rule matches already
     return ruleMatches;
   }
   
@@ -494,7 +513,7 @@ public class JLanguageTool {
     return analyzeSentences(sentences);
   }
   
-  private List<AnalyzedSentence> analyzeSentences(final List<String> sentences) throws IOException {
+  protected List<AnalyzedSentence> analyzeSentences(final List<String> sentences) throws IOException {
     final List<AnalyzedSentence> analyzedSentences = new ArrayList<>();
     
     int j = 0;
@@ -507,11 +526,17 @@ public class JLanguageTool {
         analyzedSentence = new AnalyzedSentence(anTokens);
       }
       analyzedSentences.add(analyzedSentence);
-      printIfVerbose(analyzedSentence.toString());
-      printIfVerbose(analyzedSentence.getAnnotations());
+      printSentenceInfo(analyzedSentence);
     }
     
     return analyzedSentences;
+  }
+
+  protected void printSentenceInfo(AnalyzedSentence analyzedSentence) {
+    if (printStream != null) {
+      printIfVerbose(analyzedSentence.toString());
+      printIfVerbose(analyzedSentence.getAnnotations());
+    }
   }
   
   protected List<RuleMatch> performCheck(final List<AnalyzedSentence> analyzedSentences, final List<String> sentences,
@@ -526,13 +551,15 @@ public class JLanguageTool {
     }
   }
 
-  public List<RuleMatch> checkAnalyzedSentence(final ParagraphHandling paraMode,
+  List<RuleMatch> checkAnalyzedSentence(final ParagraphHandling paraMode,
       final List<Rule> allRules, int charCount, int lineCount, int columnCount,
       final String sentence, final AnalyzedSentence analyzedSentence) throws IOException {
     return checkAnalyzedSentence(paraMode, allRules, charCount, lineCount, columnCount, sentence, analyzedSentence, null);
   }
   
   /**
+   * This is an internal method that's public only for technical reasons, please use one
+   * of the {@link #check(String)} methods instead. 
    * @since 2.3
    */
   public List<RuleMatch> checkAnalyzedSentence(final ParagraphHandling paraMode,
@@ -561,8 +588,7 @@ public class JLanguageTool {
         sentenceMatches.add(thisMatch);
       }
     }
-    final RuleMatchFilter filter = new SameRuleGroupFilter();
-    return filter.filter(sentenceMatches);
+    return new SameRuleGroupFilter().filter(sentenceMatches);
   }
 
   private boolean ignoreRule(Rule rule) {
@@ -621,11 +647,10 @@ public class JLanguageTool {
     thisMatch.setEndLine(lineCount + lineBreaksToEndOfError);
     thisMatch.setColumn(column);
     thisMatch.setEndColumn(endColumn);
-    thisMatch.setOffset(match.getFromPos() + charCount);
     return thisMatch;
   }
 
-  private void rememberUnknownWords(final AnalyzedSentence analyzedText) {
+  protected void rememberUnknownWords(final AnalyzedSentence analyzedText) {
     if (listUnknownWords) {
       final AnalyzedTokenReadings[] atr = analyzedText
           .getTokensWithoutWhitespace();
@@ -673,7 +698,11 @@ public class JLanguageTool {
    * @param sentence sentence to be analyzed
    */
   public AnalyzedSentence getAnalyzedSentence(final String sentence) throws IOException {
-    return language.getDisambiguator().disambiguate(getRawAnalyzedSentence(sentence));
+    AnalyzedSentence analyzedSentence = language.getDisambiguator().disambiguate(getRawAnalyzedSentence(sentence));
+    if (language.getPostDisambiguationChunker() != null) {
+      language.getPostDisambiguationChunker().addChunkTags(Arrays.asList(analyzedSentence.getTokens()));
+    }
+    return analyzedSentence;
   }
 
   /**
@@ -737,14 +766,20 @@ public class JLanguageTool {
   }
 
   private Map<Integer, String> replaceSoftHyphens(List<String> tokens) {
-    final Map<Integer, String> softHyphenTokens = new HashMap<>();
+    Pattern ignoredCharacterRegex = language.getIgnoredCharactersRegex();
+    
+    final Map<Integer, String> ignoredCharsTokens = new HashMap<>();
+    if (ignoredCharacterRegex == null) {
+      return ignoredCharsTokens;
+    }
+
     for (int i = 0; i < tokens.size(); i++) {
-      if (tokens.get(i).indexOf('\u00ad') != -1) {
-        softHyphenTokens.put(i, tokens.get(i));
-        tokens.set(i, tokens.get(i).replaceAll("\u00ad", ""));
+      if ( ignoredCharacterRegex.matcher(tokens.get(i)).find() ) {
+        ignoredCharsTokens.put(i, tokens.get(i));
+        tokens.set(i, ignoredCharacterRegex.matcher(tokens.get(i)).replaceAll(""));
       }
     }
-    return softHyphenTokens;
+    return ignoredCharsTokens;
   }
 
   /**
@@ -756,13 +791,6 @@ public class JLanguageTool {
     final List<Rule> rules = new ArrayList<>();
     rules.addAll(builtinRules);
     rules.addAll(userRules);
-    // Some rules have an internal state so they can do checks over sentence
-    // boundaries. These need to be reset so the checks don't suddenly
-    // work on different texts with the same data. However, it could be useful
-    // to keep the state information if we're checking a continuous text.    
-    for (final Rule rule : rules) {
-      rule.reset();
-    }
     return rules;
   }
   
@@ -781,7 +809,6 @@ public class JLanguageTool {
     // work on different texts with the same data. However, it could be useful
     // to keep the state information if we're checking a continuous text.    
     for (final Rule rule : rules) {
-      rule.reset();
       boolean isDisabled = disabledRules.contains(rule.getId()) || (rule.isDefaultOff() && !enabledRules.contains(rule.getId()));
       if (!isDisabled) {
         rulesActive.add(rule);
@@ -797,14 +824,13 @@ public class JLanguageTool {
    * @return a List of {@link Rule} objects
    * @since 2.3
    */
-  public List<PatternRule> getPatternRulesByIdAndSubId(String Id, String subId) {
+  public List<AbstractPatternRule> getPatternRulesByIdAndSubId(String Id, String subId) {
     final List<Rule> rules = getAllRules();
-    final List<PatternRule> rulesById = new ArrayList<>();   
+    final List<AbstractPatternRule> rulesById = new ArrayList<>();   
     for (final Rule rule : rules) {
-      rule.reset();
-      if (rule instanceof PatternRule) {
-        if (rule.getId().equals(Id) && ((PatternRule)rule).getSubId().equals(subId)) {
-          rulesById.add((PatternRule) rule);
+      if (rule instanceof AbstractPatternRule) {
+        if (rule.getId().equals(Id) && ((AbstractPatternRule) rule).getSubId().equals(subId)) {
+          rulesById.add((AbstractPatternRule) rule);
         }
       }
     }    
@@ -819,7 +845,7 @@ public class JLanguageTool {
     return sentenceCount;
   }
 
-  private void printIfVerbose(final String s) {
+  protected void printIfVerbose(final String s) {
     if (printStream != null) {
       printStream.println(s);
     }

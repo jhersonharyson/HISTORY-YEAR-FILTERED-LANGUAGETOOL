@@ -18,10 +18,10 @@
  */
 package org.languagetool.rules.patterns;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.io.ByteArrayInputStream;
+import java.io.FilePermission;
+import java.security.*;
+import java.util.*;
 
 import junit.framework.TestCase;
 
@@ -36,7 +36,7 @@ public class PatternRuleLoaderTest extends TestCase {
   public void testGetRules() throws Exception {
     final PatternRuleLoader prg = new PatternRuleLoader();
     final String name = "/xx/grammar.xml";
-    final List<PatternRule> rules = prg.getRules(JLanguageTool.getDataBroker().getFromRulesDirAsStream(name), name);
+    final List<AbstractPatternRule> rules = prg.getRules(JLanguageTool.getDataBroker().getFromRulesDirAsStream(name), name);
     assertTrue(rules.size() >= 30);
 
     final Rule demoRule1 = getRuleById("DEMO_RULE", rules);
@@ -67,10 +67,10 @@ public class PatternRuleLoaderTest extends TestCase {
     assertTrue(categories.contains("Test tokens with min and max attributes"));
 
     final PatternRule demoRuleWithChunk = (PatternRule) getRuleById("DEMO_CHUNK_RULE", rules);
-    final List<Element> elements = demoRuleWithChunk.getElements();
-    assertEquals(2, elements.size());
-    assertEquals(null, elements.get(1).getPOStag());
-    assertEquals(new ChunkTag("B-NP-singular"), elements.get(1).getChunkTag());
+    final List<PatternToken> patternTokens = demoRuleWithChunk.getPatternTokens();
+    assertEquals(2, patternTokens.size());
+    assertEquals(null, patternTokens.get(1).getPOStag());
+    assertEquals(new ChunkTag("B-NP-singular"), patternTokens.get(1).getChunkTag());
 
     final List<Rule> orRules = getRulesById("GROUP_WITH_URL", rules);
     assertEquals(3, orRules.size());
@@ -91,15 +91,28 @@ public class PatternRuleLoaderTest extends TestCase {
     assertNull("http://fake-server.org/rule-group-url", nextRule.getUrl());
   }
 
-  private Set<String> getCategoryNames(List<PatternRule> rules) {
+  public void testPermissionManager() throws Exception {
+    Policy.setPolicy(new MyPolicy());
+    System.setSecurityManager(new SecurityManager());
+    try {
+      PatternRuleLoader loader = new PatternRuleLoader();
+      // do not crash if Authenticator.setDefault() is forbidden,
+      // see https://github.com/languagetool-org/languagetool/issues/255
+      loader.getRules(new ByteArrayInputStream("<rules lang='xx'></rules>".getBytes("utf-8")), "fakeName");
+    } finally {
+      System.setSecurityManager(null);
+    }
+  }
+
+  private Set<String> getCategoryNames(List<AbstractPatternRule> rules) {
     final Set<String> categories = new HashSet<>();
-    for (PatternRule rule : rules) {
+    for (AbstractPatternRule rule : rules) {
       categories.add(rule.getCategory().getName());
     }
     return categories;
   }
 
-  private Rule getRuleById(String id, List<PatternRule> rules) {
+  private Rule getRuleById(String id, List<AbstractPatternRule> rules) {
     for (Rule rule : rules) {
       if (rule.getId().equals(id)) {
         return rule;
@@ -108,7 +121,7 @@ public class PatternRuleLoaderTest extends TestCase {
     throw new RuntimeException("No rule found for id '" + id + "'");
   }
 
-  private List<Rule> getRulesById(String id, List<PatternRule> rules) {
+  private List<Rule> getRulesById(String id, List<AbstractPatternRule> rules) {
     final List<Rule> result = new ArrayList<>();
     for (Rule rule : rules) {
       if (rule.getId().equals(id)) {
@@ -116,6 +129,42 @@ public class PatternRuleLoaderTest extends TestCase {
       }
     }
     return result;
+  }
+
+  static class MyPolicy extends Policy {
+    @Override
+    public PermissionCollection getPermissions(CodeSource codesource) {
+      PermissionCollection perms = new MyPermissionCollection();
+      perms.add(new RuntimePermission("setIO"));
+      perms.add(new RuntimePermission("setSecurityManager"));
+      perms.add(new FilePermission("<<ALL FILES>>", "read"));
+      return perms;
+    }
+  }
+
+  static class MyPermissionCollection extends PermissionCollection {
+    private final List<Permission> perms = new ArrayList<>();
+    @Override
+    public void add(Permission p) {
+      perms.add(p);
+    }
+    @Override
+    public boolean implies(Permission p) {
+      for (Permission perm : perms) {
+        if (perm.implies(p)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    @Override
+    public Enumeration<Permission> elements() {
+      return Collections.enumeration(perms);
+    }
+    @Override
+    public boolean isReadOnly() {
+      return false;
+    }
   }
 
 }

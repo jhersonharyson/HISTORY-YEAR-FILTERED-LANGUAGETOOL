@@ -24,6 +24,7 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 import org.languagetool.dev.index.Indexer;
 import org.xml.sax.helpers.DefaultHandler;
 
@@ -94,7 +95,7 @@ public class SentenceSourceIndexer extends DefaultHandler implements AutoCloseab
     final String languageCode = args[2];
     final int maxSentences = Integer.parseInt(args[3]);
 
-    final Language language = Language.getLanguageForShortName(languageCode);
+    final Language language = Languages.getLanguageForShortName(languageCode);
     if (maxSentences == 0) {
       System.out.println("Going to index contents from " + dumpFilesNames);
     } else {
@@ -103,7 +104,7 @@ public class SentenceSourceIndexer extends DefaultHandler implements AutoCloseab
     System.out.println("Output index dir: " + indexDir);
     
     final long start = System.currentTimeMillis();
-    try (FSDirectory fsDirectory = FSDirectory.open(indexDir)) {
+    try (FSDirectory fsDirectory = FSDirectory.open(indexDir.toPath())) {
       final SentenceSourceIndexer indexer = new SentenceSourceIndexer(fsDirectory, language, maxSentences);
       try {
         indexer.run(dumpFilesNames, language);

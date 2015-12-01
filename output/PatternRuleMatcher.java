@@ -18,6 +18,7 @@
  */
 package org.languagetool.rules.patterns;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.Language;
@@ -34,92 +35,95 @@ import java.util.List;
 /**
  * Matches a pattern rule against text.
  */
-class PatternRuleMatcher extends AbstractPatternRulePerformer {
+final class PatternRuleMatcher extends AbstractPatternRulePerformer implements RuleMatcher {
 
   private static final String SUGGESTION_START_TAG = "<suggestion>";
   private static final String SUGGESTION_END_TAG = "</suggestion>";
   private static final String MISTAKE = "<mistake/>";
 
   private final boolean useList;
-  private final List<ElementMatcher> elementMatchers;
+  private final List<PatternTokenMatcher> patternTokenMatchers;
 
   PatternRuleMatcher(PatternRule rule, boolean useList) {
     super(rule, rule.getLanguage().getUnifier());
     this.useList = useList;
-    this.elementMatchers = createElementMatchers();
+    this.patternTokenMatchers = createElementMatchers();
   }
 
-  final RuleMatch[] match(final AnalyzedSentence sentence) throws IOException {
+  @Override
+  public RuleMatch[] match(final AnalyzedSentence sentence) throws IOException {
     final List<RuleMatch> ruleMatches = new ArrayList<>();
+
     final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
     final List<Integer> tokenPositions = new ArrayList<>(tokens.length + 1);
-    final int patternSize = elementMatchers.size();
+    final int patternSize = patternTokenMatchers.size();
     final int limit = Math.max(0, tokens.length - patternSize + 1);
-    ElementMatcher elem = null;
+    PatternTokenMatcher pTokenMatcher = null;
     int i = 0;
     int minOccurCorrection = getMinOccurrenceCorrection();
-    while (i < limit + minOccurCorrection && !(rule.sentStart && i > 0)) {
+    while (i < limit + minOccurCorrection && !(rule.isSentStart() && i > 0)) {
       int skipShiftTotal = 0;
       boolean allElementsMatch = false;
       int firstMatchToken = -1;
-      int firstMarkerMatchToken = -1;
       int lastMatchToken = -1;
+      int firstMarkerMatchToken = -1;
       int lastMarkerMatchToken = -1;
       int prevSkipNext = 0;
-      if (rule.testUnification) {
+      if (rule.isTestUnification()) {
         unifier.reset();
       }
       tokenPositions.clear();
       int minOccurSkip = 0;
-      //System.out.println("===================================");
       for (int k = 0; k < patternSize; k++) {
-        final ElementMatcher prevElement = elem;
-        elem = elementMatchers.get(k);
-        elem.resolveReference(firstMatchToken, tokens, rule.getLanguage());
+        final PatternTokenMatcher prevTokenMatcher = pTokenMatcher;
+        pTokenMatcher = patternTokenMatchers.get(k);
+        pTokenMatcher.resolveReference(firstMatchToken, tokens, rule.getLanguage());
         final int nextPos = i + k + skipShiftTotal - minOccurSkip;
         prevMatched = false;
         if (prevSkipNext + nextPos >= tokens.length || prevSkipNext < 0) { // SENT_END?
           prevSkipNext = tokens.length - (nextPos + 1);
         }
         final int maxTok = Math.min(nextPos + prevSkipNext, tokens.length - (patternSize - k) + minOccurCorrection);
-        //System.out.println("-----------------------------------");
         for (int m = nextPos; m <= maxTok; m++) {
-          allElementsMatch = !tokens[m].isImmunized() && testAllReadings(tokens, elem, prevElement, m,
-              firstMatchToken, prevSkipNext);
+          allElementsMatch = !tokens[m].isImmunized() && testAllReadings(tokens, pTokenMatcher, prevTokenMatcher, m, firstMatchToken, prevSkipNext);
 
-          if (elem.getElement().getMinOccurrence() == 0) {
-            final ElementMatcher nextElement = elementMatchers.get(k + 1);
-            final boolean nextElementMatch = !tokens[m].isImmunized() && testAllReadings(tokens, nextElement, elem, m,
-                firstMatchToken, prevSkipNext);
-            if (nextElementMatch) {
-              // this element doesn't match, but it's optional so accept this and continue
-              allElementsMatch = true;
-              minOccurSkip++;
-              tokenPositions.add(0);
+          if (pTokenMatcher.getPatternToken().getMinOccurrence() == 0) {
+            boolean foundNext = false;
+            for (int k2 = k + 1; k2 < patternSize; k2++) {
+              final PatternTokenMatcher nextElement = patternTokenMatchers.get(k2);
+              final boolean nextElementMatch = !tokens[m].isImmunized() && testAllReadings(tokens, nextElement, pTokenMatcher, m,
+                  firstMatchToken, prevSkipNext);
+              if (nextElementMatch) {
+                // this element doesn't match, but it's optional so accept this and continue
+                allElementsMatch = true;
+                minOccurSkip++;
+                tokenPositions.add(0);
+                foundNext = true;
+                break;
+              } else if (nextElement.getPatternToken().getMinOccurrence() > 0) {
+                break;
+              }
+            }
+            if (foundNext) {
               break;
             }
           }
+          
           if (allElementsMatch) {
-            int skipForMax = skipMaxTokens(tokens, elem, firstMatchToken, prevSkipNext,
-                prevElement, m, patternSize - k -1);
+            int skipForMax = skipMaxTokens(tokens, pTokenMatcher, firstMatchToken, prevSkipNext,
+                prevTokenMatcher, m, patternSize - k -1);
             lastMatchToken = m + skipForMax;
-            /*System.out.println("LMT: " + lastMatchToken + ", elem inside marker? " + elem.getElement() + " -> " + elem.getElement().isInsideMarker());
-            System.out.println("TOKEN: " + tokens[m].getToken());
-            System.out.println("ELEMENT: " + elem.getElement());
-            System.out.println("minOccurSkip: " + minOccurSkip);
-            System.out.println("skipForMax: " + skipForMax);
-            System.out.println("");*/
             final int skipShift = lastMatchToken - nextPos;
             tokenPositions.add(skipShift + 1);
-            prevSkipNext = translateElementNo(elem.getElement().getSkipNext());
+            prevSkipNext = translateElementNo(pTokenMatcher.getPatternToken().getSkipNext());
             skipShiftTotal += skipShift;
             if (firstMatchToken == -1) {
               firstMatchToken = lastMatchToken - skipForMax;
             }
-            if (firstMarkerMatchToken == -1 && elem.getElement().isInsideMarker()) {
+            if (firstMarkerMatchToken == -1 && pTokenMatcher.getPatternToken().isInsideMarker()) {
               firstMarkerMatchToken = lastMatchToken - skipForMax;
             }
-            if (elem.getElement().isInsideMarker()) {
+            if (pTokenMatcher.getPatternToken().isInsideMarker()) {
               lastMarkerMatchToken = lastMatchToken;
             }
             break;
@@ -129,9 +133,7 @@ class PatternRuleMatcher extends AbstractPatternRulePerformer {
           break;
         }
       }
-
       if (allElementsMatch && tokenPositions.size() == patternSize) {
-        //System.out.println("YES");
         final RuleMatch ruleMatch = createRuleMatch(tokenPositions,
             tokens, firstMatchToken, lastMatchToken, firstMarkerMatchToken, lastMarkerMatchToken);
         if (ruleMatch != null) {
@@ -145,6 +147,7 @@ class PatternRuleMatcher extends AbstractPatternRulePerformer {
     return filteredMatches.toArray(new RuleMatch[filteredMatches.size()]);
   }
 
+  @Nullable
   private RuleMatch createRuleMatch(final List<Integer> tokenPositions,
       final AnalyzedTokenReadings[] tokens, final int firstMatchToken,
       final int lastMatchToken, int firstMarkerMatchToken, int lastMarkerMatchToken) throws IOException {
@@ -193,7 +196,7 @@ class PatternRuleMatcher extends AbstractPatternRulePerformer {
       lastMarkerMatchToken = lastMatchToken;
     }
     final AnalyzedTokenReadings token = tokens[Math.min(lastMarkerMatchToken, tokens.length-1)];
-    int toPos = token.getStartPos() + token.getToken().length();
+    int toPos = token.getEndPos();
     if (fromPos < toPos) { // this can happen with some skip="-1" when the last token is not matched
       //now do some spell-checking:
       if (!(errMessage.contains(PatternRuleHandler.PLEASE_SPELL_ME) && errMessage.contains(MISTAKE))) {
@@ -290,29 +293,32 @@ class PatternRuleMatcher extends AbstractPatternRulePerformer {
           nextTokenPos = firstMatchTok + repTokenPos + positions.get(j + 1);
         }
 
-        if (suggestionMatches != null) {
+        if (suggestionMatches != null && suggestionMatches.size() > 0) {
           if (matchCounter < suggestionMatches.size()) {
             numbersToMatches[j] = matchCounter;
-            if (suggestionMatches.get(matchCounter) != null) {
-              // if token is optional remove it from suggestions:
-              final String[] matches = j >= positions.size() || positions.get(j) != 0
-                   ? concatMatches(matchCounter, j, firstMatchTok + repTokenPos, tokenReadings, nextTokenPos, suggestionMatches)
-                   : new String[] { "" };
-              final String leftSide = errorMessage.substring(0, backslashPos);
-              final String rightSide = errorMessage.substring(backslashPos + numLen);
-              if (matches.length == 1) {
-                // if we removed optional token from suggestion squeeze two spaces into one:
-                if (matches[0].isEmpty() && leftSide.endsWith(" ") && rightSide.startsWith(" ")) {
-                  errorMessage = leftSide.substring(0, leftSide.length()-1) + rightSide;
-                } else {
-                  errorMessage = leftSide + matches[0] + rightSide;
-                }
-              } else {
-                errorMessage = formatMultipleSynthesis(matches, leftSide, rightSide);
-              }
-              matchCounter++;
-              newWay = true;
+            // if token is optional remove it from suggestions:
+            final String[] matches;
+            if (j >= positions.size()) {
+              matches = concatMatches(matchCounter, j, firstMatchTok + repTokenPos, tokenReadings, nextTokenPos, suggestionMatches);
+            } else if (positions.get(j) != 0) {
+              matches = concatMatches(matchCounter, j, firstMatchTok + repTokenPos, tokenReadings, nextTokenPos, suggestionMatches);
+            } else {
+              matches = new String[] { "" };
             }
+            final String leftSide = errorMessage.substring(0, backslashPos);
+            final String rightSide = errorMessage.substring(backslashPos + numLen);
+            if (matches.length == 1) {
+              // if we removed optional token from suggestion squeeze two spaces into one:
+              if (matches[0].isEmpty() && leftSide.endsWith(" ") && rightSide.startsWith(" ")) {
+                errorMessage = leftSide.substring(0, leftSide.length()-1) + rightSide;
+              } else {
+                errorMessage = leftSide + matches[0] + rightSide;
+              }
+            } else {
+              errorMessage = formatMultipleSynthesis(matches, leftSide, rightSide);
+            }
+            matchCounter++;
+            newWay = true;
           } else {
             // FIXME: is this correct? this is how we deal with multiple matches
             suggestionMatches.add(suggestionMatches.get(numbersToMatches[j]));
@@ -388,30 +394,28 @@ class PatternRuleMatcher extends AbstractPatternRulePerformer {
       final int tokenIndex, final AnalyzedTokenReadings[] tokens,
       final int nextTokenPos, final List<Match> suggestionMatches)
           throws IOException {
-    String[] finalMatch = null;
-    if (suggestionMatches.get(start) != null) {
-      final int len = phraseLen(index);
-      final Language language = rule.language;
-      if (len == 1) {
-        final int skippedTokens = nextTokenPos - tokenIndex;
-        final MatchState matchState = suggestionMatches.get(start).createState(language.getSynthesizer(), tokens, tokenIndex - 1, skippedTokens);
-        finalMatch = matchState.toFinalString(language);
-        if (suggestionMatches.get(start).checksSpelling()
-            && finalMatch.length == 1
-            && "".equals(finalMatch[0])) {
-          finalMatch = new String[1];
-          finalMatch[0] = MISTAKE;
-        }
-      } else {
-        final List<String[]> matchList = new ArrayList<>();
-        for (int i = 0; i < len; i++) {
-          final int skippedTokens = nextTokenPos - (tokenIndex + i);
-          final MatchState matchState = suggestionMatches.get(start).createState(language.getSynthesizer(), tokens, tokenIndex - 1 + i, skippedTokens);
-          matchList.add(matchState.toFinalString(language));
-        }
-        return combineLists(matchList.toArray(new String[matchList.size()][]),
-            new String[matchList.size()], 0, language);
+    String[] finalMatch;
+    final int len = phraseLen(index);
+    final Language language = rule.language;
+    if (len == 1) {
+      final int skippedTokens = nextTokenPos - tokenIndex;
+      final MatchState matchState = suggestionMatches.get(start).createState(language.getSynthesizer(), tokens, tokenIndex - 1, skippedTokens);
+      finalMatch = matchState.toFinalString(language);
+      if (suggestionMatches.get(start).checksSpelling()
+          && finalMatch.length == 1
+          && "".equals(finalMatch[0])) {
+        finalMatch = new String[1];
+        finalMatch[0] = MISTAKE;
       }
+    } else {
+      final List<String[]> matchList = new ArrayList<>();
+      for (int i = 0; i < len; i++) {
+        final int skippedTokens = nextTokenPos - (tokenIndex + i);
+        final MatchState matchState = suggestionMatches.get(start).createState(language.getSynthesizer(), tokens, tokenIndex - 1 + i, skippedTokens);
+        matchList.add(matchState.toFinalString(language));
+      }
+      return combineLists(matchList.toArray(new String[matchList.size()][]),
+          new String[matchList.size()], 0, language);
     }
     return finalMatch;
   }

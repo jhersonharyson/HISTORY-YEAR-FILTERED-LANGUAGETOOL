@@ -36,7 +36,6 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -55,6 +54,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
 import javax.swing.JSeparator;
 import javax.swing.SwingUtilities;
@@ -73,8 +73,10 @@ import javax.swing.text.Position;
 import javax.swing.text.View;
 
 import org.apache.commons.lang.StringUtils;
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 import org.languagetool.MultiThreadedJLanguageTool;
 import org.languagetool.language.LanguageIdentifier;
 import org.languagetool.rules.ITSIssueType;
@@ -110,7 +112,7 @@ class LanguageToolSupport {
   private final List<RuleMatch> ruleMatches;
   private final List<Span> documentSpans;
 
-  private JLanguageTool languageTool;
+  private MultiThreadedJLanguageTool languageTool;
   private ScheduledExecutorService checkExecutor;
   private MouseListener mouseListener;
   private ActionListener actionListener;
@@ -224,13 +226,13 @@ class LanguageToolSupport {
     toEnable = new HashSet<>(languageTool.getDisabledCategories());
     toEnable.removeAll(common);
 
-    if(!toDisable.isEmpty()) {
+    if (!toDisable.isEmpty()) {
       languageTool.getDisabledCategories().addAll(toDisable);
       // ugly hack to trigger reInitSpellCheckIgnoreWords()
       languageTool.disableRules(new ArrayList<String>());
       update = true;
     }
-    if(!toEnable.isEmpty()) {
+    if (!toEnable.isEmpty()) {
       languageTool.getDisabledCategories().removeAll(toEnable);
       // ugly hack to trigger reInitSpellCheckIgnoreWords()
       languageTool.disableRules(new ArrayList<String>());
@@ -246,7 +248,7 @@ class LanguageToolSupport {
       languageTool.enableRule(ruleName);
     }
 
-    if(update) {
+    if (update) {
       //FIXME
       //we could skip a full check if the user disabled but didn't enable rules
       checkImmediately(null);
@@ -283,10 +285,27 @@ class LanguageToolSupport {
       config = new Configuration(new File(System.getProperty("user.home")), CONFIG_FILE, language);
       //config still contains old language, update it
       this.config.setLanguage(language);
+      // Calling shutdown here may cause a RejectedExecutionException:
+      //if (languageTool != null) {
+      //  languageTool.shutdownWhenDone();
+      //}
       languageTool = new MultiThreadedJLanguageTool(language, config.getMotherTongue());
-      languageTool.activateDefaultPatternRules();
-      languageTool.activateDefaultFalseFriendRules();
       loadConfig();
+      if (config.getNgramDirectory() != null) {
+        File ngramLangDir = new File(config.getNgramDirectory(), language.getShortName());
+        if (ngramLangDir.exists()) {
+          try {
+            languageTool.activateLanguageModelRules(config.getNgramDirectory());
+          } catch (Exception e) {
+            JOptionPane.showMessageDialog(null, "Error while loading ngram database.\n" + e.getMessage());
+          }
+        } else {
+          // user might have set ngram directory to use it for e.g. English, but they
+          // might not have the data for other languages that supports ngram, so don't
+          // annoy them with an error dialog:
+          System.err.println("Not loading ngram data, directory does not exist: " + ngramLangDir);
+        }
+      }
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -300,8 +319,8 @@ class LanguageToolSupport {
     }
 
     Language defaultLanguage = config.getLanguage();
-    if(defaultLanguage == null) {
-        defaultLanguage = Language.getLanguageForLocale(Locale.getDefault());
+    if (defaultLanguage == null) {
+        defaultLanguage = Languages.getLanguageForLocale(Locale.getDefault());
     }
 
     /**
@@ -329,9 +348,7 @@ class LanguageToolSupport {
     this.textComponent.getDocument().addDocumentListener(new DocumentListener() {
       @Override
       public void insertUpdate(DocumentEvent e) {
-        if (e.getDocument().getLength() == e.getLength() && config.getAutoDetect()) {
-          mustDetectLanguage = true;
-        }
+        mustDetectLanguage = config.getAutoDetect();
         recalculateSpans(e.getOffset(), e.getLength(), false);
         if (backgroundCheckEnabled) {
           checkDelayed(null);
@@ -340,9 +357,7 @@ class LanguageToolSupport {
 
       @Override
       public void removeUpdate(DocumentEvent e) {
-        if (e.getDocument().getLength() == 0 && config.getAutoDetect()) {
-          mustDetectLanguage = true;
-        }
+        mustDetectLanguage = config.getAutoDetect();
         recalculateSpans(e.getOffset(), e.getLength(), true);
         if (backgroundCheckEnabled) {
           checkDelayed(null);
@@ -351,9 +366,7 @@ class LanguageToolSupport {
 
       @Override
       public void changedUpdate(DocumentEvent e) {
-        if (e.getDocument().getLength() == e.getLength() && config.getAutoDetect()) {
-          mustDetectLanguage = true;
-        }
+        mustDetectLanguage = config.getAutoDetect();
         if (backgroundCheckEnabled) {
           checkDelayed(null);
         }
@@ -462,14 +475,13 @@ class LanguageToolSupport {
 
   void disableRule(String ruleId) {
     Rule rule = this.getRuleForId(ruleId);
-    if(rule == null) {
+    if (rule == null) {
       //System.err.println("No rule with id: <"+ruleId+">");
       return;
     }
-    if(rule.isDefaultOff()) {
+    if (rule.isDefaultOff()) {
       config.getEnabledRuleIds().remove(ruleId);
-    }
-    else {
+    } else {
       config.getDisabledRuleIds().add(ruleId);
     }
     languageTool.disableRule(ruleId);
@@ -479,15 +491,14 @@ class LanguageToolSupport {
 
   void enableRule(String ruleId) {
     Rule rule = this.getRuleForId(ruleId);
-    if(rule == null) {
+    if (rule == null) {
       //System.err.println("No rule with id: <"+ruleId+">");
       return;
     }
-    if(rule.isDefaultOff()) {
+    if (rule.isDefaultOff()) {
       config.getEnabledRuleIds().add(ruleId);
       languageTool.enableDefaultOffRule(ruleId);
-    }
-    else {
+    } else {
       config.getDisabledRuleIds().remove(ruleId);
     }
     languageTool.enableRule(ruleId);
@@ -495,6 +506,7 @@ class LanguageToolSupport {
     checkImmediately(null);
   }
 
+  @Nullable
   private Span getSpan(int offset) {
     for (final Span cur : documentSpans) {
       if (cur.end > cur.start && cur.start <= offset && offset < cur.end) {
@@ -505,7 +517,7 @@ class LanguageToolSupport {
   }
 
   private void showPopup(MouseEvent event) {
-    if(documentSpans.isEmpty() && languageTool.getDisabledRules().isEmpty()) {
+    if (documentSpans.isEmpty() && languageTool.getDisabledRules().isEmpty()) {
       //No errors and no disabled Rules
       return;
     }
@@ -576,7 +588,7 @@ class LanguageToolSupport {
 
       @Override
       public void popupMenuCanceled(PopupMenuEvent e) {
-        if(span != null) {
+        if (span != null) {
           textComponent.setCaretPosition(span.start);
         }
       }
@@ -594,12 +606,7 @@ class LanguageToolSupport {
       }
       disabledRules.add(rule);
     }
-    Collections.sort(disabledRules, new Comparator<Rule>() {
-      @Override
-      public int compare(Rule r1, Rule r2) {
-        return r1.getDescription().compareTo(r2.getDescription());
-      }
-    });
+    Collections.sort(disabledRules, (r1, r2) -> r1.getDescription().compareTo(r2.getDescription()));
     return disabledRules;
   }
 
@@ -625,7 +632,7 @@ class LanguageToolSupport {
       parent.add(submenu);
       createRulesMenu(submenu, categories.get(category));
 
-      if(categories.keySet().size() <= MAX_CATEGORIES_PER_MENU) {
+      if (categories.keySet().size() <= MAX_CATEGORIES_PER_MENU) {
         continue;
       }
 
@@ -656,13 +663,13 @@ class LanguageToolSupport {
       });
       menu.add(ruleItem);
 
-      if(rules.size() <= MAX_RULES_PER_MENU) {
+      if (rules.size() <= MAX_RULES_PER_MENU) {
         continue;
       }
 
       //if menu contains MAX_RULES_PER_MENU-1, add a `more` menu
       //but only if the remain entries are more than one
-      if((count % (MAX_RULES_PER_MENU - 1) == 0)
+      if ((count % (MAX_RULES_PER_MENU - 1) == 0)
               && (rules.size() - count > 1)) {
         JMenu more = new JMenu(messages.getString("guiActivateRuleMoreRules"));
         menu.add(more);
@@ -671,6 +678,7 @@ class LanguageToolSupport {
     }
   }
 
+  @Nullable
   Rule getRuleForId(String ruleId) {
     final List<Rule> allRules = languageTool.getAllRules();
     for (Rule rule : allRules) {
@@ -695,7 +703,7 @@ class LanguageToolSupport {
     Document doc = this.textComponent.getDocument();
     if (doc != null) {
       try {
-        if(this.undo != null) {
+        if (this.undo != null) {
           this.undo.startCompoundEdit();
         }
         if (doc instanceof AbstractDocument) {
@@ -707,7 +715,7 @@ class LanguageToolSupport {
       } catch (BadLocationException e) {
         throw new IllegalArgumentException(e);
       } finally {
-        if(this.undo != null) {
+        if (this.undo != null) {
           this.undo.endCompoundEdit();
         }
       }
@@ -735,7 +743,7 @@ class LanguageToolSupport {
   Language autoDetectLanguage(String text) {
     Language lang = langIdentifier.detectLanguage(text);
     if (lang == null) {
-      lang = Language.getLanguageForLocale(Locale.getDefault());
+      lang = Languages.getLanguageForLocale(Locale.getDefault());
     }
     if (lang.hasVariant()) {
       // UI only shows variants like "English (American)", not just "English", so use that:
@@ -887,7 +895,7 @@ class LanguageToolSupport {
           ITSIssueType issueType = span.rule.getLocQualityIssueType();
           Color colorForIssueType = getConfig().getErrorColors().get(issueType);
           Color bgColor = colorForIssueType != null ? colorForIssueType : null;
-          Color underlineColor = ITSIssueType.Misspelling.equals(span.rule.getLocQualityIssueType()) ? Color.red : Color.blue;
+          Color underlineColor = ITSIssueType.Misspelling == span.rule.getLocQualityIssueType() ? Color.red : Color.blue;
           HighlightPainter painter = new HighlightPainter(bgColor, underlineColor);
           h.addHighlight(span.start, span.end, painter);
         }

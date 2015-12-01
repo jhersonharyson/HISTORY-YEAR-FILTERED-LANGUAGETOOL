@@ -19,11 +19,14 @@
 package org.languagetool.rules;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang.builder.HashCodeBuilder;
 import org.languagetool.tools.StringTools;
 
 /**
@@ -36,18 +39,13 @@ public class RuleMatch implements Comparable<RuleMatch> {
 
   private static final Pattern SUGGESTION_PATTERN = Pattern.compile("<suggestion>(.*?)</suggestion>");
 
-  private int fromLine = -1;
-  private int column = -1;
-  private int offset = -1;
-  private int endLine = -1;
-  private int endColumn = -1;
-
   private final Rule rule;
-  private final int fromPos;
-  private final int toPos;
+  private final OffsetPosition offsetPosition;
   private final String message;
   private final String shortMessage;   // used e.g. for OOo/LO context menu
 
+  private LinePosition linePosition = new LinePosition(-1, -1);
+  private ColumnPosition columnPosition = new ColumnPosition(-1, -1);
   private List<String> suggestedReplacements = new ArrayList<>();
 
   /**
@@ -78,7 +76,7 @@ public class RuleMatch implements Comparable<RuleMatch> {
    * This message is scanned for &lt;suggestion&gt;...&lt;/suggestion&gt;
    * to get suggested fixes for the problem detected by this rule. 
    * 
-   * @param shortMessage used for example in OpenOffice/LibreOffice's context menu
+   * @param shortMessage used for example in OpenOffice/LibreOffice's context menu (may be null)
    * @param startWithUppercase whether the original text at the position
    *    of the match starts with an uppercase character
    */
@@ -88,8 +86,7 @@ public class RuleMatch implements Comparable<RuleMatch> {
     if (toPos <= fromPos) {
       throw new RuntimeException("fromPos (" + fromPos + ") must be less than toPos (" + toPos + ")");
     }
-    this.fromPos = fromPos;
-    this.toPos = toPos;
+    this.offsetPosition = new OffsetPosition(fromPos, toPos);
     this.message = message;
     this.shortMessage = shortMessage;
     // extract suggestion from <suggestion>...</suggestion> in message:
@@ -113,84 +110,70 @@ public class RuleMatch implements Comparable<RuleMatch> {
    * Set the line number in which the match occurs (zero-based).
    */
   public void setLine(final int fromLine) {
-    this.fromLine = fromLine;
+    linePosition = new LinePosition(fromLine, linePosition.getEnd());
   }
 
   /**
    * Get the line number in which the match occurs (zero-based).
    */
   public int getLine() {
-    return fromLine;
+    return linePosition.getStart();
   }
 
   /**
    * Set the line number in which the match ends (zero-based).
    */
   public void setEndLine(final int endLine) {
-    this.endLine = endLine;
+    linePosition = new LinePosition(linePosition.getStart(), endLine);
   }
 
   /**
    * Get the line number in which the match ends (zero-based).
    */
   public int getEndLine() {
-    return endLine;
+    return linePosition.getEnd();
   }
 
   /**
    * Set the column number in which the match occurs (zero-based).
    */
   public void setColumn(final int column) {
-    this.column = column;
+    this.columnPosition = new ColumnPosition(column, columnPosition.getEnd());
   }
 
   /**
    * Get the column number in which the match occurs (zero-based).
    */
   public int getColumn() {
-    return column;
+    return columnPosition.getStart();
   }
 
   /**
    * Set the column number in which the match ends (zero-based).
    */
   public void setEndColumn(final int endColumn) {
-    this.endColumn = endColumn;
+    this.columnPosition = new ColumnPosition(columnPosition.getStart(), endColumn);
   }
 
   /**
    * Get the column number in which the match ends (zero-based).
    */
   public int getEndColumn() {
-    return endColumn;
-  }
-
-  /**
-   * Set the character offset at which the match occurs (zero-based).
-   */
-  public void setOffset(final int offset) {
-    this.offset = offset;
-  }
-
-  /**
-   * Get the character offset at which the match occurs (zero-based).
-   */
-  public int getOffset() {
-    return offset;
+    return columnPosition.getEnd();
   }
 
   /**
    * Position of the start of the error (in characters, zero-based).
    */
   public int getFromPos() {
-    return fromPos;
+    return offsetPosition.getStart();
   }
 
   /**
    * Position of the end of the error (in characters, zero-based).
    */
   public int getToPos() {
-    return toPos;
+    return offsetPosition.getEnd();
   }
 
   /**
@@ -233,15 +216,15 @@ public class RuleMatch implements Comparable<RuleMatch> {
    * The text fragments which might be an appropriate fix for the problem. One
    * of these fragments can be used to replace the old text between {@link #getFromPos()}
    * to {@link #getToPos()}.
-   * @return List of String objects or an empty List
+   * @return unmodifiable list of String objects or an empty List
    */
   public List<String> getSuggestedReplacements() {
-    return suggestedReplacements;
+    return Collections.unmodifiableList(suggestedReplacements);
   }
 
   @Override
   public String toString() {
-    return rule.getId() + ":" + fromPos + "-" + toPos + ":" + message;
+    return rule.getId() + ":" + offsetPosition + ":" + message;
   }
 
   /** Compare by start position. */
@@ -251,4 +234,43 @@ public class RuleMatch implements Comparable<RuleMatch> {
     return Integer.compare(getFromPos(), other.getFromPos());
   }
 
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    RuleMatch other = (RuleMatch) o;
+    return new EqualsBuilder()
+            .append(rule.getId(), other.rule.getId())
+            .append(offsetPosition, other.offsetPosition)
+            .append(message, other.message)
+            .append(suggestedReplacements, other.suggestedReplacements)
+            .isEquals();
+  }
+
+  @Override
+  public int hashCode() {
+    return new HashCodeBuilder()
+            .append(rule.getId())
+            .append(offsetPosition)
+            .append(message)
+            .append(suggestedReplacements).toHashCode();
+  }
+
+  static class OffsetPosition extends MatchPosition {
+    OffsetPosition(int start, int end) {
+      super(start, end);
+    }
+  }
+
+  static class LinePosition extends MatchPosition {
+    LinePosition(int start, int end) {
+      super(start, end);
+    }
+  }
+
+  static class ColumnPosition extends MatchPosition {
+    ColumnPosition(int start, int end) {
+      super(start, end);
+    }
+  }
 }

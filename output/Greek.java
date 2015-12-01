@@ -25,7 +25,6 @@ import java.util.ResourceBundle;
 
 import org.languagetool.Language;
 import org.languagetool.rules.*;
-import org.languagetool.rules.el.GreekUnpairedBracketsRule;
 import org.languagetool.rules.el.MorfologikGreekSpellerRule;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.el.GreekSynthesizer;
@@ -40,7 +39,7 @@ import org.languagetool.tokenizers.el.GreekWordTokenizer;
 
 /**
  *
- * @author Panagiotis Minos <pminos@gmail.com>
+ * @author Panagiotis Minos (pminos@gmail.com)
  */
 public class Greek extends Language {
 
@@ -48,7 +47,6 @@ public class Greek extends Language {
   private SentenceTokenizer sentenceTokenizer;
   private Synthesizer synthesizer;
   private Tagger tagger;
-  private String name = "Greek";
 
   @Override
   public String getShortName() {
@@ -57,12 +55,7 @@ public class Greek extends Language {
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Greek";
   }
 
   @Override
@@ -82,7 +75,9 @@ public class Greek extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GreekUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule("EL_UNPAIRED_BRACKETS", messages,
+                    Arrays.asList("[", "(", "{", "“", "\"", "«"),
+                    Arrays.asList("]", ")", "}", "”", "\"", "»")),
             new LongSentenceRule(messages),
             new MorfologikGreekSpellerRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),

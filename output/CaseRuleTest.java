@@ -24,6 +24,7 @@ import junit.framework.TestCase;
 
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.JLanguageTool;
+import org.languagetool.TestTools;
 import org.languagetool.language.German;
 
 /**
@@ -36,12 +37,11 @@ public class CaseRuleTest extends TestCase {
 
   @Override
   public void setUp() throws IOException {
-    rule = new CaseRule(null, new German());
+    rule = new CaseRule(TestTools.getMessages("de"), new German());
     langTool = new JLanguageTool(new German());
   }
 
   public void testRuleActivation() throws IOException {
-    CaseRule rule = new CaseRule(null, new German());
     assertTrue(rule.supportsLanguage(new German()));
   }
 
@@ -67,10 +67,23 @@ public class CaseRuleTest extends TestCase {
     assertGood("Sie hat immer ihr Bestes getan.");
     assertGood("Er wird etwas Verrücktes träumen.");
     assertGood("Er wird etwas schön Verrücktes träumen.");
+    assertGood("Er wird etwas ganz schön Verrücktes träumen.");
+    assertGood("Mit aufgewühltem Innerem.");
+    assertGood("Mit völlig aufgewühltem Innerem.");
     assertGood("Er wird etwas so Verrücktes träumen.");
     assertGood("Tom ist etwas über dreißig.");
     assertGood("Diese Angriffe bleiben im Verborgenen.");
+    assertGood("Ihr sollt mich das wissen lassen.");
+    assertGood("Wenn er mich das rechtzeitig wissen lässt, gerne.");
+    assertGood("Und sein völlig aufgewühltes Inneres erzählte von den Geschehnissen.");
+    assertGood("Aber sein aufgewühltes Inneres erzählte von den Geschehnissen.");
+    // assertGood("Sein aufgewühltes Inneres erzählte von den Geschehnissen."); TODO: 'Sein' is mistagged
+    assertGood("Aber sein Inneres erzählte von den Geschehnissen.");
+    assertGood("Ein Kaninchen, das zaubern kann.");
+
     assertBad("Tom ist etwas über Dreißig.");
+    assertBad("Unser warten wird sich lohnen.");
+    assertBad("Tom kann mit fast Allem umgehen.");
     // "NIL" reading in Morphy that used to confuse CaseRule:
     assertGood("Ein Menschenfreund.");
     // works only thanks to addex.txt:
@@ -150,6 +163,13 @@ public class CaseRuleTest extends TestCase {
     assertBad("Dem Norwegischen Ingenieur gelingt das gut.");
     assertGood("Peter Peterson, dessen Namen auf Griechisch Stein bedeutet.");
     assertGood("Peter Peterson, dessen Namen auf Griechisch gut klingt.");
+    assertGood("Das dabei Erlernte und Erlebte ist sehr nützlich.");
+    assertBad("Das dabei erlernte und Erlebte Wissen ist sehr nützlich.");
+    assertGood("Ein Kapitän verlässt als Letzter das sinkende Schiff.");
+    assertBad("Die Dolmetscherin und Der Vorleser gehen spazieren.");
+    assertGood("Es hilft, die Harmonie zwischen Führer und Geführten zu stützen.");
+    assertGood("Das Gebäude des Auswärtigen Amts.");
+    assertGood("Das Gebäude des Auswärtigen Amtes.");
     //assertBad("Peter Peterson, dessen Namen auf griechisch Stein bedeutet.");
   }
 

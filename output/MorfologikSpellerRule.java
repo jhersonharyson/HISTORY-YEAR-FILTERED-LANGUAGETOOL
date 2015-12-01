@@ -19,6 +19,7 @@
 
 package org.languagetool.rules.spelling.morfologik;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
@@ -35,8 +36,8 @@ import java.util.regex.Pattern;
 
 public abstract class MorfologikSpellerRule extends SpellingCheckRule {
   
-  protected MorfologikSpeller speller1;
-  protected MorfologikSpeller speller2;
+  protected MorfologikMultiSpeller speller1;
+  protected MorfologikMultiSpeller speller2;
   protected Locale conversionLocale;
 
   private boolean ignoreTaggedWords = false;
@@ -48,6 +49,9 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
    */
   public abstract String getFileName();
 
+  @Override
+  public abstract String getId();
+
   public MorfologikSpellerRule(ResourceBundle messages, Language language) throws IOException {
     super(messages, language);
     super.setCategory(new Category(messages.getString("category_typo")));
@@ -55,9 +59,6 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     init();
     setLocQualityIssueType(ITSIssueType.Misspelling);
   }
-
-  @Override
-  public abstract String getId();
 
   @Override
   public String getDescription() {
@@ -82,10 +83,12 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
     //lazy init
     if (speller1 == null) {
+      String binaryDict = null;
       if (JLanguageTool.getDataBroker().resourceExists(getFileName())) {
-        speller1 = new MorfologikSpeller(getFileName(), 1);
-        speller2 = new MorfologikSpeller(getFileName(), 2);
-        setConvertsCase(speller1.convertsCase());
+        binaryDict = getFileName();
+      }
+      if (binaryDict != null) {
+        initSpeller(binaryDict);
       } else {
         // should not happen, as we only configure this rule (or rather its subclasses)
         // when we have the resources:
@@ -95,19 +98,11 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     int idx = -1;
     for (AnalyzedTokenReadings token : tokens) {
       idx++;
-      if (token.isSentenceStart()) {
+      if (canBeIgnored(tokens, idx, token)) {
         continue;
       }
-      if (isUrl(token.getToken())) {
-        continue;
-      }
-      if (ignoreToken(tokens, idx) || token.isImmunized() || token.isIgnoredBySpeller()) {
-        continue;
-      }
-      if (ignoreTaggedWords && token.isTagged()) {
-        continue;
-      }
-      final String word = token.getToken();
+      // if we use token.getToken() we'll get ignored characters inside and speller will choke
+      final String word = token.getAnalyzedToken(0).getToken();
       if (tokenizingPattern() == null) {
         ruleMatches.addAll(getRuleMatches(word, token.getStartPos()));
       } else {
@@ -129,12 +124,35 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  private void initSpeller(String binaryDict) throws IOException {
+    String plainTextDict = null;
+    if (JLanguageTool.getDataBroker().resourceExists(getSpellingFileName())) {
+      plainTextDict = getSpellingFileName();
+    }
+    if (plainTextDict != null) {
+      speller1 = new MorfologikMultiSpeller(binaryDict, plainTextDict, 1);
+      speller2 = new MorfologikMultiSpeller(binaryDict, plainTextDict, 2);
+      setConvertsCase(speller1.convertsCase());
+    } else {
+      throw new RuntimeException("Could not find ignore spell file in path: " + getSpellingFileName());
+    }
+  }
+
+  private boolean canBeIgnored(AnalyzedTokenReadings[] tokens, int idx, AnalyzedTokenReadings token) throws IOException {
+    return token.isSentenceStart() ||
+           token.isImmunized() ||
+           token.isIgnoredBySpeller() ||
+           isUrl(token.getToken()) ||
+           (ignoreTaggedWords && token.isTagged()) ||
+           ignoreToken(tokens, idx);
+  }
+
 
   /**
    * @return true if the word is misspelled
    * @since 2.4
    */
-  protected boolean isMisspelled(MorfologikSpeller speller, String word) {
+  protected boolean isMisspelled(MorfologikMultiSpeller speller, String word) {
     if (!speller.isMisspelled(word)) {
       return false;
     }
@@ -181,8 +199,9 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
    * the words as in the source dictionary. For example,
    * it may contain a hyphen, if the words with hyphens are
    * not included in the dictionary
-   * @return A compiled {@link Pattern} that is used to tokenize words or null.
+   * @return A compiled {@link Pattern} that is used to tokenize words or {@code null}.
    */
+  @Nullable
   public Pattern tokenizingPattern() {
     return null;
   }

@@ -28,16 +28,13 @@ import org.languagetool.language.Polish;
 import org.languagetool.rules.AbstractCompoundRuleTest;
 import org.languagetool.rules.RuleMatch;
 
-/**
- * @author Daniel Naber
- */
 public class CompoundRuleTest extends AbstractCompoundRuleTest {
 
   @Override
   protected void setUp() throws Exception {
     super.setUp();
     langTool = new JLanguageTool(new Polish());
-    rule = new CompoundRule(null);
+    rule = new CompoundRule(TestTools.getEnglishMessages());
   }
 
   public void testRule() throws IOException {
@@ -55,7 +52,7 @@ public class CompoundRuleTest extends AbstractCompoundRuleTest {
     try (Scanner scanner = new Scanner(file, "UTF-8")) {
       while (scanner.hasNextLine()) {
         String line = scanner.nextLine().trim();
-        if (line.length() < 1 || line.charAt(0) == '#') {
+        if (line.isEmpty() || line.charAt(0) == '#') {
           continue;     // ignore comments
         }
         if (line.endsWith("+")) {

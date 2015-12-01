@@ -21,14 +21,17 @@ package org.languagetool.language;
 import com.google.common.base.Optional;
 import com.optimaize.langdetect.LanguageDetector;
 import com.optimaize.langdetect.LanguageDetectorBuilder;
+import com.optimaize.langdetect.i18n.LdLocale;
 import com.optimaize.langdetect.ngram.NgramExtractors;
 import com.optimaize.langdetect.profiles.LanguageProfile;
 import com.optimaize.langdetect.profiles.LanguageProfileReader;
 import com.optimaize.langdetect.text.CommonTextObjectFactories;
 import com.optimaize.langdetect.text.TextObject;
 import com.optimaize.langdetect.text.TextObjectFactory;
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,7 +43,6 @@ import java.util.List;
  * Identify the language of a text. Note that some languages might never be
  * detected because they are close to another language. Language variants like
  * en-US or en-GB are not detected, the result will be {@code en} for those.
- *
  * @since 2.9
  */
 public class LanguageIdentifier {
@@ -49,21 +51,17 @@ public class LanguageIdentifier {
 
   // ast and gl often prevent the correct detection of Spanish (as the are quite similar
   // to Spanish, I assume) so we disable them for now. See LanguageDetectionEval.java:
-  private static final List<String> ignoreLangNames = Arrays.asList("ast", "gl");
+  private static final List<String> ignoreLangCodes = Arrays.asList("ast", "gl");
 
   // languages that we offer profiles for as they are not yet supported by language-detector:
-  private static final List<String> externalLangNames = Arrays.asList("km", "eo");
+  private static final List<String> externalLangCodes = Arrays.asList("eo");
 
   private final LanguageDetector languageDetector;
   private final TextObjectFactory textObjectFactory;
 
   public LanguageIdentifier() {
-    this(getLanguageNames());
-  }
-
-  LanguageIdentifier(List<String> langNames) {
     try {
-      List<LanguageProfile> profiles = loadProfiles(langNames);
+      List<LanguageProfile> profiles = loadProfiles(getLanguageCodes());
       languageDetector = LanguageDetectorBuilder.create(NgramExtractors.standard())
               .minimalConfidence(MINIMAL_CONFIDENCE)
               .withProfiles(profiles)
@@ -74,32 +72,33 @@ public class LanguageIdentifier {
     }
   }
 
-  private static List<String> getLanguageNames() {
-    List<String> langNames = new ArrayList<>();
-    for (Language lang : Language.REAL_LANGUAGES) {
+  private static List<String> getLanguageCodes() {
+    List<String> langCodes = new ArrayList<>();
+    for (Language lang : Languages.get()) {
       String langCode = lang.getShortName();
-      boolean ignore = lang.isVariant() || ignoreLangNames.contains(langCode) || externalLangNames.contains(langCode);
+      boolean ignore = lang.isVariant() || ignoreLangCodes.contains(langCode) || externalLangCodes.contains(langCode);
       if (ignore) {
         continue;
       }
       if ("zh".equals(langCode)) {
-        langNames.add("zh-cn");
-        langNames.add("zh-tw");
+        langCodes.add("zh-CN");
+        langCodes.add("zh-TW");
       } else {
-        langNames.add(langCode);
+        langCodes.add(langCode);
       }
     }
-    return langNames;
+    return langCodes;
   }
 
-  private List<LanguageProfile> loadProfiles(List<String> langNames) throws IOException {
+  private List<LanguageProfile> loadProfiles(List<String> langCodes) throws IOException {
     LanguageProfileReader profileReader = new LanguageProfileReader();
-    List<LanguageProfile> profiles = profileReader.read(langNames);
-    for (String externalLangName : externalLangNames) {
-      if (langNames.contains(externalLangName)) {
-        String profilePath = "/" + externalLangName + "/" + externalLangName + ".profile";
-        InputStream profile = JLanguageTool.getDataBroker().getFromResourceDirAsStream(profilePath);
-        profiles.add(new LanguageProfileReader().read(profile));
+    List<LanguageProfile> profiles = profileReader.read(langCodes);
+    for (String externalLangCode : externalLangCodes) {
+      String profilePath = "/" + externalLangCode + "/" + externalLangCode + ".profile";
+      if (JLanguageTool.getDataBroker().resourceExists(profilePath)) {  // not all languages are always available
+        try (InputStream profile = JLanguageTool.getDataBroker().getFromResourceDirAsStream(profilePath)) {
+          profiles.add(new LanguageProfileReader().read(profile));
+        }
       }
     }
     return profiles;
@@ -108,10 +107,11 @@ public class LanguageIdentifier {
   /**
    * @return language or {@code null} if language could not be identified
    */
+  @Nullable
   public Language detectLanguage(String text) {
     String languageCode = detectLanguageCode(text);
     if (languageCode != null) {
-      return Language.getLanguageForShortName(languageCode);
+      return Languages.getLanguageForShortName(languageCode);
     } else {
       return null;
     }
@@ -120,14 +120,14 @@ public class LanguageIdentifier {
   /**
    * @return language or {@code null} if language could not be identified
    */
-  String detectLanguageCode(String text) {
+  @Nullable
+  private String detectLanguageCode(String text) {
     TextObject textObject = textObjectFactory.forText(text);
-    Optional<String> lang = languageDetector.detect(textObject);
+    Optional<LdLocale> lang = languageDetector.detect(textObject);
+    // comment in for debugging:
+    //System.out.println(languageDetector.getProbabilities(textObject));
     if (lang.isPresent()) {
-      if ("zh-cn".equals(lang.get()) || "zh-tw".equals(lang.get())) {
-        return "zh";
-      }
-      return lang.get();
+      return lang.get().getLanguage();
     } else {
       return null;
     }

@@ -37,16 +37,10 @@ public class Danish extends Language {
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
   private Disambiguator disambiguator;
-  private String name = "Danish";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Danish";
   }
 
   @Override
@@ -57,16 +51,6 @@ public class Danish extends Language {
   @Override
   public String[] getCountries() {
     return new String[]{"DK"};
-  }
-  
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "\"", "”" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "\"", "”" };
   }
   
   @Override
@@ -103,7 +87,9 @@ public class Danish extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),  // correction for genitive apostrophes eg. "Lis' hund" made in UnpairedQuotesBracketsRule
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "\"", "”"),
+                    Arrays.asList("]", ")", "}", "\"", "”")),
             new HunspellNoSuggestionRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),  // abbreviation exceptions, done in DanishSentenceTokenizer
             // "WORD_REPEAT_RULE" implemented in grammar.xml

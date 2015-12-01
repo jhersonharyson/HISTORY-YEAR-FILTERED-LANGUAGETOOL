@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.tagging.BaseTagger;
@@ -42,11 +43,7 @@ public class GermanTagger extends BaseTagger {
   private GermanCompoundTokenizer compoundTokenizer;
 
   public GermanTagger() {
-  }
-
-  @Override
-  public String getFileName() {
-    return "/de/german.dict";
+    super("/de/german.dict");
   }
 
   @Override
@@ -54,9 +51,15 @@ public class GermanTagger extends BaseTagger {
     return "/de/added.txt";
   }
 
+  @Override
+  public String getManualRemovalsFileName() {
+    return "/de/removed.txt";
+  }
+  
   /**
    * Return only the first reading of the given word or {@code null}.
    */
+  @Nullable
   public AnalyzedTokenReadings lookup(String word) throws IOException {
     List<AnalyzedTokenReadings> result = tag(Collections.singletonList(word), false);
     AnalyzedTokenReadings atr = result.get(0);
@@ -139,8 +142,8 @@ public class GermanTagger extends BaseTagger {
     List<AnalyzedToken> result = new ArrayList<>();
     for (TaggedWord taggedWord : taggedWords) {
       List<String> allButLastPart = compoundParts.subList(0, compoundParts.size() - 1);
-      String lemma = StringTools.listToString(allButLastPart, "")
-              + StringTools.lowercaseFirstChar(taggedWord.getLemma());
+      String lemma = String.join("", allButLastPart)
+                   + StringTools.lowercaseFirstChar(taggedWord.getLemma());
       result.add(new AnalyzedToken(word, taggedWord.getPosTag(), lemma));
     }
     return result;

@@ -23,8 +23,8 @@ import java.io.File;
 import java.io.UnsupportedEncodingException;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.text.MessageFormat;
-import java.util.ResourceBundle;
+import java.util.*;
+import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -46,17 +46,10 @@ import org.languagetool.tools.StringTools;
  * 
  * @author Daniel Naber
  */
-public class Tools {
+public final class Tools {
 
   private Tools() {
     // no public constructor
-  }
-
-  public static String makeTexti18n(final ResourceBundle messages, final String key,
-                                    final Object... messageArguments) {
-    final MessageFormat formatter = new MessageFormat("");
-    formatter.applyPattern(messages.getString(key).replaceAll("'", "''"));
-    return formatter.format(messageArguments);
   }
 
   /**
@@ -64,22 +57,35 @@ public class Tools {
    * <code>null</code>.
    */
   static File openFileDialog(final Frame frame, final FileFilter fileFilter) {
-    final JFileChooser jfc = new JFileChooser();
-    jfc.setFileFilter(fileFilter);
-    jfc.showOpenDialog(frame);
-    return jfc.getSelectedFile();
+    return openFileDialog(frame, fileFilter, null);
   }
 
   /**
    * Show a file chooser dialog in a specified directory
-   * @param frame Owner frame.
-   * @param fileFilter The pattern of files to choose from.
+   * @param frame Owner frame
+   * @param fileFilter The pattern of files to choose from
    * @param initialDir The initial directory
-   * @return the selected file.
+   * @return the selected file
    * @since 2.6
    */
   static File openFileDialog(final Frame frame, final FileFilter fileFilter, final File initialDir) {
+    return openFileDialog(frame, fileFilter, initialDir, JFileChooser.FILES_ONLY);
+  }
+
+  /**
+   * Show a directory chooser dialog, starting with a specified directory
+   * @param frame Owner frame
+   * @param initialDir The initial directory
+   * @return the selected file
+   * @since 3.0
+   */
+  static File openDirectoryDialog(Frame frame, File initialDir) {
+    return openFileDialog(frame, null, initialDir, JFileChooser.DIRECTORIES_ONLY);
+  }
+
+  private static File openFileDialog(final Frame frame, final FileFilter fileFilter, final File initialDir, int mode) {
     final JFileChooser jfc = new JFileChooser();
+    jfc.setFileSelectionMode(mode);
     jfc.setCurrentDirectory(initialDir);
     jfc.setFileFilter(fileFilter);
     jfc.showOpenDialog(frame);
@@ -120,24 +126,25 @@ public class Tools {
    */
   public static String shortenComment(String comment) {
     final int maxCommentLength = 100;
-    if (comment.length() > maxCommentLength) {
+    String shortComment = comment;
+    if (shortComment.length() > maxCommentLength) {
       // if there is text in brackets, drop it (beginning at the end)
-      while (comment.lastIndexOf(" [") > 0
-              && comment.lastIndexOf(']') > comment.lastIndexOf(" [")
-              && comment.length() > maxCommentLength) {
-        comment = comment.substring(0,comment.lastIndexOf(" [")) + comment.substring(comment.lastIndexOf(']')+1);
+      while (shortComment.lastIndexOf(" [") > 0
+              && shortComment.lastIndexOf(']') > shortComment.lastIndexOf(" [")
+              && shortComment.length() > maxCommentLength) {
+        shortComment = shortComment.substring(0, shortComment.lastIndexOf(" [")) + shortComment.substring(shortComment.lastIndexOf(']')+1);
       }
-      while (comment.lastIndexOf(" (") > 0
-              && comment.lastIndexOf(')') > comment.lastIndexOf(" (")
-              && comment.length() > maxCommentLength) {
-        comment = comment.substring(0,comment.lastIndexOf(" (")) + comment.substring(comment.lastIndexOf(')')+1);
+      while (shortComment.lastIndexOf(" (") > 0
+              && shortComment.lastIndexOf(')') > shortComment.lastIndexOf(" (")
+              && shortComment.length() > maxCommentLength) {
+        shortComment = shortComment.substring(0, shortComment.lastIndexOf(" (")) + shortComment.substring(shortComment.lastIndexOf(')')+1);
       }
       // in case it's still not short enough, shorten at the end
-      if (comment.length() > maxCommentLength) {
-        comment = comment.substring(0,maxCommentLength-1) + "…";
+      if (shortComment.length() > maxCommentLength) {
+        shortComment = shortComment.substring(0, maxCommentLength-1) + "…";
       }
     }
-    return comment;
+    return shortComment;
   }
 
   /**
@@ -236,7 +243,7 @@ public class Tools {
     }
   }
 
-  private static String getExampleSentences(Rule rule,  ResourceBundle messages) {
+  private static String getExampleSentences(Rule rule, ResourceBundle messages) {
     StringBuilder examples = new StringBuilder(200);
     java.util.List<IncorrectExample> incorrectExamples = rule.getIncorrectExamples();
     if (incorrectExamples.size() > 0) {
@@ -249,6 +256,15 @@ public class Tools {
       String correctExample = correctExamples.iterator().next();
       String sentence = correctExample.replace("<marker>", "<span style='background-color:#80ff80'>").replace("</marker>", "</span>");
       examples.append("<br/>").append(sentence).append("&nbsp;<span style='color:green'>✓</span>");
+    } else if (incorrectExamples.size() > 0) {
+      IncorrectExample incorrectExample = incorrectExamples.iterator().next();
+      List<String> corrections = incorrectExample.getCorrections();
+      if (corrections != null && corrections.size() > 0) {
+        String incorrectSentence = incorrectExamples.iterator().next().getExample();
+        String correctedSentence = incorrectSentence.replaceAll("<marker>.*?</marker>",
+                "<span style='background-color:#80ff80'>" + corrections.get(0) + "</span>");
+        examples.append("<br/>").append(correctedSentence).append("&nbsp;<span style='color:green'>✓</span>");
+      }
     }
     if (examples.length() > 0) {
       examples.insert(0, "<br/><br/>" + messages.getString("guiExamples"));

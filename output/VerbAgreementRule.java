@@ -29,11 +29,13 @@ import java.util.Set;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.Language;
 import org.languagetool.language.German;
 import org.languagetool.rules.Category;
 import org.languagetool.rules.Example;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.patterns.PatternToken;
+import org.languagetool.rules.patterns.PatternTokenBuilder;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.languagetool.tools.StringTools;
 
 import java.io.IOException;
@@ -48,8 +50,8 @@ import java.io.IOException;
  * 
  * TODO:
  * <ul>
- * <li>wenn nur ein mögliches finites Verb -> das nehmen (Max machen das.)
- * <li>Sie (i>1)
+ * <li>wenn nur ein mögliches finites Verb -&gt; das nehmen (Max machen das.)
+ * <li>Sie (i&gt;1)
  * <li>bei ich/du/er/wir sofort prüfen, damit alle vorkommen geprüft werden (Ich geht jetzt nach Hause und dort gehe ich sofort unter die Dusche.) [aber: isNear]
  * <li>Alle Verbvorkommen merken (Er präsentieren wollte und Video hätte keine Pläne.)
  * </ul>
@@ -57,13 +59,30 @@ import java.io.IOException;
  * @author Markus Brenneis
  */
 public class VerbAgreementRule extends GermanRule {
-  
+
+  private static final List<List<PatternToken>> ANTI_PATTERNS = Arrays.asList(
+    Arrays.asList(
+      new PatternTokenBuilder().tokenRegex("die|welche").build(),
+      new PatternTokenBuilder().tokenRegex(".*").build(),
+      new PatternTokenBuilder().tokenRegex("mehr|weniger").build(),
+      new PatternTokenBuilder().token("als").build(),
+      new PatternTokenBuilder().tokenRegex("ich|du|er|sie|es").build()
+    ),
+    Arrays.asList(
+      new PatternTokenBuilder().token("wenn").build(),
+      new PatternTokenBuilder().token("du").build(),
+      new PatternTokenBuilder().token("anstelle").build()
+    )
+  );
+
   // Words that prevent a rule match when they occur directly before "bin":
   private static final Set<String> BIN_IGNORE = new HashSet<>(Arrays.asList(
+    "Suleiman",
     "Mohamed",
     "Muhammad",
     "Muhammed",
     "Mohammed",
+    "Mohammad",
     "Mansour",
     "Qaboos",
     "Qabus",
@@ -97,15 +116,13 @@ public class VerbAgreementRule extends GermanRule {
     "\"", "„"
   ));
   
-  private final Language language;
+  private final German language;
 
   private AnalyzedTokenReadings finiteVerb;
 
   public VerbAgreementRule(final ResourceBundle messages, German language) {
     this.language = language;
-    if (messages != null) {
-      super.setCategory(new Category(messages.getString("category_grammar")));
-    }
+    super.setCategory(new Category(messages.getString("category_grammar")));
     addExamplePair(Example.wrong("Ich <marker>bist</marker> über die Entwicklung sehr froh."),
                    Example.fixed("Ich <marker>bin</marker> über die Entwicklung sehr froh."));
   }
@@ -124,7 +141,7 @@ public class VerbAgreementRule extends GermanRule {
   public RuleMatch[] match(final AnalyzedSentence sentence) {
     
     final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
+    final AnalyzedTokenReadings[] tokens = getSentenceWithImmunization(sentence).getTokensWithoutWhitespace();
     
     if (tokens.length < 4) { // ignore one-word sentences (3 tokens: SENT_START, one word, SENT_END)
       return toRuleMatchArray(ruleMatches);
@@ -148,7 +165,11 @@ public class VerbAgreementRule extends GermanRule {
     /*int posPossibleVer2Plu = -1;*/
     
     for (int i = 1; i < tokens.length; ++i) { // ignore SENT_START
-      
+
+      if (tokens[i].isImmunized()) {
+        continue;
+      }
+
       String strToken = tokens[i].getToken().toLowerCase();
       strToken = strToken.replace("‚", "");
 
@@ -174,7 +195,7 @@ public class VerbAgreementRule extends GermanRule {
                   || (tokens.length != i + 1 && tokens[i+1].getToken().startsWith("Laden")) ))) {
           posVer1Sin = i;
         } 
-        else if (hasUnambiguouslyPersonAndNumber(tokens[i], "2", "SIN")) {
+        else if (hasUnambiguouslyPersonAndNumber(tokens[i], "2", "SIN") && !"Probst".equals(tokens[i].getToken())) {
           posVer2Sin = i;
         } else if (hasUnambiguouslyPersonAndNumber(tokens[i], "1", "PLU")) {
           posVer1Plu = i;
@@ -211,7 +232,7 @@ public class VerbAgreementRule extends GermanRule {
                && !isQuotationMark(tokens[posIch-1])) {
       final int plus1 = ((posIch + 1) == tokens.length) ? 0 : +1; // prevent posIch+1 segfault
       if (!verbDoesMatchPersonAndNumber(tokens[posIch-1], tokens[posIch+plus1], "1", "SIN")) {
-        if (!nextButOneIsModal(tokens, posIch)) {
+        if (!nextButOneIsModal(tokens, posIch) && !"äußerst".equals(finiteVerb.getToken())) {
           ruleMatches.add(ruleMatchWrongVerbSubject(tokens[posIch], finiteVerb, "1:SIN"));
         }
       }
@@ -253,13 +274,18 @@ public class VerbAgreementRule extends GermanRule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  @Override
+  public List<DisambiguationPatternRule> getAntiPatterns() {
+    return makeAntiPatterns(ANTI_PATTERNS, language);
+  }
+
   // avoid false alarm on 'wenn ich sterben sollte ...':
   private boolean nextButOneIsModal(AnalyzedTokenReadings[] tokens, int pos) {
     return pos < tokens.length - 2 && tokens[pos+2].hasPartialPosTag(":MOD:");
   }
 
   /**
-   * @return true if |a - b| &lt; 5, and a != -1 
+   * @return true if |a - b| < 5, and a != -1 
    */
   private boolean isNear(final int a, final int b) {
     return (Math.abs(a - b) < 5) && a != -1;
@@ -274,11 +300,10 @@ public class VerbAgreementRule extends GermanRule {
    */
   private boolean hasUnambiguouslyPersonAndNumber(final AnalyzedTokenReadings tokenReadings, final String person, final String number) {
     if (tokenReadings.getToken().length() == 0
-        || (Character.isUpperCase(tokenReadings.getToken().charAt(0)) && !(tokenReadings.getStartPos() == 0) )
+        || (Character.isUpperCase(tokenReadings.getToken().charAt(0)) && tokenReadings.getStartPos() != 0)
         || !tokenReadings.hasPartialPosTag("VER")) {
       return false;
     }
-
     for (AnalyzedToken analyzedToken : tokenReadings) {
       final String postag = analyzedToken.getPOSTag();
       if (postag.contains("_END")) { // ignore SENT_END and PARA_END
@@ -287,8 +312,7 @@ public class VerbAgreementRule extends GermanRule {
       if (!postag.contains(":" + person + ":" + number)) {
         return false;
       }
-    } // for each reading
-    
+    }
     return true;
   }
   
@@ -305,7 +329,7 @@ public class VerbAgreementRule extends GermanRule {
         || "einst".equals(token.getToken())) {
       return false;
     }
-    return (token.hasPartialPosTag(":1:") || token.hasPartialPosTag(":2:") || token.hasPartialPosTag(":3:"));
+    return token.hasPartialPosTag(":1:") || token.hasPartialPosTag(":2:") || token.hasPartialPosTag(":3:");
   }
   
   /**
@@ -314,8 +338,10 @@ public class VerbAgreementRule extends GermanRule {
    */
   private boolean verbDoesMatchPersonAndNumber(final AnalyzedTokenReadings token1, final AnalyzedTokenReadings token2,
                                                final String person, final String number) {
-    if (token1.getToken().equals(",") || token1.getToken().equals("und") ||
-        token2.getToken().equals(",") || token2.getToken().equals("und")) {
+    String token1Str = token1.getToken();
+    String token2Str = token2.getToken();
+    if (token1Str.equals(",") || token1Str.equals("und") || token1Str.equals("sowie") ||
+        token2Str.equals(",") || token2Str.equals("und") || token2Str.equals("sowie")) {
       return true;
     }
    
@@ -346,7 +372,7 @@ public class VerbAgreementRule extends GermanRule {
    */
   private List<String> getVerbSuggestions(final AnalyzedTokenReadings verb, final String expectedVerbPOS, final boolean toUppercase) {
     // find the first verb reading
-    AnalyzedToken verbToken = new AnalyzedToken("","","");
+    AnalyzedToken verbToken = new AnalyzedToken("", "", "");
     for (AnalyzedToken token : verb.getReadings()) {
       if (token.getPOSTag().startsWith("VER:")) {
         verbToken = token;
@@ -356,11 +382,8 @@ public class VerbAgreementRule extends GermanRule {
     
     try {
       String[] synthesized = language.getSynthesizer().synthesize(verbToken, "VER.*:"+expectedVerbPOS+".*", true);
-      // remove duplicates
-      Set<String> suggestionSet = new HashSet<>();
-      suggestionSet.addAll(Arrays.asList(synthesized));
-      List<String> suggestions = new ArrayList<>();
-      suggestions.addAll(suggestionSet);
+      Set<String> suggestionSet = new HashSet<>(Arrays.asList(synthesized));  // remove duplicates
+      List<String> suggestions = new ArrayList<>(suggestionSet);
       if (toUppercase) {
         for (int i = 0; i < suggestions.size(); ++i) {
           suggestions.set(i, StringTools.uppercaseFirstChar(suggestions.get(i)));
@@ -411,7 +434,7 @@ public class VerbAgreementRule extends GermanRule {
     final String msg = "Möglicherweise fehlende grammatische Übereinstimmung zwischen Subjekt und Prädikat (" +
       token.getToken() + ") bezüglich Person oder Numerus (Einzahl, Mehrzahl - Beispiel: " +
       "'Max bist' statt 'Max ist').";
-    return new RuleMatch(this, token.getStartPos(), token.getStartPos() + token.getToken().length(), msg);
+    return new RuleMatch(this, token.getStartPos(), token.getEndPos(), msg);
   }
   
   private RuleMatch ruleMatchWrongVerbSubject(final AnalyzedTokenReadings subject, final AnalyzedTokenReadings verb, final String expectedVerbPOS) {

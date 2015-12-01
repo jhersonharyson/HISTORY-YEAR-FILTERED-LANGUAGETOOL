@@ -1,5 +1,5 @@
 /* LanguageTool, a natural language style checker 
- * Copyright (C) 2009 Marcin Miłkowski (http://www.languagetool.org)
+ * Copyright (C) 2015 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,63 +18,36 @@
  */
 package org.languagetool.tools;
 
-import junit.framework.TestCase;
-import org.languagetool.JLanguageTool;
-import org.languagetool.language.English;
-import org.languagetool.language.Polish;
+import org.junit.Test;
+import org.languagetool.TestTools;
 import org.languagetool.rules.RuleMatch;
-import org.languagetool.rules.bitext.BitextRule;
-import org.xml.sax.SAXException;
+import org.languagetool.rules.patterns.PatternRule;
+import org.languagetool.rules.patterns.PatternToken;
 
-import javax.xml.parsers.ParserConfigurationException;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.PrintStream;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
-public class ToolsTest extends TestCase {
+import static org.hamcrest.core.Is.is;
+import static org.junit.Assert.assertThat;
 
-  private ByteArrayOutputStream out;
-  private PrintStream stdout;
-  private PrintStream stderr;
-
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
-    this.stdout = System.out;
-    this.stderr = System.err;
-    this.out = new ByteArrayOutputStream();
-    final ByteArrayOutputStream err = new ByteArrayOutputStream();      
-    System.setOut(new PrintStream(this.out));
-    System.setErr(new PrintStream(err));
+public class ToolsTest {
+  
+  @Test
+  public void testCorrectTextFromMatches() {
+    RuleMatch match1 = new RuleMatch(new FakeRule(), 0, 9, "msg1");
+    match1.setSuggestedReplacement("I've had");
+    RuleMatch match2 = new RuleMatch(new FakeRule(), 0, 9, "msg2");
+    match2.setSuggestedReplacement("I have");
+    List<RuleMatch> matches = Arrays.asList(match1, match2);
+    assertThat(Tools.correctTextFromMatches("I've have", matches), is("I've had"));
   }
 
-  @Override
-  public void tearDown() throws Exception {
-    super.tearDown();
-    System.setOut(this.stdout);
-    System.setErr(this.stderr);
+  private static class FakeRule extends PatternRule {
+    FakeRule() {
+      super("FAKE_ID", TestTools.getDemoLanguage(), Collections.singletonList(new PatternToken("foo", true, false, false)),
+              "My fake description", "Fake message", "Fake short message");
+    }
   }
   
-  public void testBitextCheck() throws IOException, ParserConfigurationException, SAXException {
-    final English english = new English();
-    final JLanguageTool srcTool = new JLanguageTool(english);
-    final Polish polish = new Polish();
-    final JLanguageTool trgTool = new JLanguageTool(polish);
-    trgTool.activateDefaultPatternRules();
-    
-    final List<BitextRule> rules = Tools.getBitextRules(english, polish);
-    
-    int matches1 = Tools.checkBitext(
-        "This is a perfectly good sentence.",
-        "To jest całkowicie prawidłowe zdanie.", srcTool, trgTool, rules).size();
-    assertEquals(0, matches1);
-
-    List<RuleMatch> matches = Tools.checkBitext(
-            "This is not actual.",
-            "To nie jest aktualne.",
-            srcTool, trgTool, rules);
-    assertEquals(1, matches.size());
-    assertTrue(matches.get(0).getRule().getId().equals("ACTUAL"));
-  }
 }

@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 
 import org.apache.commons.lang.ObjectUtils;
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.Language;
 import org.languagetool.chunking.ChunkTag;
 import org.languagetool.rules.IncorrectExample;
@@ -42,11 +43,57 @@ import org.xml.sax.helpers.DefaultHandler;
  * @author Daniel Naber
  */
 public class XMLRuleHandler extends DefaultHandler {
+  
+  enum RegexpMode {
+    SMART, EXACT
+  }
 
   public static final String ID = "id";
   public static final String NAME = "name";
-  
-  protected List<PatternRule> rules = new ArrayList<>();
+
+  /** Definitions of values in XML files. */
+  protected static final String YES = "yes";
+  protected static final String OFF = "off";
+  protected static final String ON = "on";
+  protected static final String POSTAG = "postag";
+  protected static final String CHUNKTAG = "chunk";
+  protected static final String POSTAG_REGEXP = "postag_regexp";
+  protected static final String REGEXP = "regexp";
+  protected static final String NEGATE = "negate";
+  protected static final String INFLECTED = "inflected";
+  protected static final String NEGATE_POS = "negate_pos";
+  protected static final String MARKER = "marker";
+  protected static final String DEFAULT = "default";
+  protected static final String TYPE = "type";
+  protected static final String SPACEBEFORE = "spacebefore";
+  protected static final String EXAMPLE = "example";
+  protected static final String SCOPE = "scope";
+  protected static final String IGNORE = "ignore";
+  protected static final String SKIP = "skip";
+  protected static final String MIN = "min";
+  protected static final String MAX = "max";
+  protected static final String TOKEN = "token";
+  protected static final String FEATURE = "feature";
+  protected static final String UNIFY = "unify";
+  protected static final String UNIFY_IGNORE = "unify-ignore";
+  protected static final String AND = "and";
+  protected static final String OR = "or";
+  protected static final String EXCEPTION = "exception";
+  protected static final String CASE_SENSITIVE = "case_sensitive";
+  protected static final String MARK = "mark";
+  protected static final String PATTERN = "pattern";
+  protected static final String ANTIPATTERN = "antipattern";
+  protected static final String MATCH = "match";
+  protected static final String UNIFICATION = "unification";
+  protected static final String RULE = "rule";
+  protected static final String RULES = "rules";
+  protected static final String RULEGROUP = "rulegroup";
+  protected static final String NO = "no";
+  protected static final String PHRASES = "phrases";
+  protected static final String MESSAGE = "message";
+  protected static final String SUGGESTION = "suggestion";
+
+  protected List<AbstractPatternRule> rules = new ArrayList<>();
   protected Language language;
 
   protected StringBuilder correctExample = new StringBuilder();
@@ -101,43 +148,43 @@ public class XMLRuleHandler extends DefaultHandler {
   protected boolean exceptionSpaceBefore;
   protected boolean exceptionSpaceBeforeSet;
 
-  protected boolean exceptionLevelCaseSensitive;
+  protected Boolean exceptionLevelCaseSensitive;
   protected boolean exceptionLevelCaseSet;
 
-  /** List of elements as specified by tokens. **/
-  protected List<Element> elementList;
+  /** List of elements as specified by tokens. */
+  protected List<PatternToken> patternTokens = new ArrayList<>();
 
-  /** true when phraseref is the last element in the rule. **/
+  /** true when phraseref is the last element in the rule. */
   protected boolean lastPhrase;
 
-  /** ID reference to the phrase. **/
+  /** ID reference to the phrase. */
   protected String phraseIdRef;
 
-  /** Current phrase ID. **/
+  /** Current phrase ID. */
   protected String phraseId;
   protected int skipPos;
   protected int minOccurrence = 1;
   protected int maxOccurrence = 1;
   protected String ruleGroupId;
   protected String id;
-  protected Element tokenElement;
+  protected PatternToken patternToken;
   protected Match tokenReference;
-  protected List<Match> suggestionMatches;
-  protected List<Match> suggestionMatchesOutMsg;
+  protected List<Match> suggestionMatches = new ArrayList<>();
+  protected List<Match> suggestionMatchesOutMsg = new ArrayList<>();
   protected Locator pLocator;
 
   protected int startPositionCorrection;
   protected int endPositionCorrection;
   protected int tokenCounter;
 
-  /** Phrase store - elementLists keyed by phraseIds. **/
-  protected Map<String, List<List<Element>>> phraseMap;
+  /** Phrase store - elementLists keyed by phraseIds. */
+  protected Map<String, List<List<PatternToken>>> phraseMap;
 
   /**
    * Logically forking element list, used for including multiple phrases in the
    * current one.
-   **/
-  protected List<ArrayList<Element>> phraseElementList;
+   */
+  protected List<ArrayList<PatternToken>> phrasePatternTokens = new ArrayList<>();
 
   protected int andGroupCounter;
   protected int orGroupCounter;
@@ -146,6 +193,12 @@ public class XMLRuleHandler extends DefaultHandler {
   protected boolean inUrlForRuleGroup;
   protected StringBuilder url = new StringBuilder();
   protected StringBuilder urlForRuleGroup = new StringBuilder();
+  
+  protected boolean inRegex;
+  protected StringBuilder regex = new StringBuilder();
+  protected RegexpMode regexMode = RegexpMode.SMART;
+  protected boolean regexCaseSensitive = false;
+  protected int regexpMark = 0;
 
   protected boolean inShortMessage;
   protected boolean inShortMessageForRuleGroup;
@@ -161,57 +214,13 @@ public class XMLRuleHandler extends DefaultHandler {
   protected String uFeature;
   protected String uType = "";
 
-  protected List<String> uTypeList;
-
-  protected Map<String, List<String>> equivalenceFeatures;
-
-  /** Definitions of values in XML files. */
-  protected static final String YES = "yes";
-  protected static final String OFF = "off";
-  protected static final String ON = "on";
-  protected static final String POSTAG = "postag";
-  protected static final String CHUNKTAG = "chunk";
-  protected static final String POSTAG_REGEXP = "postag_regexp";
-  protected static final String REGEXP = "regexp";
-  protected static final String NEGATE = "negate";
-  protected static final String INFLECTED = "inflected";
-  protected static final String NEGATE_POS = "negate_pos";
-  protected static final String MARKER = "marker";
-  protected static final String DEFAULT = "default";
-  protected static final String TYPE = "type";
-  protected static final String SPACEBEFORE = "spacebefore";
-  protected static final String EXAMPLE = "example";
-  protected static final String SCOPE = "scope";
-  protected static final String IGNORE = "ignore";
-  protected static final String SKIP = "skip";
-  protected static final String MIN = "min";
-  protected static final String MAX = "max";
-  protected static final String TOKEN = "token";
-  protected static final String FEATURE = "feature";
-  protected static final String UNIFY = "unify";
-  protected static final String UNIFY_IGNORE = "unify-ignore";
-  protected static final String AND = "and";
-  protected static final String OR = "or";
-  protected static final String EXCEPTION = "exception";
-  protected static final String CASE_SENSITIVE = "case_sensitive";
-  protected static final String PATTERN = "pattern";
-  protected static final String ANTIPATTERN = "antipattern";
-  protected static final String MATCH = "match";
-  protected static final String UNIFICATION = "unification";
-  protected static final String RULE = "rule";
-  protected static final String RULEGROUP = "rulegroup";
-  protected static final String NO = "no";
-  protected static final String PHRASES = "phrases";
-  protected static final String MESSAGE = "message";
-  protected static final String SUGGESTION = "suggestion";
+  protected List<String> uTypeList = new ArrayList<>();
+  protected Map<String, List<String>> equivalenceFeatures = new HashMap<>();
 
   public XMLRuleHandler() {
-    elementList = new ArrayList<>();
-    equivalenceFeatures = new HashMap<>();
-    uTypeList = new ArrayList<>();
   }
 
-  public List<PatternRule> getRules() {
+  public List<AbstractPatternRule> getRules() {
     return rules;
   }
 
@@ -237,7 +246,6 @@ public class XMLRuleHandler extends DefaultHandler {
     inToken = false;
     tokenSpaceBefore = false;
     tokenSpaceBeforeSet = false;
-
     resetException();
     exceptionSet = false;
     tokenReference = null;
@@ -255,30 +263,23 @@ public class XMLRuleHandler extends DefaultHandler {
     exceptionSpaceBeforeSet = false;
   }
 
-  protected void phraseElementInit() {
-    // lazy init
-    if (phraseElementList == null) {
-      phraseElementList = new ArrayList<>();
-    }
-  }
-
   protected void preparePhrase(final Attributes attrs) {
     phraseIdRef = attrs.getValue("idref");
     if (phraseMap.containsKey(phraseIdRef)) {
-      for (final List<Element> curPhrEl : phraseMap.get(phraseIdRef)) {
-        for (final Element e : curPhrEl) {
-          e.setPhraseName(phraseIdRef);
+      for (final List<PatternToken> curPhrTokens : phraseMap.get(phraseIdRef)) {
+        for (final PatternToken pToken : curPhrTokens) {
+          pToken.setPhraseName(phraseIdRef);
         }
-        final List<Element> copy = (List<Element>) ObjectUtils.clone(curPhrEl);
-        for (Element element : copy) {
-          element.setInsideMarker(inMarker);
+        final List<PatternToken> copy = (List<PatternToken>) ObjectUtils.clone(curPhrTokens);
+        for (PatternToken patternToken : copy) {
+          patternToken.setInsideMarker(inMarker);
         }
-        if (elementList.isEmpty()) {
-          phraseElementList.add(new ArrayList<>(copy));
+        if (patternTokens.isEmpty()) {
+          phrasePatternTokens.add(new ArrayList<>(copy));
         } else {
-          final List<Element> prevList = new ArrayList<>(elementList);
+          final List<PatternToken> prevList = new ArrayList<>(patternTokens);
           prevList.addAll(copy);
-          phraseElementList.add(new ArrayList<>(prevList));
+          phrasePatternTokens.add(new ArrayList<>(prevList));
           prevList.clear();
         }
       }
@@ -291,22 +292,21 @@ public class XMLRuleHandler extends DefaultHandler {
     if (phraseMap == null) {
       phraseMap = new HashMap<>();
     }
-    phraseElementInit();
-    for (Element element : elementList) {
-      element.setInsideMarker(inMarker);
+    for (PatternToken patternToken : patternTokens) {
+      patternToken.setInsideMarker(inMarker);
     }
-    if (phraseElementList.isEmpty()) {
-      phraseElementList.add(new ArrayList<>(elementList));
+    if (phrasePatternTokens.isEmpty()) {
+      phrasePatternTokens.add(new ArrayList<>(patternTokens));
     } else {
-      for (List<Element> ph : phraseElementList) {
-        ph.addAll(new ArrayList<>(elementList));
+      for (List<PatternToken> ph : phrasePatternTokens) {
+        ph.addAll(new ArrayList<>(patternTokens));
       }
     }
 
-    phraseMap.put(phraseId, new ArrayList<List<Element>>(phraseElementList));
-    elementList.clear();
+    phraseMap.put(phraseId, new ArrayList<>(phrasePatternTokens));
+    patternTokens.clear();
 
-    phraseElementList.clear();
+    phrasePatternTokens.clear();
   }
 
   protected void startPattern(final Attributes attrs) throws SAXException {
@@ -319,17 +319,17 @@ public class XMLRuleHandler extends DefaultHandler {
    * Calculates the offset of the match reference (if any) in case the match
    * element has been used in the group.
    * 
-   * @param elList Element list where the match element was used. It is directly changed.
+   * @param patternTokens token list where the match element was used. It is directly changed.
    */
-  protected void processElement(final List<Element> elList) {
+  protected void processElement(final List<PatternToken> patternTokens) {
     int counter = 0;
-    for (final Element elTest : elList) {
-        if (elTest.getPhraseName() != null && counter > 0 && elTest.isReferenceElement()) {
-            final int tokRef = elTest.getMatch().getTokenRef();
-            elTest.getMatch().setTokenRef(tokRef + counter - 1);
-            final String offsetToken = elTest.getString().replace("\\" + tokRef,
+    for (final PatternToken pToken : patternTokens) {
+        if (pToken.getPhraseName() != null && counter > 0 && pToken.isReferenceElement()) {
+            final int tokRef = pToken.getMatch().getTokenRef();
+            pToken.getMatch().setTokenRef(tokRef + counter - 1);
+            final String offsetToken = pToken.getString().replace("\\" + tokRef,
                     "\\" + (tokRef + counter - 1));
-            elTest.setStringElement(offsetToken);
+            pToken.setStringElement(offsetToken);
         }
       counter++;
     }
@@ -356,18 +356,12 @@ public class XMLRuleHandler extends DefaultHandler {
         includeRange);
     mWorker.setInMessageOnly(!inSuggestion);
     if (inMessage) {
-      if (suggestionMatches == null) {
-        suggestionMatches = new ArrayList<>();
-      }
       suggestionMatches.add(mWorker);
       // add incorrect XML character for simplicity
       message.append("\u0001\\");
       message.append(attrs.getValue("no"));
       checkNumber(attrs);
     } else if (inSuggestion) {
-      if (suggestionMatchesOutMsg == null) {
-        suggestionMatchesOutMsg = new ArrayList<>();
-      }
       suggestionMatchesOutMsg.add(mWorker);
       // add incorrect XML character for simplicity
       suggestionsOutMsg.append("\u0001\\");
@@ -388,7 +382,7 @@ public class XMLRuleHandler extends DefaultHandler {
       throw new SAXException("References cannot be empty: " + "\n Line: "
           + pLocator.getLineNumber() + ", column: "
           + pLocator.getColumnNumber() + ".");
-    } else if (Integer.parseInt(attrs.getValue("no")) < 1) {
+    } else if (Integer.parseInt(attrs.getValue("no")) < 1 && regex.length() == 0) {
       throw new SAXException("References must be larger than 0: "
           + attrs.getValue("no") + "\n Line: " + pLocator.getLineNumber()
           + ", column: " + pLocator.getColumnNumber() + ".");
@@ -396,7 +390,7 @@ public class XMLRuleHandler extends DefaultHandler {
   }
 
   private void checkRefNumber(int refNumber) throws SAXException {
-    if (refNumber > elementList.size()) {
+    if (refNumber > patternTokens.size()) {
       throw new SAXException("Only backward references in match elements are possible, tried to specify token "
           + refNumber + "\n" + "Line: " + pLocator.getLineNumber()
           + ", column: " + pLocator.getColumnNumber() + ".");
@@ -439,25 +433,19 @@ public class XMLRuleHandler extends DefaultHandler {
       if (tokenLevelCaseSet) {
         tokenCase = tokenLevelCaseSensitive;
       }
-      tokenElement = new Element(elements
-          .toString(), tokenCase, regExpression, tokenInflected);
+      patternToken = new PatternToken(elements.toString(), tokenCase, regExpression, tokenInflected);
       exceptionSet = true;
     }
-    tokenElement.setNegation(tokenNegated);
+    patternToken.setNegation(tokenNegated);
     if (!StringTools.isEmpty(exceptions.toString()) || exceptionPosToken != null) {
-      if (exceptionLevelCaseSet) {
-        tokenElement.setStringPosException(exceptions.toString(), exceptionStringRegExp,
-            exceptionStringInflected, exceptionStringNegation, exceptionValidNext, exceptionValidPrev,
-            exceptionPosToken, exceptionPosRegExp, exceptionPosNegation, exceptionLevelCaseSensitive);
-      } else {
-        tokenElement.setStringPosException(exceptions.toString(), exceptionStringRegExp,
-            exceptionStringInflected, exceptionStringNegation, exceptionValidNext, exceptionValidPrev,
-            exceptionPosToken, exceptionPosRegExp, exceptionPosNegation);
-      }
+      patternToken.setStringPosException(exceptions.toString(), exceptionStringRegExp,
+          exceptionStringInflected, exceptionStringNegation, exceptionValidNext, exceptionValidPrev,
+          exceptionPosToken, exceptionPosRegExp, exceptionPosNegation, exceptionLevelCaseSensitive);
       exceptionPosToken = null;
+      exceptionLevelCaseSensitive = null;
     }
     if (exceptionSpaceBeforeSet) {
-      tokenElement.setExceptionSpaceBefore(exceptionSpaceBefore);
+      patternToken.setExceptionSpaceBefore(exceptionSpaceBefore);
     }
     resetException();
   }
@@ -466,7 +454,7 @@ public class XMLRuleHandler extends DefaultHandler {
     inToken = true;
 
     if (lastPhrase) {
-      elementList.clear();
+      patternTokens.clear();
     }
 
     lastPhrase = false;
@@ -506,6 +494,7 @@ public class XMLRuleHandler extends DefaultHandler {
       tokenLevelCaseSet = true;
       tokenLevelCaseSensitive = YES.equals(attrs.getValue(CASE_SENSITIVE));
     } else {
+      tokenLevelCaseSensitive = false;
       tokenLevelCaseSet = false;
     }
   }
@@ -514,10 +503,11 @@ public class XMLRuleHandler extends DefaultHandler {
    * Adds Match objects for all references to tokens
    * (including '\1' and the like).
    */
+  @Nullable
   protected List<Match> addLegacyMatches(final List <Match> existingSugMatches, final String messageStr,
       boolean inMessage) {
     if (existingSugMatches == null || existingSugMatches.isEmpty()) {
-      return null;
+      return new ArrayList<>();
     }
     final List<Match> sugMatch = new ArrayList<>();
     int pos = 0;
@@ -551,46 +541,41 @@ public class XMLRuleHandler extends DefaultHandler {
   }
 
   protected void finalizeTokens() throws SAXException {
-    if (!exceptionSet || tokenElement == null) {
+    if (!exceptionSet || patternToken == null) {
       boolean tokenCase = caseSensitive;
       if (tokenLevelCaseSet) {
         tokenCase = tokenLevelCaseSensitive;
       }
-      tokenElement = new Element(elements.toString(),
+      patternToken = new PatternToken(elements.toString(),
           tokenCase, regExpression, tokenInflected);
-      tokenElement.setNegation(tokenNegated);
+      patternToken.setNegation(tokenNegated);
     } else {
-      tokenElement.setStringElement(elements
-          .toString());
+      patternToken.setStringElement(elements.toString());
     }
-
     if (skipPos != 0) {
-      tokenElement.setSkipNext(skipPos);
+      patternToken.setSkipNext(skipPos);
       skipPos = 0;
     }
-
     if (minOccurrence == 0) {
-      tokenElement.setMinOccurrence(0);
+      patternToken.setMinOccurrence(0);
     }
     if (maxOccurrence != 1) {
-      tokenElement.setMaxOccurrence(maxOccurrence);
+      patternToken.setMaxOccurrence(maxOccurrence);
       maxOccurrence = 1;
     }
     if (posToken != null) {
-      tokenElement.setPosElement(posToken, posRegExp, posNegation);
+      patternToken.setPosToken(new PatternToken.PosToken(posToken, posRegExp, posNegation));
       posToken = null;
     }
     if (chunkTag != null) {
-      tokenElement.setChunkElement(chunkTag);
+      patternToken.setChunkTag(chunkTag);
       chunkTag = null;
     }
-
     if (tokenReference != null) {
-      tokenElement.setMatch(tokenReference);
+      patternToken.setMatch(tokenReference);
     }
-
     if (inAndGroup && andGroupCounter > 0) {
-      elementList.get(elementList.size() - 1).setAndGroupElement(tokenElement);
+      patternTokens.get(patternTokens.size() - 1).setAndGroupElement(patternToken);
         if (minOccurrence !=1 || maxOccurrence !=1) {
             throw new SAXException("Please set min and max attributes on the " +
                     "first token in the AND group.\n You attempted to set these " +
@@ -599,13 +584,13 @@ public class XMLRuleHandler extends DefaultHandler {
                     + pLocator.getColumnNumber() + ".");
         }
     } else if (inOrGroup && orGroupCounter > 0) {
-      elementList.get(elementList.size() - 1).setOrGroupElement(tokenElement);
+      patternTokens.get(patternTokens.size() - 1).setOrGroupElement(patternToken);
     } else {
       if (minOccurrence < 1) {
-        elementList.add(tokenElement);
+        patternTokens.add(patternToken);
       }
       for (int i = 1; i <= minOccurrence; i ++) {
-        elementList.add(tokenElement);
+        patternTokens.add(patternToken);
       }
       minOccurrence = 1;
     }
@@ -615,23 +600,19 @@ public class XMLRuleHandler extends DefaultHandler {
     if (inOrGroup) {
       orGroupCounter++;
     }
-
     if (inUnification) {
-      tokenElement.setUnification(equivalenceFeatures);
+      patternToken.setUnification(equivalenceFeatures);
     }
-
     if (inUnificationNeutral) {
-      tokenElement.setUnificationNeutral();
+      patternToken.setUnificationNeutral();
     }
-
-    tokenElement.setInsideMarker(inMarker);
-
+    patternToken.setInsideMarker(inMarker);
     if (inUnificationDef) {
-      language.getUnifierConfiguration().setEquivalence(uFeature, uType, tokenElement);
-      elementList.clear();
+      language.getUnifierConfiguration().setEquivalence(uFeature, uType, patternToken);
+      patternTokens.clear();
     }
     if (tokenSpaceBeforeSet) {
-      tokenElement.setWhitespaceBefore(tokenSpaceBefore);
+      patternToken.setWhitespaceBefore(tokenSpaceBefore);
     }
     resetToken();
   }

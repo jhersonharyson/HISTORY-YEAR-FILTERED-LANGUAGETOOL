@@ -108,80 +108,81 @@ public final class MorfologikPolishSpellerRule extends MorfologikSpellerRule {
     return POLISH_TOKENIZING_CHARS;
   }
 
-    @Override
-    protected List<RuleMatch> getRuleMatches(final String word, final int startPos)
-    throws IOException {
-        final List<RuleMatch> ruleMatches = new ArrayList<>();
-        if (isMisspelled(speller1, word) && isNotCompound(word)) {
-            final RuleMatch ruleMatch = new RuleMatch(this, startPos, startPos
-                    + word.length(), messages.getString("spelling"),
-                    messages.getString("desc_spelling_short"));
-            //If lower case word is not a misspelled word, return it as the only suggestion
-            if (!isMisspelled(speller1, word.toLowerCase(conversionLocale))) {
-                List<String> suggestion = Arrays.asList(word.toLowerCase(conversionLocale));
-                ruleMatch.setSuggestedReplacements(suggestion);
-                ruleMatches.add(ruleMatch);
-                return ruleMatches;
-            }
-            List<String> suggestions = speller1.getSuggestions(word);
-            suggestions.addAll(0, getAdditionalTopSuggestions(suggestions, word));
-            suggestions.addAll(getAdditionalSuggestions(suggestions, word));
-            if (!suggestions.isEmpty()) {
-                ruleMatch.setSuggestedReplacements(pruneSuggestions(orderSuggestions(suggestions,word)));
-            }
-            ruleMatches.add(ruleMatch);
-        }
+  @Override
+  protected List<RuleMatch> getRuleMatches(final String word, final int startPos)
+          throws IOException {
+    final List<RuleMatch> ruleMatches = new ArrayList<>();
+    if (isMisspelled(speller1, word) && isNotCompound(word)) {
+      final RuleMatch ruleMatch = new RuleMatch(this, startPos, startPos
+              + word.length(), messages.getString("spelling"),
+              messages.getString("desc_spelling_short"));
+      //If lower case word is not a misspelled word, return it as the only suggestion
+      if (!isMisspelled(speller1, word.toLowerCase(conversionLocale))) {
+        List<String> suggestion = Arrays.asList(word.toLowerCase(conversionLocale));
+        ruleMatch.setSuggestedReplacements(suggestion);
+        ruleMatches.add(ruleMatch);
         return ruleMatches;
+      }
+      List<String> suggestions = speller1.getSuggestions(word);
+      suggestions.addAll(0, getAdditionalTopSuggestions(suggestions, word));
+      suggestions.addAll(getAdditionalSuggestions(suggestions, word));
+      if (!suggestions.isEmpty()) {
+        ruleMatch.setSuggestedReplacements(pruneSuggestions(orderSuggestions(suggestions,word)));
+      }
+      ruleMatches.add(ruleMatch);
     }
+    return ruleMatches;
+  }
 
-    /**
-     * Check whether the word is a compound adjective or contains a non-splitting prefix.
-     * Used to suppress false positives.
-     *
-     * @param word Word to be checked.
-     * @return True if the word is not a compound.
-     * @since 2.5
-     */
-    private boolean isNotCompound(String word) throws IOException {
-        List<String> probablyCorrectWords = new ArrayList<>();
-        List<String> testedTokens = new ArrayList<>(2);
-        for (int i = 2; i < word.length(); i++) {
-            // chop from left to right
-            final String first = word.substring(0, i);
-            final String second = word.substring(i, word.length());
-            if (prefixes.contains(first.toLowerCase(conversionLocale))
-                    && !isMisspelled(speller1, second)) {
-                // ignore this match, it's fine
-                probablyCorrectWords.add(word);
-            } else {
-                testedTokens.clear();
-                testedTokens.add(first);
-                testedTokens.add(second);
-                List<AnalyzedTokenReadings> taggedToks =
-                        language.getTagger().tag(testedTokens);
-                if (taggedToks.size() == 2
-                        // "białozielony", trzynastobitowy
-                        && (taggedToks.get(0).hasPosTag("adja")
-                        || (taggedToks.get(0).hasPosTag("num:comp")
-                           && !taggedToks.get(0).hasPosTag("adv")))
-                        && taggedToks.get(1).hasPartialPosTag("adj:")) {
-                    probablyCorrectWords.add(word);
-                }
-            }
+  /**
+   * Check whether the word is a compound adjective or contains a non-splitting prefix.
+   * Used to suppress false positives.
+   *
+   * @param word Word to be checked.
+   * @return True if the word is not a compound.
+   * @since 2.5
+   */
+  private boolean isNotCompound(String word) throws IOException {
+    List<String> probablyCorrectWords = new ArrayList<>();
+    List<String> testedTokens = new ArrayList<>(2);
+    for (int i = 2; i < word.length(); i++) {
+      // chop from left to right
+      final String first = word.substring(0, i);
+      final String second = word.substring(i, word.length());
+      if (prefixes.contains(first.toLowerCase(conversionLocale))
+              && !isMisspelled(speller1, second)
+              && second.length() > first.length()) { // but not for short words such as "premoc"
+        // ignore this match, it's fine
+        probablyCorrectWords.add(word); // FIXME: some strange words are being accepted, like prekupa
+      } else {
+        testedTokens.clear();
+        testedTokens.add(first);
+        testedTokens.add(second);
+        List<AnalyzedTokenReadings> taggedToks =
+                language.getTagger().tag(testedTokens);
+        if (taggedToks.size() == 2
+                // "białozielony", trzynastobitowy
+                && (taggedToks.get(0).hasPosTag("adja")
+                || (taggedToks.get(0).hasPosTag("num:comp")
+                   && !taggedToks.get(0).hasPosTag("adv")))
+                && taggedToks.get(1).hasPartialPosTag("adj:")) {
+          probablyCorrectWords.add(word);
         }
-        if (!probablyCorrectWords.isEmpty()) {
-            addIgnoreTokens(probablyCorrectWords);
-            return false;
-        }
-        return true;
+      }
     }
+    if (!probablyCorrectWords.isEmpty()) {
+      addIgnoreTokens(probablyCorrectWords);
+      return false;
+    }
+    return true;
+  }
 
   /**
    * Remove suggestions -- not really runon words using a list of non-word suffixes
    * @return A list of pruned suggestions.
    */
     private List<String> pruneSuggestions(final List<String> suggestions) {
-      List<String> prunedSuggestions = new ArrayList<String>(suggestions.size());
+      List<String> prunedSuggestions = new ArrayList<>(suggestions.size());
       for (final String suggestion : suggestions) {
         if (suggestion.indexOf(' ') == -1) {
           prunedSuggestions.add(suggestion);

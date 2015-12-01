@@ -36,16 +36,10 @@ public class Swedish extends Language {
 
   private SentenceTokenizer sentenceTokenizer;
   private Tagger tagger;
-  private String name = "Swedish";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Swedish";
   }
 
   @Override
@@ -84,7 +78,7 @@ public class Swedish extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages),
             new HunspellRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
             new WordRepeatRule(messages, this),

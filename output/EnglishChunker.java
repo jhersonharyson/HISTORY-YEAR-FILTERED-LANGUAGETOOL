@@ -24,6 +24,7 @@ import opennlp.tools.postag.POSModel;
 import opennlp.tools.postag.POSTaggerME;
 import opennlp.tools.tokenize.TokenizerME;
 import opennlp.tools.tokenize.TokenizerModel;
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.tools.Tools;
 
@@ -48,9 +49,9 @@ public class EnglishChunker implements Chunker {
    * that is once created there will never be released. As English has several variants,
    * we'd have as many posModels etc. as we have variants -> huge waste of memory:
    */
-  private static TokenizerModel tokenModel;
-  private static POSModel posModel;
-  private static ChunkerModel chunkerModel;
+  private static volatile TokenizerModel tokenModel;
+  private static volatile POSModel posModel;
+  private static volatile ChunkerModel chunkerModel;
 
   private final EnglishChunkFilter chunkFilter;
 
@@ -143,6 +144,7 @@ public class EnglishChunker implements Chunker {
   // Get only exact position matches - i.e. this can only be used for a trivial mapping
   // where tokens that are not exactly at the same position will be skipped. For example,
   // the tokens of "I'll" ([I] ['ll] vs [I]['][ll) cannot be mapped with this.
+  @Nullable
   private AnalyzedTokenReadings getAnalyzedTokenReadingsFor(int startPos, int endPos, List<AnalyzedTokenReadings> tokenReadings) {
     int pos = 0;
     for (AnalyzedTokenReadings tokenReading : tokenReadings) {

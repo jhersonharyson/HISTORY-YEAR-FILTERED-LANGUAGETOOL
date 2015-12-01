@@ -32,6 +32,8 @@ import java.util.List;
 import java.util.ResourceBundle;
 import java.util.regex.Pattern;
 
+import com.google.common.base.Charsets;
+import com.google.common.io.Resources;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
@@ -114,7 +116,7 @@ public class HunspellRule extends SpellingCheckRule {
     return toRuleMatchArray(ruleMatches);
   }
 
-  private boolean isMisspelled(String word) {
+  boolean isMisspelled(String word) {
     boolean isAlphabetic = true;
     if (word.length() == 1) { // hunspell dictionaries usually do not contain punctuation
       isAlphabetic = Character.isAlphabetic(word.charAt(0));
@@ -184,12 +186,23 @@ public class HunspellRule extends SpellingCheckRule {
           wordChars = "(?![" + hunspellDict.getWordChars().replace("-", "\\-") + "])";
         }
 
-        hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOL); // to make demo text check 4 times faster...
-        hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOL_FX);
+        addIgnoreWords();
       }
     }
     nonWordPattern = Pattern.compile(wordChars + NON_ALPHABETIC);
     needsInit = false;
+  }
+
+  private void addIgnoreWords() throws IOException {
+    hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOL);
+    hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOL_FX);
+    URL ignoreUrl = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(getIgnoreFileName());
+    List<String> ignoreLines = Resources.readLines(ignoreUrl, Charsets.UTF_8);
+    for (String ignoreLine : ignoreLines) {
+      if (!ignoreLine.startsWith("#")) {
+        hunspellDict.addWord(ignoreLine);
+      }
+    }
   }
 
   private String getDictionaryPath(final String dicName,
@@ -197,19 +210,20 @@ public class HunspellRule extends SpellingCheckRule {
 
     final URL dictURL = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(originalPath);
     String dictionaryPath;
-    //in the webstart version, we need to copy the files outside the jar
+    //in the webstart or java EE container version, we need to copy the files outside the jar
     //to the local temporary directory
-    if ("jar".equals(dictURL.getProtocol())) {
+    if ("jar".equals(dictURL.getProtocol()) || "vfs".equals(dictURL.getProtocol())) {
       final File tempDir = new File(System.getProperty("java.io.tmpdir"));
       File tempDicFile = new File(tempDir, dicName + ".dic");
       JLanguageTool.addTemporaryFile(tempDicFile);
-      fileCopy(JLanguageTool.getDataBroker().
-          getFromResourceDirAsStream(originalPath), tempDicFile);
+      try (InputStream dicStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(originalPath)) {
+        fileCopy(dicStream, tempDicFile);
+      }
       File tempAffFile = new File(tempDir, dicName + ".aff");
       JLanguageTool.addTemporaryFile(tempAffFile);
-      fileCopy(JLanguageTool.getDataBroker().
-          getFromResourceDirAsStream(originalPath.replaceFirst(".dic$", ".aff")), tempAffFile);
-
+      try (InputStream affStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(originalPath.replaceFirst(".dic$", ".aff"))) {
+        fileCopy(affStream, tempAffFile);
+      }
       dictionaryPath = tempDir.getAbsolutePath() + "/" + dicName;
     } else {
       final int suffixLength = ".dic".length();

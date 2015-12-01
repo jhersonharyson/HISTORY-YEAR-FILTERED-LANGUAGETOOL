@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.ResourceBundle;
 import java.util.regex.Pattern;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.Language;
@@ -128,7 +129,7 @@ public class UppercaseSentenceStartRule extends Rule {
       if (!preventError && Character.isLowerCase(firstChar)) {
         final RuleMatch ruleMatch = new RuleMatch(this,
                 tokens[matchTokenPos].getStartPos(),
-                tokens[matchTokenPos].getStartPos() + tokens[matchTokenPos].getToken().length(),
+                tokens[matchTokenPos].getEndPos(),
                 messages.getString("incorrect_case"));
         ruleMatch.setSuggestedReplacement(StringTools.uppercaseFirstChar(checkToken));
         ruleMatches.add(ruleMatch);
@@ -137,6 +138,7 @@ public class UppercaseSentenceStartRule extends Rule {
     return toRuleMatchArray(ruleMatches);
   }
 
+  @Nullable
   private String dutchSpecialCase(final String firstToken,
       final String secondToken, final AnalyzedTokenReadings[] tokens) {
     if (!language.getShortName().equals("nl")) {
@@ -151,15 +153,11 @@ public class UppercaseSentenceStartRule extends Rule {
 
   @Override
   public void reset() {
+    lastParagraphString = "";
   }
   
   protected boolean isUrl(String token) {
-    for (String protocol : WordTokenizer.getProtocols()) {
-      if (token.startsWith(protocol + "://")) {
-        return true;
-      }
-    }
-    return false;
+    return WordTokenizer.isUrl(token);
   }
 
 }

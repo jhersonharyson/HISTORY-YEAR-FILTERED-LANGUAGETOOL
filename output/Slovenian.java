@@ -32,16 +32,10 @@ import org.languagetool.tokenizers.SentenceTokenizer;
 public class Slovenian extends Language {
   
   private SentenceTokenizer sentenceTokenizer;
-  private String name = "Slovenian";
 
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Slovenian";
   }
 
   @Override
@@ -54,16 +48,6 @@ public class Slovenian extends Language {
     return new String[]{"SI"};
   }
 
-  @Override
-  public String[] getUnpairedRuleStartSymbols() {
-    return new String[]{ "[", "(", "{", "„", "»", "«", "\"" };
-  }
-
-  @Override
-  public String[] getUnpairedRuleEndSymbols() {
-    return new String[]{ "]", ")", "}", "”", "«", "»", "\"" };
-  }
-  
   @Override
   public SentenceTokenizer getSentenceTokenizer() {
     if (sentenceTokenizer == null) {
@@ -82,7 +66,9 @@ public class Slovenian extends Language {
     return Arrays.asList(
             new CommaWhitespaceRule(messages),
             new DoublePunctuationRule(messages),
-            new GenericUnpairedBracketsRule(messages, this),
+            new GenericUnpairedBracketsRule(messages,
+                    Arrays.asList("[", "(", "{", "„", "»", "«", "\""),
+                    Arrays.asList("]", ")", "}", "”", "«", "»", "\"")),
             new MorfologikSlovenianSpellerRule(messages, this),
             new UppercaseSentenceStartRule(messages, this),
             new WordRepeatRule(messages, this),

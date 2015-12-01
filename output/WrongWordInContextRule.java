@@ -53,9 +53,7 @@ public abstract class WrongWordInContextRule extends Rule {
   private final List<ContextWords> contextWordsSet;
 
   public WrongWordInContextRule(final ResourceBundle messages) {
-    if (messages != null) {
-      super.setCategory(new Category(getCategoryString()));
-    }
+    super.setCategory(new Category(getCategoryString()));
     contextWordsSet = loadContextWords(JLanguageTool.getDataBroker().getFromRulesDirAsStream(getFilename()));
     setLocQualityIssueType(ITSIssueType.Misspelling);
   }
@@ -149,7 +147,7 @@ public abstract class WrongWordInContextRule extends Rule {
   }
   
   /**
-   * @return a string like "Possible confusion of words: Did you mean <suggestion>$SUGGESTION</suggestion> instead of '$WRONGWORD'?"
+   * @return a string like "Possible confusion of words: Did you mean &lt;suggestion&gt;$SUGGESTION&lt;/suggestion&gt; instead of '$WRONGWORD'?"
    */
   protected abstract String getMessageString();
   
@@ -159,13 +157,13 @@ public abstract class WrongWordInContextRule extends Rule {
   protected abstract String getShortMessageString();
   
   /**
-   * @return a string like "Possible confusion of words: Did you mean <suggestion>$SUGGESTION</suggestion>
+   * @return a string like "Possible confusion of words: Did you mean &lt;suggestion&gt;$SUGGESTION&lt;/suggestion&gt;
    * (= $EXPLANATION_SUGGESTION) instead of '$WRONGWORD' (= $EXPLANATION_WRONGWORD)?"
    */
   protected abstract String getLongMessageString();
   
   private String getMessage(String wrongWord, String suggestion, String explanationSuggestion, String explanationWrongWord) {
-    if (explanationSuggestion.equals("") || explanationWrongWord.equals("")) {
+    if (explanationSuggestion.isEmpty() || explanationWrongWord.isEmpty()) {
       return getMessageString().replaceFirst("\\$SUGGESTION", suggestion).replaceFirst("\\$WRONGWORD", wrongWord);
     } else {
       return getLongMessageString().replaceFirst("\\$SUGGESTION", suggestion).replaceFirst("\\$WRONGWORD", wrongWord)
@@ -206,7 +204,7 @@ public abstract class WrongWordInContextRule extends Rule {
     return set;
   }
   
-  class ContextWords {
+  static class ContextWords {
     
     String[] matches = {"", ""};
     String[] explanations = {"", ""};
@@ -239,7 +237,6 @@ public abstract class WrongWordInContextRule extends Rule {
 
   @Override
   public void reset() {
-    // nothing
   }
 
 }

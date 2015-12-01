@@ -19,7 +19,7 @@
 package org.languagetool.rules.spelling.hunspell;
 
 import org.languagetool.Language;
-import org.languagetool.rules.spelling.morfologik.MorfologikSpeller;
+import org.languagetool.rules.spelling.morfologik.MorfologikMultiSpeller;
 import org.languagetool.tokenizers.CompoundWordTokenizer;
 import org.languagetool.tools.StringTools;
 
@@ -36,9 +36,11 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
   private static final int MAX_SUGGESTIONS = 20;
   
   private final CompoundWordTokenizer wordSplitter;
-  private final MorfologikSpeller morfoSpeller;
-  
-  public CompoundAwareHunspellRule(ResourceBundle messages, Language language, CompoundWordTokenizer wordSplitter, MorfologikSpeller morfoSpeller) {
+  private final MorfologikMultiSpeller morfoSpeller;
+
+  protected abstract void filterForLanguage(List<String> suggestions);
+
+  public CompoundAwareHunspellRule(ResourceBundle messages, Language language, CompoundWordTokenizer wordSplitter, MorfologikMultiSpeller morfoSpeller) {
     super(messages, language);
     this.wordSplitter = wordSplitter;
     this.morfoSpeller = morfoSpeller;
@@ -47,7 +49,7 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
   /**
    * As a hunspell-based approach is too slow, we use Morfologik to create suggestions. As this
    * won't work for compounds not in the dictionary, we split the word and also get suggestions
-   * on the compound parts. In the end, all candidates are filtered against Hunspell again (which 
+   * on the compound parts. In the end, all candidates are filtered against Hunspell again (which
    * supports compounds).
    */
   @Override
@@ -55,49 +57,64 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
     if (needsInit) {
       init();
     }
-    final List<String> candidates = new ArrayList<>();
-    
-    final List<String> noSplitSuggestions = morfoSpeller.getSuggestions(word);
-    candidates.addAll(noSplitSuggestions);
+    final List<String> candidates = getCandidates(word);
+    final List<String> suggestions = getCorrectWords(candidates);
 
+    final List<String> noSplitSuggestions = morfoSpeller.getSuggestions(word);  // after getCorrectWords() so spelling.txt is considered
     if (StringTools.startsWithUppercase(word) && !StringTools.isAllUppercase(word)) {
       // almost all words can be uppercase because they can appear at the start of a sentence:
       final List<String> noSplitLowercaseSuggestions = morfoSpeller.getSuggestions(word.toLowerCase());
-      int pos = candidates.size() == 0 ? 0 : 1;  // first item comes from getSuggestion() above, if any
+      int pos = noSplitSuggestions.size() == 0 ? 0 : 1;  // first item comes from getSuggestion() above, if any
       for (String suggestion : noSplitLowercaseSuggestions) {
-        candidates.add(pos, StringTools.uppercaseFirstChar(suggestion));
+        noSplitSuggestions.add(pos, StringTools.uppercaseFirstChar(suggestion));
         // we don't know about the quality of the results here, so mix both lists together,
-        // taking elements from both lists on a rotating basis: 
-        pos = Math.min(pos + 2, candidates.size());
+        // taking elements from both lists on a rotating basis:
+        pos = Math.min(pos + 2, noSplitSuggestions.size());
       }
     }
+    suggestions.addAll(0, noSplitSuggestions);
 
-    final List<String> parts = wordSplitter.tokenize(word);
+    filterDupes(suggestions);
+    filterForLanguage(suggestions);
+    final List<String> sortedSuggestions = sortSuggestionByQuality(word, suggestions);
+    return sortedSuggestions.subList(0, Math.min(MAX_SUGGESTIONS, sortedSuggestions.size()));
+  }
+
+  protected List<String> getCandidates(String word) {
+    return wordSplitter.tokenize(word);
+  }
+
+  protected List<String> getCandidates(List<String> parts) {
     int partCount = 0;
+    final List<String> candidates = new ArrayList<>();
     for (String part : parts) {
       if (hunspellDict.misspelled(part)) {
-        List<String> suggestions = morfoSpeller.getSuggestions(part);
+        // assume noun, so use uppercase:
+        boolean doUpperCase = partCount > 0 && !StringTools.startsWithUppercase(part);
+        List<String> suggestions = morfoSpeller.getSuggestions(doUpperCase ? StringTools.uppercaseFirstChar(part) : part);
         if (suggestions.size() == 0) {
-          suggestions = morfoSpeller.getSuggestions(StringTools.uppercaseFirstChar(part));
+          suggestions = morfoSpeller.getSuggestions(doUpperCase ? StringTools.lowercaseFirstChar(part) : part);
         }
         for (String suggestion : suggestions) {
           final List<String> partsCopy = new ArrayList<>(parts);
-          if (partCount > 0 && !parts.get(partCount-1).endsWith("-")) {
+          if (partCount > 0 && parts.get(partCount).startsWith("-") && parts.get(partCount).length() > 1) {
+            partsCopy.set(partCount, "-" + StringTools.uppercaseFirstChar(suggestion.substring(1)));
+          } else if (partCount > 0 && !parts.get(partCount-1).endsWith("-")) {
             partsCopy.set(partCount, suggestion.toLowerCase());
           } else {
             partsCopy.set(partCount, suggestion);
           }
-          candidates.add(StringTools.listToString(partsCopy, ""));
+          String candidate = String.join("", partsCopy);
+          if (!isMisspelled(candidate)) {
+            candidates.add(candidate);
+          }
         }
       }
       // TODO: what if there's no misspelled parts like for Arbeitamt = Arbeit+Amt ??
       // -> morfologik must be extended to return similar words even for known words
       partCount++;
     }
-    filterDupes(candidates);
-    final List<String> suggestions = getCorrectWords(candidates);
-    final List<String> sortedSuggestions = sortSuggestionByQuality(word, suggestions);
-    return sortedSuggestions.subList(0, Math.min(MAX_SUGGESTIONS, sortedSuggestions.size()));
+    return candidates;
   }
 
   protected List<String> sortSuggestionByQuality(String misspelling, List<String> suggestions) {
@@ -115,7 +132,9 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
       seen.add(word);
     }
   }
-  
+
+  // avoid over-accepting words, as the Morfologik approach above might construct
+  // compound words with parts that are correct but the compound is not correct (e.g. "Arbeit + Amt = Arbeitamt"):
   private List<String> getCorrectWords(List<String> wordsOrPhrases) {
     final List<String> result = new ArrayList<>();
     for (String wordOrPhrase : wordsOrPhrases) {

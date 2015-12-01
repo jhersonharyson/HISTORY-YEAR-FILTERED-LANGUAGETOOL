@@ -34,6 +34,7 @@ import org.languagetool.rules.ca.CatalanWrongWordInContextRule;
 import org.languagetool.rules.ca.ComplexAdjectiveConcordanceRule;
 import org.languagetool.rules.ca.MorfologikCatalanSpellerRule;
 import org.languagetool.rules.ca.ReflexiveVerbsRule;
+import org.languagetool.rules.ca.ReplaceOperationNamesRule;
 import org.languagetool.rules.ca.SimpleReplaceRule;
 import org.languagetool.rules.ca.SimpleReplaceVerbsRule;
 import org.languagetool.synthesis.Synthesizer;
@@ -48,29 +49,23 @@ import org.languagetool.tokenizers.Tokenizer;
 import org.languagetool.tokenizers.ca.CatalanWordTokenizer;
 
 public class Catalan extends Language {
+
+  private static final Language DEFAULT_CATALAN = new Catalan();
   
   private Tagger tagger;
   private SentenceTokenizer sentenceTokenizer;
   private Tokenizer wordTokenizer;
   private Synthesizer synthesizer;
   private Disambiguator disambiguator;
-  private String name = "Catalan";
 
-  private static final Language GENERAL_CATALAN = new GeneralCatalan();
-  
   @Override
   public String getName() {
-    return name;
-  }
-
-  @Override
-  public void setName(String name) {
-    this.name = name;
+    return "Catalan";
   }
 
   @Override
   public String[] getCountries() {
-    return new String[]{};
+    return new String[]{"ES"}; // "AD", "FR", "IT"
   }
   
   @Override
@@ -80,7 +75,7 @@ public class Catalan extends Language {
 
   @Override
   public Language getDefaultLanguageVariant() {
-    return GENERAL_CATALAN;
+    return DEFAULT_CATALAN;
   }
   
   @Override
@@ -107,9 +102,8 @@ public class Catalan extends Language {
             new CatalanWrongWordInContextRule(messages),
             new ReflexiveVerbsRule(messages),
             new SimpleReplaceVerbsRule(messages),
-            new SimpleReplaceRule(messages)
-            //new CastellanismesReplaceRule(messages),
-            //new AccentuacioReplaceRule(messages)
+            new SimpleReplaceRule(messages),
+            new ReplaceOperationNamesRule(messages)
     );
   }
 

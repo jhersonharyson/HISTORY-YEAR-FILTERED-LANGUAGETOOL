@@ -20,7 +20,7 @@ package org.languagetool.server;
 
 import com.sun.net.httpserver.HttpServer;
 import org.languagetool.JLanguageTool;
-import org.languagetool.gui.Tools;
+import org.languagetool.tools.Tools;
 
 import java.net.InetSocketAddress;
 import java.util.ResourceBundle;
@@ -105,12 +105,14 @@ public class HTTPServer extends Server {
         httpHandler.setAfterTheDeadlineMode(config.getAfterTheDeadlineLanguage());
       }
       httpHandler.setLanguageModel(config.getLanguageModelDir());
+      httpHandler.setMaxWorkQueueSize(config.getMaxWorkQueueSize());
+      httpHandler.setRulesConfigurationFile(config.getRulesConfigFile());
       server.createContext("/", httpHandler);
       executorService = getExecutorService(workQueue, config);
       server.setExecutor(executorService);
     } catch (Exception e) {
       final ResourceBundle messages = JLanguageTool.getMessageBundle();
-      final String message = Tools.makeTexti18n(messages, "http_server_start_failed", host, Integer.toString(port));
+      final String message = Tools.i18n(messages, "http_server_start_failed", host, Integer.toString(port));
       throw new PortBindingException(message, e);
     }
   }
@@ -126,9 +128,7 @@ public class HTTPServer extends Server {
   public static void main(String[] args) {
     if (args.length > 5 || usageRequested(args)) {
       System.out.println("Usage: " + HTTPServer.class.getSimpleName() + " [--config propertyFile] [--port|-p port] [--public]");
-      System.out.println("  --config file  a Java property file with values for:");
-      System.out.println("                 'mode' - 'LanguageTool' or 'AfterTheDeadline' for emulation of After the Deadline output (optional, experimental)");
-      System.out.println("                 'afterTheDeadlineLanguage' - language code like 'en' or 'en-GB' (required if mode is 'AfterTheDeadline')");
+      System.out.println("  --config file  a Java property file (one key=value entry per line) with values for:");
       printCommonConfigFileOptions();
       printCommonOptions();
       System.exit(1);
@@ -137,7 +137,7 @@ public class HTTPServer extends Server {
     final HTTPServerConfig config = new HTTPServerConfig(args);
     try {
       final HTTPServer server;
-      System.out.println("WARNING: running in HTTP mode, consider using SSL by running " + HTTPSServer.class.getName() + " instead");
+      System.out.println("WARNING: running in HTTP mode, consider using " + HTTPSServer.class.getName() + " for encrypted connections");
       if (config.isPublicAccess()) {
         System.out.println("WARNING: running in public mode, LanguageTool API can be accessed without restrictions!");
         server = new HTTPServer(config, runInternal, null, null);

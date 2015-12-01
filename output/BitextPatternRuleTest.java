@@ -25,14 +25,11 @@ import java.util.Set;
 
 import junit.framework.TestCase;
 
-import org.languagetool.AnalyzedSentence;
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.TestTools;
+import org.languagetool.*;
 import org.languagetool.bitext.StringPair;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
-import org.languagetool.rules.patterns.PatternRule;
+import org.languagetool.rules.patterns.AbstractPatternRule;
 import org.languagetool.rules.patterns.bitext.BitextPatternRule;
 import org.languagetool.rules.patterns.bitext.BitextPatternRuleLoader;
 
@@ -47,7 +44,7 @@ public class BitextPatternRuleTest extends TestCase {
   }
 
   private void testBitextRulesFromXML(final Set<Language> ignoredLanguages) throws IOException {
-    for (final Language lang : Language.LANGUAGES) {
+    for (final Language lang : Languages.getWithDemoLanguage()) {
       if (ignoredLanguages != null && ignoredLanguages.contains(lang)) {
         continue;
       }
@@ -90,7 +87,7 @@ public class BitextPatternRuleTest extends TestCase {
 
   private void testBadSentence(final String origBadSentence,
                                final List<String> suggestedCorrection, final int expectedMatchStart,
-                               final int expectedMatchEnd, final PatternRule rule,
+                               final int expectedMatchEnd, final AbstractPatternRule rule,
                                final Language lang,
                                final JLanguageTool languageTool) throws IOException {
     final String badSentence = cleanXML(origBadSentence);
@@ -111,7 +108,7 @@ public class BitextPatternRuleTest extends TestCase {
               rule.getMessage().contains("<suggestion>")
       );
       assertTrue(lang + ": Incorrect suggestions: "
-              + suggestedCorrection.toString() + " != "
+              + suggestedCorrection + " != "
               + matches[0].getSuggestedReplacements() + " for rule " + rule,
               suggestedCorrection.equals(matches[0]
                       .getSuggestedReplacements()));
@@ -139,7 +136,7 @@ public class BitextPatternRuleTest extends TestCase {
 
   private void testBitextRule(final BitextPatternRule rule, final Language lang,
                               final JLanguageTool languageTool) throws IOException {
-    final JLanguageTool srcTool = new JLanguageTool(rule.getSourceLang());
+    final JLanguageTool srcTool = new JLanguageTool(rule.getSourceLanguage());
     final List<StringPair> goodSentences = rule.getCorrectBitextExamples();
     for (StringPair goodSentence : goodSentences) {
       assertTrue(cleanSentence(goodSentence.getSource()).trim().length() > 0);

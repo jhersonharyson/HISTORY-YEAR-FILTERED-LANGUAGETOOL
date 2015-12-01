@@ -18,6 +18,8 @@
  */
 package org.languagetool.dev.eval;
 
+import org.apache.commons.lang.StringUtils;
+import org.jetbrains.annotations.NotNull;
 import org.languagetool.dev.errorcorpus.ErrorCorpus;
 import org.languagetool.dev.errorcorpus.ErrorSentence;
 import org.languagetool.dev.errorcorpus.PedlerCorpus;
@@ -66,7 +68,7 @@ import java.util.List;
  */
 class RealWordCorpusEvaluator {
 
-  private final Evaluator checker;
+  private final Evaluator evaluator;
   private final List<String> badConfusionMatchWords = new ArrayList<>();
   
   private int sentenceCount;
@@ -78,14 +80,25 @@ class RealWordCorpusEvaluator {
   private int goodConfusionMatches;
   private int badConfusionMatches;
 
-  RealWordCorpusEvaluator(File indexTopDir) throws IOException {
-    checker = new LanguageToolEvaluator(indexTopDir);
+  RealWordCorpusEvaluator(File indexDir) throws IOException {
+    evaluator = getEvaluator(indexDir);
+  }
+
+  @NotNull
+  protected Evaluator getEvaluator(File indexTopDir) throws IOException {
+    Evaluator checker = new LanguageToolEvaluator(indexTopDir);
     // use this to run AtD as the backend, so results can easily be compared to LT:
     //checker = new AtDEvalChecker("http://en.service.afterthedeadline.com/checkDocument?key=test&data=");
+    return checker;
+  }
+
+  @NotNull
+  protected ErrorCorpus getCorpus(File dir) throws IOException {
+    return new PedlerCorpus(dir);
   }
   
   void close() {
-    checker.close();
+    evaluator.close();
   }
 
   int getSentencesChecked() {
@@ -111,18 +124,21 @@ class RealWordCorpusEvaluator {
     System.out.println("    [++] = this is an expected error and the first suggestion is correct");
     System.out.println("    [//]  = not counted because already matches by a different rule");
     System.out.println("");
-    ErrorCorpus corpus = new PedlerCorpus(dir);
+    ErrorCorpus corpus = getCorpus(dir);
     checkLines(corpus);
     printResults();
   }
 
   private void checkLines(ErrorCorpus corpus) throws IOException {
     for (ErrorSentence sentence : corpus) {
-      List<RuleMatch> matches = checker.check(sentence.getAnnotatedText());
+      List<RuleMatch> matches = evaluator.check(sentence.getAnnotatedText());
       sentenceCount++;
       errorsInCorpusCount += sentence.getErrors().size();
       System.out.println(sentence.getMarkupText() + " => " + matches.size());
-      //System.out.println("###"+sentence.annotatedText.toString().replaceAll("<.*?>", ""));
+      for (RuleMatch match : matches) {
+        int length = match.getToPos() - match.getFromPos();
+        System.out.println(StringUtils.repeat(" ", match.getFromPos()) + StringUtils.repeat("^", length));
+      }
       List<Span> detectedErrorPositions = new ArrayList<>();
       for (RuleMatch match : matches) {
         boolean alreadyCounted = errorAlreadyCounted(match, detectedErrorPositions);
@@ -136,6 +152,7 @@ class RealWordCorpusEvaluator {
           }
           System.out.println("    [++] " + match + ": " + match.getSuggestedReplacements());
         } else if (!alreadyCounted && sentence.hasErrorCoveredByMatch(match)) {
+        //} else if (!alreadyCounted && sentence.hasErrorOverlappingWithMatch(match)) {
           goodMatches++;
           matchCount++;
           if (isConfusionRule(match)) {
@@ -201,34 +218,19 @@ class RealWordCorpusEvaluator {
   public static void main(String[] args) throws IOException {
     if (args.length != 1 && args.length != 2) {
       System.out.println("Usage: " + RealWordCorpusEvaluator.class.getSimpleName() + " <corpusDirectory> [languageModel]");
-      System.out.println("   [languageModel] is a morfologik file or Lucene index directory with ngram frequency information (optional)");
+      System.out.println("   [languageModel] is a Lucene index directory with ngram frequency information (optional)");
       System.exit(1);
     }
+    File languageModelTopDir = null;
     if (args.length == 1) {
       System.out.println("Running without language model");
-      RealWordCorpusEvaluator evaluator = new RealWordCorpusEvaluator(null);
-      evaluator.run(new File(args[0]));
-      evaluator.close();
     } else {
-      File languageModelTopDir = new File(args[1]);
+      languageModelTopDir = new File(args[1]);
       System.out.println("Running with language model from " + languageModelTopDir);
-      RealWordCorpusEvaluator evaluator = new RealWordCorpusEvaluator(languageModelTopDir);
-      evaluator.run(new File(args[0]));
-      evaluator.close();
     }
+    RealWordCorpusEvaluator evaluator = new RealWordCorpusEvaluator(languageModelTopDir);
+    evaluator.run(new File(args[0]));
+    evaluator.close();
   }
   
-  class Span {
-    private final int startPos;
-    private final int endPos;
-
-    Span(int startPos, int endPos) {
-      this.startPos = startPos;
-      this.endPos = endPos;
-    }
-
-    boolean covers(Span other) {
-      return startPos <= other.startPos && endPos >= other.endPos;
-    }
-  }
 }

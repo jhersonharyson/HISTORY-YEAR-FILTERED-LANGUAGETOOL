@@ -18,7 +18,9 @@
  */
 package org.languagetool.server;
 
+import org.jetbrains.annotations.Nullable;
 import org.languagetool.Language;
+import org.languagetool.Languages;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -50,6 +52,8 @@ public class HTTPServerConfig {
   protected int requestLimit;
   protected int requestLimitPeriodInSeconds;
   protected boolean trustXForwardForHeader;
+  protected int maxWorkQueueSize;
+  protected File rulesConfigFile = null;
 
   /**
    * Create a server configuration for the default port ({@link #DEFAULT_PORT}).
@@ -112,6 +116,7 @@ public class HTTPServerConfig {
         requestLimit = Integer.parseInt(getOptionalProperty(props, "requestLimit", "0"));
         requestLimitPeriodInSeconds = Integer.parseInt(getOptionalProperty(props, "requestLimitPeriodInSeconds", "0"));
         trustXForwardForHeader = Boolean.valueOf(getOptionalProperty(props, "trustXForwardForHeader", "false"));
+        maxWorkQueueSize = Integer.parseInt(getOptionalProperty(props, "maxWorkQueueSize", "0"));
         String langModel = getOptionalProperty(props, "languageModel", null);
         if (langModel != null) {
           languageModelDir = new File(langModel);
@@ -125,7 +130,14 @@ public class HTTPServerConfig {
         }
         mode = getOptionalProperty(props, "mode", "LanguageTool").equalsIgnoreCase("AfterTheDeadline") ? Mode.AfterTheDeadline : Mode.LanguageTool;
         if (mode == Mode.AfterTheDeadline) {
-          atdLanguage = Language.getLanguageForShortName(getProperty(props, "afterTheDeadlineLanguage", file));
+          atdLanguage = Languages.getLanguageForShortName(getProperty(props, "afterTheDeadlineLanguage", file));
+        }
+        String rulesConfigFilePath = getOptionalProperty(props, "rulesFile", null);
+        if (rulesConfigFilePath != null) {
+          rulesConfigFile = new File(rulesConfigFilePath);
+          if (!rulesConfigFile.exists() || !rulesConfigFile.isFile()) {
+            throw new RuntimeException("Rules Configuration file can not be found: " + rulesConfigFile);
+          }
         }
       }
     } catch (IOException e) {
@@ -151,6 +163,7 @@ public class HTTPServerConfig {
   /**
    * URL of server whose visitors may request data via Ajax, or {@code *} (= anyone) or {@code null} (= no support for CORS).
    */
+  @Nullable
   public String getAllowOriginUrl() {
     return allowOriginUrl;
   }
@@ -163,16 +176,16 @@ public class HTTPServerConfig {
     this.maxTextLength = maxTextLength;
   }
 
+  int getMaxTextLength() {
+    return maxTextLength;
+  }
+
   int getRequestLimit() {
     return requestLimit;
   }
 
   int getRequestLimitPeriodInSeconds() {
     return requestLimitPeriodInSeconds;
-  }
-
-  int getMaxTextLength() {
-    return maxTextLength;
   }
 
   /**
@@ -193,6 +206,7 @@ public class HTTPServerConfig {
    * Get language model directory (which contains '3grams' sub directory) or {@code null}.
    * @since 2.7
    */
+  @Nullable
   File getLanguageModelDir() {
     return languageModelDir;
   }
@@ -206,6 +220,7 @@ public class HTTPServerConfig {
    * @return the language used, or {@code null} if not in AtD mode
    * @since 2.7 
    */
+  @Nullable
   Language getAfterTheDeadlineLanguage() {
     return atdLanguage;
   }
@@ -232,6 +247,20 @@ public class HTTPServerConfig {
   /** @since 2.8 */
   boolean getTrustXForwardForHeader() {
     return trustXForwardForHeader;
+  }
+
+  /** @since 2.9 */
+  int getMaxWorkQueueSize() {
+    return maxWorkQueueSize;
+  }
+
+  /**
+   * @return the file from which server rules configuration should be loaded, or {@code null}
+   * @since 3.0
+   */
+  @Nullable
+  File getRulesConfigFile() {
+    return rulesConfigFile;
   }
 
   /**
