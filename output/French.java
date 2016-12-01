@@ -25,6 +25,7 @@ import java.util.ResourceBundle;
 import java.io.IOException;
 
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.languagemodel.LuceneLanguageModel;
 import org.languagetool.rules.*;
@@ -61,7 +62,7 @@ public class French extends Language implements AutoCloseable {
   }
 
   @Override
-  public String getShortName() {
+  public String getShortCode() {
     return "fr";
   }
 
@@ -98,9 +99,7 @@ public class French extends Language implements AutoCloseable {
   @Override
   public Contributor[] getMaintainers() {
     return new Contributor[] {
-        Contributors.DOMINIQUE_PELLE,
-        new Contributor("Agnes Souque"),
-        new Contributor("Hugo Voisard (2006-2007)")
+        Contributors.DOMINIQUE_PELLE
     };
   }
 
@@ -114,7 +113,7 @@ public class French extends Language implements AutoCloseable {
                     Arrays.asList("]", ")", "}"
                          /*"»", French dialog can contain multiple sentences. */
                          /*"’" used in "d’arm" and many other words */)),
-            new HunspellNoSuggestionRule(messages, this),
+            new HunspellNoSuggestionRule(messages, this, Example.wrong("Le <marker>chein</marker> noir"), Example.fixed("Le <marker>chien</marker> noir")),
             new UppercaseSentenceStartRule(messages, this),
             new MultipleWhitespaceRule(messages, this),
             new SentenceWhitespaceRule(messages),
@@ -128,7 +127,7 @@ public class French extends Language implements AutoCloseable {
   @Override
   public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
     if (languageModel == null) {
-      languageModel = new LuceneLanguageModel(new File(indexDir, getShortName()));
+      languageModel = new LuceneLanguageModel(new File(indexDir, getShortCode()));
     }
     return languageModel;
   }
@@ -141,12 +140,20 @@ public class French extends Language implements AutoCloseable {
     );
   }
 
-  /** @since 3.1 */
+  /**
+   * Closes the language model, if any. 
+   * @since 3.1
+   */
   @Override
   public void close() throws Exception {
     if (languageModel != null) {
       languageModel.close();
     }
+  }
+
+  @Override
+  public LanguageMaintainedState getMaintainedState() {
+    return LanguageMaintainedState.ActivelyMaintained;
   }
 
 }

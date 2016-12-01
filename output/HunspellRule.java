@@ -38,7 +38,7 @@ import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
-import org.languagetool.rules.Category;
+import org.languagetool.rules.Categories;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.spelling.SpellingCheckRule;
 
@@ -59,11 +59,11 @@ public class HunspellRule extends SpellingCheckRule {
 
   private static final String NON_ALPHABETIC = "[^\\p{L}]";
 
-  private Pattern nonWordPattern;
+  protected Pattern nonWordPattern;
 
-  public HunspellRule(final ResourceBundle messages, final Language language) {
+  public HunspellRule(ResourceBundle messages, Language language) {
     super(messages, language);
-    super.setCategory(new Category(messages.getString("category_typo")));
+    super.setCategory(Categories.TYPOS.getCategory(messages));
   }
 
   @Override
@@ -78,7 +78,7 @@ public class HunspellRule extends SpellingCheckRule {
 
   @Override
   public RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
-    final List<RuleMatch> ruleMatches = new ArrayList<>();
+    List<RuleMatch> ruleMatches = new ArrayList<>();
     if (needsInit) {
       init();
     }
@@ -86,7 +86,7 @@ public class HunspellRule extends SpellingCheckRule {
       // some languages might not have a dictionary, be silent about it
       return toRuleMatchArray(ruleMatches);
     }
-    final String[] tokens = tokenizeText(getSentenceTextWithoutUrlsAndImmunizedTokens(sentence));
+    String[] tokens = tokenizeText(getSentenceTextWithoutUrlsAndImmunizedTokens(sentence));
 
     // starting with the first token to skip the zero-length START_SENT
     int len = sentence.getTokens()[1].getStartPos();
@@ -97,11 +97,11 @@ public class HunspellRule extends SpellingCheckRule {
         continue;
       }
       if (isMisspelled(word)) {
-        final RuleMatch ruleMatch = new RuleMatch(this,
+        RuleMatch ruleMatch = new RuleMatch(this,
             len, len + word.length(),
             messages.getString("spelling"),
             messages.getString("desc_spelling_short"));
-        final List<String> suggestions = getSuggestions(word);
+        List<String> suggestions = getSuggestions(word);
         suggestions.addAll(0, getAdditionalTopSuggestions(suggestions, word));
         suggestions.addAll(getAdditionalSuggestions(suggestions, word));
         if (!suggestions.isEmpty()) {
@@ -138,16 +138,16 @@ public class HunspellRule extends SpellingCheckRule {
     return hunspellDict.suggest(word);
   }
 
-  protected String[] tokenizeText(final String sentence) {
+  protected String[] tokenizeText(String sentence) {
     return nonWordPattern.split(sentence);
   }
 
-  private String getSentenceTextWithoutUrlsAndImmunizedTokens(final AnalyzedSentence sentence) {
-    final StringBuilder sb = new StringBuilder();
-    final AnalyzedTokenReadings[] sentenceTokens = sentence.getTokens();
+  private String getSentenceTextWithoutUrlsAndImmunizedTokens(AnalyzedSentence sentence) {
+    StringBuilder sb = new StringBuilder();
+    AnalyzedTokenReadings[] sentenceTokens = getSentenceWithImmunization(sentence).getTokens();
     for (int i = 1; i < sentenceTokens.length; i++) {
-      final String token = sentenceTokens[i].getToken();
-      if (isUrl(token) || sentenceTokens[i].isImmunized() || sentenceTokens[i].isIgnoredBySpeller()) {
+      String token = sentenceTokens[i].getToken();
+      if (isUrl(token) || isEMail(token) || sentenceTokens[i].isImmunized() || sentenceTokens[i].isIgnoredBySpeller()) {
         // replace URLs and immunized tokens with whitespace to ignore them for spell checking:
         for (int j = 0; j < token.length(); j++) {
           sb.append(' ');
@@ -162,21 +162,21 @@ public class HunspellRule extends SpellingCheckRule {
   @Override
   protected void init() throws IOException {
     super.init();
-    final String langCountry;
+    String langCountry;
     if (language.getCountries().length > 0) {
-      langCountry = language.getShortName() + "_" + language.getCountries()[0];
+      langCountry = language.getShortCode() + "_" + language.getCountries()[0];
     } else {
-      langCountry = language.getShortName();
+      langCountry = language.getShortCode();
     }
-    final String shortDicPath = "/"
-        + language.getShortName()
+    String shortDicPath = "/"
+        + language.getShortCode()
         + "/hunspell/"
         + langCountry
         + ".dic";
     String wordChars = "";
     // set dictionary only if there are dictionary files:
     if (JLanguageTool.getDataBroker().resourceExists(shortDicPath)) {
-      final String path = getDictionaryPath(langCountry, shortDicPath);
+      String path = getDictionaryPath(langCountry, shortDicPath);
       if ("".equals(path)) {
         hunspellDict = null;
       } else {
@@ -205,15 +205,15 @@ public class HunspellRule extends SpellingCheckRule {
     }
   }
 
-  private String getDictionaryPath(final String dicName,
-      final String originalPath) throws IOException {
+  private String getDictionaryPath(String dicName,
+      String originalPath) throws IOException {
 
-    final URL dictURL = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(originalPath);
+    URL dictURL = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(originalPath);
     String dictionaryPath;
-    //in the webstart or java EE container version, we need to copy the files outside the jar
+    //in the webstart, java EE or OSGi bundle version, we need to copy the files outside the jar
     //to the local temporary directory
-    if ("jar".equals(dictURL.getProtocol()) || "vfs".equals(dictURL.getProtocol())) {
-      final File tempDir = new File(System.getProperty("java.io.tmpdir"));
+    if ("jar".equals(dictURL.getProtocol()) || "vfs".equals(dictURL.getProtocol()) || "bundle".equals(dictURL.getProtocol())) {
+      File tempDir = new File(System.getProperty("java.io.tmpdir"));
       File tempDicFile = new File(tempDir, dicName + ".dic");
       JLanguageTool.addTemporaryFile(tempDicFile);
       try (InputStream dicStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(originalPath)) {
@@ -226,7 +226,7 @@ public class HunspellRule extends SpellingCheckRule {
       }
       dictionaryPath = tempDir.getAbsolutePath() + "/" + dicName;
     } else {
-      final int suffixLength = ".dic".length();
+      int suffixLength = ".dic".length();
       try {
         dictionaryPath = new File(dictURL.toURI()).getAbsolutePath();
         dictionaryPath = dictionaryPath.substring(0, dictionaryPath.length() - suffixLength);
@@ -237,9 +237,9 @@ public class HunspellRule extends SpellingCheckRule {
     return dictionaryPath;
   }
 
-  private void fileCopy(final InputStream in, final File targetFile) throws IOException {
+  private void fileCopy(InputStream in, File targetFile) throws IOException {
     try (OutputStream out = new FileOutputStream(targetFile)) {
-      final byte[] buf = new byte[1024];
+      byte[] buf = new byte[1024];
       int len;
       while ((len = in.read(buf)) > 0) {
         out.write(buf, 0, len);

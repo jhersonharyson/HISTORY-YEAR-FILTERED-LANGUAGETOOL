@@ -24,7 +24,7 @@ import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
-import org.languagetool.rules.Category;
+import org.languagetool.rules.Categories;
 import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.spelling.SpellingCheckRule;
@@ -54,7 +54,7 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
 
   public MorfologikSpellerRule(ResourceBundle messages, Language language) throws IOException {
     super(messages, language);
-    super.setCategory(new Category(messages.getString("category_typo")));
+    super.setCategory(Categories.TYPOS.getCategory(messages));
     this.conversionLocale = conversionLocale != null ? conversionLocale : Locale.getDefault();
     init();
     setLocQualityIssueType(ITSIssueType.Misspelling);
@@ -79,8 +79,8 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
 
   @Override
   public RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
-    final List<RuleMatch> ruleMatches = new ArrayList<>();
-    final AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
+    List<RuleMatch> ruleMatches = new ArrayList<>();
+    AnalyzedTokenReadings[] tokens = getSentenceWithImmunization(sentence).getTokensWithoutWhitespace();
     //lazy init
     if (speller1 == null) {
       String binaryDict = null;
@@ -98,18 +98,18 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     int idx = -1;
     for (AnalyzedTokenReadings token : tokens) {
       idx++;
-      if (canBeIgnored(tokens, idx, token)) {
+      if (canBeIgnored(tokens, idx, token) || token.isImmunized()) {
         continue;
       }
       // if we use token.getToken() we'll get ignored characters inside and speller will choke
-      final String word = token.getAnalyzedToken(0).getToken();
+      String word = token.getAnalyzedToken(0).getToken();
       if (tokenizingPattern() == null) {
         ruleMatches.addAll(getRuleMatches(word, token.getStartPos()));
       } else {
         int index = 0;
-        final Matcher m = tokenizingPattern().matcher(word);
+        Matcher m = tokenizingPattern().matcher(word);
         while (m.find()) {
-          final String match = word.subSequence(index, m.start()).toString();
+          String match = word.subSequence(index, m.start()).toString();
           ruleMatches.addAll(getRuleMatches(match, token.getStartPos() + index));
           index = m.end();
         }
@@ -143,6 +143,7 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
            token.isImmunized() ||
            token.isIgnoredBySpeller() ||
            isUrl(token.getToken()) ||
+           isEMail(token.getToken()) ||
            (ignoreTaggedWords && token.isTagged()) ||
            ignoreToken(tokens, idx);
   }
@@ -172,15 +173,15 @@ public abstract class MorfologikSpellerRule extends SpellingCheckRule {
     return true;
   }
 
-  protected List<RuleMatch> getRuleMatches(final String word, final int startPos) throws IOException {
-    final List<RuleMatch> ruleMatches = new ArrayList<>();
+  protected List<RuleMatch> getRuleMatches(String word, int startPos) throws IOException {
+    List<RuleMatch> ruleMatches = new ArrayList<>();
     if (isMisspelled(speller1, word) || isProhibited(word)) {
-      final RuleMatch ruleMatch = new RuleMatch(this, startPos, startPos
+      RuleMatch ruleMatch = new RuleMatch(this, startPos, startPos
           + word.length(), messages.getString("spelling"),
           messages.getString("desc_spelling_short"));
       List<String> suggestions = speller1.getSuggestions(word);
       if (suggestions.size() == 0 && word.length() >= 5) {
-        // speller1 uses a maximum edit distance of 1, it won't find suggestion for "garentee", "greatful" ezc.
+        // speller1 uses a maximum edit distance of 1, it won't find suggestion for "garentee", "greatful" etc.
         suggestions.addAll(speller2.getSuggestions(word));
       }
       suggestions.addAll(0, getAdditionalTopSuggestions(suggestions, word));

@@ -62,10 +62,10 @@ public abstract class ConfusionProbabilityRule extends Rule {
   
   public ConfusionProbabilityRule(ResourceBundle messages, LanguageModel languageModel, Language language, int grams) {
     super(messages);
-    setCategory(new Category(messages.getString("category_typo")));
+    setCategory(Categories.TYPOS.getCategory(messages));
     setLocQualityIssueType(ITSIssueType.NonConformance);
     ResourceDataBroker dataBroker = JLanguageTool.getDataBroker();
-    String path = "/" + language.getShortName() + "/confusion_sets.txt";
+    String path = "/" + language.getShortCode() + "/confusion_sets.txt";
     try (InputStream confusionSetStream = dataBroker.getFromResourceDirAsStream(path)) {
       ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader();
       this.wordToSets = confusionSetLoader.loadConfusionSet(confusionSetStream);
@@ -190,11 +190,11 @@ public abstract class ConfusionProbabilityRule extends Rule {
 
   private ConfusionString getConfusionString(Set<ConfusionString> confusionSet, GoogleToken token) {
     for (ConfusionString s : confusionSet) {
-      if (s.getString().equals(token.token)) {
+      if (s.getString().equalsIgnoreCase(token.token)) {
         return s;
       }
     }
-    throw new RuntimeException("Not found in set: " + token);
+    throw new RuntimeException("Not found in set '" + confusionSet + "': " + token);
   }
 
   private ConfusionString getBetterAlternativeOrNull(GoogleToken token, List<GoogleToken> tokens, ConfusionString otherWord, long factor) {
@@ -285,7 +285,7 @@ public abstract class ConfusionProbabilityRule extends Rule {
       debug("  Min coverage of %.2f not reached: %.2f, %.2f, %.2f, assuming p=0\n", MIN_COVERAGE, ngram3Left.getCoverage(), ngram3Middle.getCoverage(), ngram3Right.getCoverage());
       return 0.0;
     } else {
-      //debug("  Min coverage of %.2f okay: %.2f, %.2f\n", MIN_COVERAGE, ngram3Left.coverage, ngram3Right.coverage);
+      //debug("  Min coverage of %.2f okay: %.2f, %.2f\n", MIN_COVERAGE, ngram3Left.getCoverage(), ngram3Right.getCoverage());
       return ngram3Left.getProb() * ngram3Middle.getProb() * ngram3Right.getProb();
     }
   }

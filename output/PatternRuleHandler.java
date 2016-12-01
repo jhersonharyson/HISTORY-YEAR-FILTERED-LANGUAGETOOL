@@ -26,11 +26,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import org.apache.commons.lang.ObjectUtils;
+import org.apache.commons.lang3.ObjectUtils;
 import org.languagetool.Languages;
-import org.languagetool.rules.Category;
-import org.languagetool.rules.ITSIssueType;
-import org.languagetool.rules.IncorrectExample;
+import org.languagetool.rules.*;
 import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
@@ -59,7 +57,6 @@ public class PatternRuleHandler extends XMLRuleHandler {
 
   private boolean defaultOff;
   private boolean ruleGroupDefaultOff;
-  private boolean defaultOn;
 
   private String ruleGroupDescription;
   private int startPos = -1;
@@ -87,31 +84,32 @@ public class PatternRuleHandler extends XMLRuleHandler {
   // ===========================================================
 
   @Override
-  public void startElement(final String namespaceURI, final String lName,
-                           final String qName, final Attributes attrs) throws SAXException {
+  public void startElement(String namespaceURI, String lName,
+                           String qName, Attributes attrs) throws SAXException {
     switch (qName) {
       case "category":
-        final String catName = attrs.getValue(NAME);
+        String catName = attrs.getValue(NAME);
+        String catId = attrs.getValue(ID);
         Category.Location location = YES.equals(attrs.getValue(EXTERNAL)) ?
                 Category.Location.EXTERNAL : Category.Location.INTERNAL;
-        final boolean onByDefault = !OFF.equals(attrs.getValue(DEFAULT));
-        category = new Category(catName, location, onByDefault);
+        boolean onByDefault = !OFF.equals(attrs.getValue(DEFAULT));
+        category = new Category(catId != null ? new CategoryId(catId) : null, catName, location, onByDefault);
         if (attrs.getValue(TYPE) != null) {
           categoryIssueType = attrs.getValue(TYPE);
         }
         break;
       case "rules":
-        final String languageStr = attrs.getValue("lang");
-        language = Languages.getLanguageForShortName(languageStr);
+        String languageStr = attrs.getValue("lang");
+        language = Languages.getLanguageForShortCode(languageStr);
         break;
       case "regexp":
         inRegex = true;
-        regex = new StringBuilder();
         regexMode = "exact".equals(attrs.getValue("type")) ? RegexpMode.EXACT : RegexpMode.SMART;
         regexCaseSensitive = attrs.getValue(CASE_SENSITIVE) != null && YES.equals(attrs.getValue(CASE_SENSITIVE));
         regexpMark = attrs.getValue(MARK) != null ? Integer.parseInt(attrs.getValue(MARK)) : 0;
         break;
       case RULE:
+        regex = new StringBuilder();
         inRule = true;
         shortMessage = new StringBuilder();
         message = new StringBuilder();
@@ -134,14 +132,13 @@ public class PatternRuleHandler extends XMLRuleHandler {
         }
         if (inRuleGroup && ruleGroupDefaultOff) {
           defaultOff = true;
-          defaultOn = false;  // false because the rule isn't on *explicitly*
         } else {
           defaultOff = OFF.equals(attrs.getValue(DEFAULT));
-          defaultOn = ON.equals(attrs.getValue(DEFAULT));
         }
 
         correctExamples = new ArrayList<>();
         incorrectExamples = new ArrayList<>();
+        errorTriggeringExamples = new ArrayList<>();
         suggestionMatches.clear();
         suggestionMatchesOutMsg.clear();
         if (attrs.getValue(TYPE) != null) {
@@ -200,7 +197,8 @@ public class PatternRuleHandler extends XMLRuleHandler {
             exampleCorrection.append(attrs.getValue("correction"));
           }
         } else if ("triggers_error".equals(typeVal)) {
-          // ignore
+          inErrorTriggerExample = true;
+          errorTriggerExample = new StringBuilder();
         } else {
           // no attribute implies the sentence is a correct example
           inCorrectExample = true;
@@ -265,6 +263,8 @@ public class PatternRuleHandler extends XMLRuleHandler {
           incorrectExample.append(MARKER_TAG);
         } else if (inCorrectExample) {
           correctExample.append(MARKER_TAG);
+        } else if (inErrorTriggerExample) {
+          errorTriggerExample.append(MARKER_TAG);
         } else if (inPattern || inAntiPattern) {
           startPos = tokenCounter;
           inMarker = true;
@@ -297,8 +297,8 @@ public class PatternRuleHandler extends XMLRuleHandler {
   }
 
   @Override
-  public void endElement(final String namespaceURI, final String sName,
-      final String qName) throws SAXException {
+  public void endElement(String namespaceURI, String sName,
+      String qName) throws SAXException {
     switch (qName) {
       case "category":
         categoryIssueType = null;
@@ -320,7 +320,7 @@ public class PatternRuleHandler extends XMLRuleHandler {
           // not where it's defined. Thus we have to copy the elements so each use of
           // the phraseref can carry their own information:
 
-          final List<PatternToken> tmpPatternTokens = new ArrayList<>();
+          List<PatternToken> tmpPatternTokens = new ArrayList<>();
           createRules(new ArrayList<>(patternTokens), tmpPatternTokens, 0);
 
         } else {
@@ -331,7 +331,7 @@ public class PatternRuleHandler extends XMLRuleHandler {
           }
           for (List<PatternToken> phrasePatternToken : phrasePatternTokens) {
             processElement(phrasePatternToken);
-            final List<PatternToken> tmpPatternTokens = new ArrayList<>();
+            List<PatternToken> tmpPatternTokens = new ArrayList<>();
             createRules(phrasePatternToken, tmpPatternTokens, 0);
           }
         }
@@ -376,7 +376,7 @@ public class PatternRuleHandler extends XMLRuleHandler {
             antiId = ruleGroupId;
           }
         }
-        final DisambiguationPatternRule rule = new DisambiguationPatternRule(
+        DisambiguationPatternRule rule = new DisambiguationPatternRule(
             antiId + "_antipattern:" + antiPatternCounter,
             "antipattern", language, patternTokens, null, null,
             DisambiguationPatternRule.DisambiguatorAction.IMMUNIZE);
@@ -401,10 +401,10 @@ public class PatternRuleHandler extends XMLRuleHandler {
         break;
       case EXAMPLE:
         if (inCorrectExample) {
-          correctExamples.add(correctExample.toString());
+          correctExamples.add(new CorrectExample(correctExample.toString()));
         } else if (inIncorrectExample) {
-          final IncorrectExample example;
-          final List<String> corrections = new ArrayList<>();
+          IncorrectExample example;
+          List<String> corrections = new ArrayList<>();
           corrections.addAll(Arrays.asList(exampleCorrection.toString().split("\\|")));
           if (corrections.size() > 0) {
             if (exampleCorrection.toString().endsWith("|")) {  // split() will ignore trailing empty items
@@ -415,11 +415,15 @@ public class PatternRuleHandler extends XMLRuleHandler {
             example = new IncorrectExample(incorrectExample.toString());
           }
           incorrectExamples.add(example);
+        } else if (inErrorTriggerExample) {
+          errorTriggeringExamples.add(new ErrorTriggeringExample(errorTriggerExample.toString()));
         }
         inCorrectExample = false;
         inIncorrectExample = false;
+        inErrorTriggerExample = false;
         correctExample = new StringBuilder();
         incorrectExample = new StringBuilder();
+        errorTriggerExample = new StringBuilder();
         exampleCorrection = new StringBuilder();
         break;
       case MESSAGE:
@@ -463,13 +467,14 @@ public class PatternRuleHandler extends XMLRuleHandler {
         antiPatternCounter = 0;
         ruleGroupDefaultOff = false;
         defaultOff = false;
-        defaultOn = false;
         break;
       case MARKER:
         if (inCorrectExample) {
           correctExample.append("</marker>");
         } else if (inIncorrectExample) {
           incorrectExample.append("</marker>");
+        } else if (inErrorTriggerExample) {
+          errorTriggerExample.append("</marker>");
         } else if (inPattern || inAntiPattern) {
           endPos = tokenCountForMarker;
           inMarker = false;
@@ -500,7 +505,7 @@ public class PatternRuleHandler extends XMLRuleHandler {
         //clear the features...
         equivalenceFeatures = new HashMap<>();
         //set negation on the last token only!
-        final int lastElement = patternTokens.size() - 1;
+        int lastElement = patternTokens.size() - 1;
         patternTokens.get(lastElement).setLastInUnification();
         if (uniNegation) {
           patternTokens.get(lastElement).setUniNegation();
@@ -547,21 +552,16 @@ public class PatternRuleHandler extends XMLRuleHandler {
         }
         rule = new RegexPatternRule(id, name, message.toString(), suggestionsOutMsg.toString(), language, Pattern.compile(regexStr, flags), regexpMark);
       } else {
-        throw new IllegalStateException("Neither pattern tokens nor regex is set");
+        throw new IllegalStateException("Neither '<pattern>' tokens nor '<regex>' is set in rule '" + id + "'");
       }
-      if (filterClassName != null && filterArgs != null) {
-        RuleFilterCreator creator = new RuleFilterCreator();
-        RuleFilter filter = creator.getFilter(filterClassName);
-        rule.setFilter(filter);
-        rule.setFilterArguments(filterArgs);
-      }
+      setRuleFilter(filterClassName, filterArgs, rule);
       prepareRule(rule);
       rules.add(rule);
     } else {
       PatternToken patternToken = elemList.get(numElement);
       if (patternToken.hasOrGroup()) {
         for (PatternToken patternTokenOfOrGroup : patternToken.getOrGroup()) {
-          final List<PatternToken> tmpElements2 = new ArrayList<>();
+          List<PatternToken> tmpElements2 = new ArrayList<>();
           tmpElements2.addAll(tmpPatternTokens);
           tmpElements2.add((PatternToken) ObjectUtils.clone(patternTokenOfOrGroup));
           createRules(elemList, tmpElements2, numElement + 1);
@@ -591,7 +591,7 @@ public class PatternRuleHandler extends XMLRuleHandler {
     return sb.toString();
   }
 
-  protected void prepareRule(final AbstractPatternRule rule) {
+  protected void prepareRule(AbstractPatternRule rule) {
     if (startPos != -1 && endPos != -1) {
       rule.setStartPositionCorrection(startPos);
       rule.setEndPositionCorrection(endPos - tokenCountForMarker);
@@ -600,6 +600,7 @@ public class PatternRuleHandler extends XMLRuleHandler {
     endPos = -1;
     rule.setCorrectExamples(correctExamples);
     rule.setIncorrectExamples(incorrectExamples);
+    rule.setErrorTriggeringExamples(errorTriggeringExamples);
     rule.setCategory(category);
     if (!rulegroupAntiPatterns.isEmpty()) {
       rule.setAntiPatterns(rulegroupAntiPatterns);
@@ -614,23 +615,20 @@ public class PatternRuleHandler extends XMLRuleHandler {
       rule.setSubId("1");
     }
     caseSensitive = false;
-    for (final Match m : suggestionMatches) {
+    for (Match m : suggestionMatches) {
       rule.addSuggestionMatch(m);
     }
     if (phrasePatternTokens.size() <= 1) {
       suggestionMatches.clear();
     }
-    for (final Match m : suggestionMatchesOutMsg) {
+    for (Match m : suggestionMatchesOutMsg) {
       rule.addSuggestionMatchOutMsg(m);
     }
     suggestionMatchesOutMsg.clear();
-    if (defaultOff) {
-      rule.setDefaultOff();
-    }
     if (category == null) {
       throw new RuntimeException("Cannot activate rule '" + id + "', it is outside of a <category>...</category>");
     }
-    if (category.isDefaultOff() && !defaultOn) {
+    if (defaultOff) {
       rule.setDefaultOff();
     }
     if (url != null && url.length() > 0) {
@@ -657,8 +655,8 @@ public class PatternRuleHandler extends XMLRuleHandler {
   }
 
   @Override
-  public void characters(final char[] buf, final int offset, final int len) {
-    final String s = new String(buf, offset, len);
+  public void characters(char[] buf, int offset, int len) {
+    String s = new String(buf, offset, len);
     if (inException) {
       exceptions.append(s);
     } else if (inToken) {
@@ -667,6 +665,8 @@ public class PatternRuleHandler extends XMLRuleHandler {
       correctExample.append(s);
     } else if (inIncorrectExample) {
       incorrectExample.append(s);
+    } else if (inErrorTriggerExample) {
+      errorTriggerExample.append(s);
     } else if (inMatch) {
       match.append(s);
     } else if (inMessage) {

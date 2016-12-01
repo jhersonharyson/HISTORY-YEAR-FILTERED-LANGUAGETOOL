@@ -53,6 +53,7 @@ public final class LanguageToolFilter extends TokenFilter {
   private final OffsetAttribute offsetAtt;
   private final PositionIncrementAttribute posIncrAtt;
   private final TypeAttribute typeAtt;
+  private final StringBuilder collectedInput = new StringBuilder();
 
   private AttributeSource.State current;
   private Iterator<AnalyzedTokenReadings> tokenIter;
@@ -72,7 +73,7 @@ public final class LanguageToolFilter extends TokenFilter {
   public boolean incrementToken() throws IOException {
 
     if (posStack.size() > 0) {
-      final String pop = posStack.pop();
+      String pop = posStack.pop();
       restoreState(current);
       termAtt.append(pop);
       posIncrAtt.setPositionIncrement(0);
@@ -84,9 +85,18 @@ public final class LanguageToolFilter extends TokenFilter {
       // there are no remaining tokens from the current sentence... are there more sentences?
       if (input.incrementToken()) {
         // a new sentence is available: process it.
-        final AnalyzedSentence sentence = languageTool.getAnalyzedSentence(termAtt.toString());
-
-        final List<AnalyzedTokenReadings> tokenBuffer = Arrays.asList(sentence.getTokens());
+        String sentenceStr = termAtt.toString();
+        collectedInput.append(sentenceStr);
+        if (sentenceStr.length() >= 255) {
+          // Long sentences get split, so keep collecting data to avoid errors
+          // later. See https://github.com/languagetool-org/languagetool/issues/364
+          return true;
+        } else {
+          sentenceStr = collectedInput.toString();
+          collectedInput.setLength(0);
+        }
+        AnalyzedSentence sentence = languageTool.getAnalyzedSentence(sentenceStr);
+        List<AnalyzedTokenReadings> tokenBuffer = Arrays.asList(sentence.getTokens());
         tokenIter = tokenBuffer.iterator();
         /*
          * it should not be possible to have a sentence with 0 words, check just in case. returning
@@ -102,7 +112,7 @@ public final class LanguageToolFilter extends TokenFilter {
 
     // It must clear attributes, as it is creating new tokens.
     clearAttributes();
-    final AnalyzedTokenReadings tr = tokenIter.next();
+    AnalyzedTokenReadings tr = tokenIter.next();
 
     // add POS tag for sentence start.
     if (tr.isSentenceStart()) {

@@ -19,58 +19,65 @@
 
 package org.languagetool.tagging.disambiguation.rules;
 
+import org.junit.Test;
+import org.languagetool.*;
+import org.languagetool.rules.patterns.PatternTestTools;
+import org.languagetool.tagging.disambiguation.xx.DemoDisambiguator;
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.ParserConfigurationException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
-import javax.xml.parsers.ParserConfigurationException;
+import static org.junit.Assert.*;
 
-import junit.framework.TestCase;
-
-import org.languagetool.*;
-import org.languagetool.rules.patterns.PatternTestTools;
-import org.languagetool.tagging.disambiguation.xx.DemoDisambiguator;
-import org.xml.sax.SAXException;
-
-public class DisambiguationRuleTest extends TestCase {
+public class DisambiguationRuleTest {
 
   /**
    * To be called from standalone or language modules - calling it here in core doesn't make
    * much sense actually as we don't have any languages.
    */
+  @Test
   public void testDisambiguationRulesFromXML() throws Exception {
     testDisambiguationRulesFromXML(null);
   }
 
-  private void testDisambiguationRulesFromXML(final Set<Language> ignoredLanguages)
+  private void testDisambiguationRulesFromXML(Set<Language> ignoredLanguages)
       throws IOException, ParserConfigurationException, SAXException {
-    for (final Language lang : Languages.getWithDemoLanguage()) {
+    for (Language lang : Languages.getWithDemoLanguage()) {
       if (ignoredLanguages != null && ignoredLanguages.contains(lang)) {
         continue;
       }
+      if (lang.isVariant()) {
+        System.out.println("Skipping variant: " + lang);
+        continue;
+      }
       System.out.println("Running disambiguation tests for " + lang.getName() + "...");
-      final DisambiguationRuleLoader ruleLoader = new DisambiguationRuleLoader();
-      final JLanguageTool languageTool = new JLanguageTool(lang);
+      DisambiguationRuleLoader ruleLoader = new DisambiguationRuleLoader();
+      JLanguageTool languageTool = new JLanguageTool(lang);
       if (!(languageTool.getLanguage().getDisambiguator() instanceof DemoDisambiguator)) {
-        final String name = JLanguageTool.getDataBroker().getResourceDir() + "/" + lang.getShortName()
+        long startTime = System.currentTimeMillis();
+        String name = JLanguageTool.getDataBroker().getResourceDir() + "/" + lang.getShortCode()
             + "/disambiguation.xml";
         validateRuleFile(name);
-        final List<DisambiguationPatternRule> rules = ruleLoader
+        List<DisambiguationPatternRule> rules = ruleLoader
             .getRules(ruleLoader.getClass().getResourceAsStream(name));
         for (DisambiguationPatternRule rule : rules) {
           PatternTestTools.warnIfRegexpSyntaxNotKosher(rule.getPatternTokens(),
               rule.getId(), rule.getSubId(), lang);
         }
         testDisambiguationRulesFromXML(rules, languageTool, lang);
-        System.out.println(rules.size() + " rules tested.");
+        long endTime = System.currentTimeMillis();
+        System.out.println(rules.size() + " rules tested (" + (endTime-startTime) + "ms)");
       }
     }
   }
 
   private void validateRuleFile(String filePath) throws IOException {
-    final XMLValidator validator = new XMLValidator();
+    XMLValidator validator = new XMLValidator();
     try (InputStream stream = this.getClass().getResourceAsStream(filePath)) {
       if (stream != null) {
         validator.validateWithXmlSchema(filePath, JLanguageTool.getDataBroker().getResourceDir() + "/disambiguation.xsd");
@@ -78,33 +85,33 @@ public class DisambiguationRuleTest extends TestCase {
     }
   }
 
-  private static String sortForms(final String wordForms) {
+  private static String sortForms(String wordForms) {
     if (",[,]".equals(wordForms)) {
       return wordForms;
     }
-    final String word = wordForms.substring(0, wordForms.indexOf('[') + 1);
-    final String forms = wordForms.substring(wordForms.indexOf('[') + 1, wordForms.length() -1);
-    final String[] formToSort = forms.split(",");
+    String word = wordForms.substring(0, wordForms.indexOf('[') + 1);
+    String forms = wordForms.substring(wordForms.indexOf('[') + 1, wordForms.length() -1);
+    String[] formToSort = forms.split(",");
     Arrays.sort(formToSort);
     return word + String.join(",", Arrays.asList(formToSort)) + "]";
   }
 
   private void testDisambiguationRulesFromXML(
-      final List<DisambiguationPatternRule> rules,
-      final JLanguageTool languageTool, final Language lang) throws IOException {
-    for (final DisambiguationPatternRule rule : rules) {
-      final String id = rule.getId();
+      List<DisambiguationPatternRule> rules,
+      JLanguageTool languageTool, Language lang) throws IOException {
+    for (DisambiguationPatternRule rule : rules) {
+      String id = rule.getId();
       if (rule.getUntouchedExamples() != null) {
-        final List<String> goodSentences = rule.getUntouchedExamples();
+        List<String> goodSentences = rule.getUntouchedExamples();
         for (String goodSentence : goodSentences) {
           // enable indentation use
           goodSentence = goodSentence.replaceAll("[\\n\\t]+", "");
           goodSentence = cleanXML(goodSentence);
 
           assertTrue(goodSentence.trim().length() > 0);
-          final AnalyzedSentence sent = disambiguateUntil(rules, id,
+          AnalyzedSentence sent = disambiguateUntil(rules, id,
               languageTool.getRawAnalyzedSentence(goodSentence));
-          final AnalyzedSentence sentToReplace = disambiguateUntil(rules, id,
+          AnalyzedSentence sentToReplace = disambiguateUntil(rules, id,
               languageTool.getRawAnalyzedSentence(goodSentence));
           //note: we're testing only if string representations are equal
           //it's because getRawAnalyzedSentence does not set all properties
@@ -115,46 +122,46 @@ public class DisambiguationRuleTest extends TestCase {
               sent.toString(), rule.replace(sentToReplace).toString());
         }
       }
-      final List<DisambiguatedExample> examples = rule.getExamples();
+      List<DisambiguatedExample> examples = rule.getExamples();
       if (examples != null) {
-        for (final DisambiguatedExample example : examples) {
+        for (DisambiguatedExample example : examples) {
 
-          final String outputForms = example.getDisambiguated();
-          assertTrue("No input form found for: " + id, outputForms != null);
+          String outputForms = example.getDisambiguated();
+          assertTrue("No output form found for: " + id, outputForms != null);
           assertTrue(outputForms.trim().length() > 0);
-          final int expectedMatchStart = example.getExample().indexOf("<marker>");
-          final int expectedMatchEnd = example.getExample().indexOf("</marker>") - "<marker>".length();
+          int expectedMatchStart = example.getExample().indexOf("<marker>");
+          int expectedMatchEnd = example.getExample().indexOf("</marker>") - "<marker>".length();
           if (expectedMatchStart == -1 || expectedMatchEnd == -1) {
             fail(lang
                 + ": No position markup ('<marker>...</marker>') in disambiguated example in rule " + rule);
           }
-          final String inputForms = example.getAmbiguous();
+          String inputForms = example.getAmbiguous();
           assertTrue("No input form found for: " + id, inputForms != null);
           assertTrue(inputForms.trim().length() > 0);
           assertTrue("Input and output forms for rule " + id + " are the same!",
               !outputForms.equals(inputForms));
-          final AnalyzedSentence cleanInput = languageTool
+          AnalyzedSentence cleanInput = languageTool
               .getRawAnalyzedSentence(cleanXML(example.getExample()));
-          final AnalyzedSentence sent = disambiguateUntil(rules, id,
+          AnalyzedSentence sent = disambiguateUntil(rules, id,
               languageTool
               .getRawAnalyzedSentence(cleanXML(example.getExample())));
-          final AnalyzedSentence disambiguatedSent = rule
+          AnalyzedSentence disambiguatedSent = rule
               .replace(disambiguateUntil(rules, id, languageTool
                   .getRawAnalyzedSentence(cleanXML(example.getExample()))));
           assertTrue(
               "Disambiguated sentence is equal to the non-disambiguated sentence for rule: "
-                  + id, !cleanInput.equals(disambiguatedSent));
+                  + id + ". The sentence was: " + sent, !cleanInput.equals(disambiguatedSent));
           assertTrue(
               "Disambiguated sentence is equal to the input sentence for rule: "
                   + id + ". The sentence was: " + sent, !sent.equals(disambiguatedSent));
           String reading = "";
           String annotations = "";
-          for (final AnalyzedTokenReadings readings : sent.getTokens()) {
+          for (AnalyzedTokenReadings readings : sent.getTokens()) {
             if (readings.isSentenceStart() && !inputForms.contains("<S>")) {
               continue;
             }
             if (readings.getStartPos() == expectedMatchStart) {
-              final AnalyzedTokenReadings[] r = { readings };
+              AnalyzedTokenReadings[] r = { readings };
               reading = new AnalyzedSentence(r).toShortString(",");
               annotations = readings.getHistoricalAnnotations();
               int startPos = readings.getStartPos();
@@ -170,12 +177,12 @@ public class DisambiguationRuleTest extends TestCase {
               + example + " is different than expected (expected "
               + inputForms + " but got " + sortForms(reading) + "). The token has been changed by the disambiguator: " + annotations,
               inputForms, sortForms(reading));
-          for (final AnalyzedTokenReadings readings : disambiguatedSent.getTokens()) {
+          for (AnalyzedTokenReadings readings : disambiguatedSent.getTokens()) {
             if (readings.isSentenceStart() && !outputForms.contains("<S>")) {
               continue;
             }
             if (readings.getStartPos() == expectedMatchStart) {
-              final AnalyzedTokenReadings[] r = { readings };
+              AnalyzedTokenReadings[] r = { readings };
               reading = new AnalyzedSentence(r).toShortString(",");
               assertTrue(readings.getStartPos() == expectedMatchStart
                   && readings.getEndPos() == expectedMatchEnd);
@@ -192,11 +199,11 @@ public class DisambiguationRuleTest extends TestCase {
   }
 
   // useful for testing the rule cascade
-  private static AnalyzedSentence disambiguateUntil(
-      final List<DisambiguationPatternRule> rules, final String ruleID,
-      final AnalyzedSentence sentence) throws IOException {
+  protected AnalyzedSentence disambiguateUntil(
+      List<DisambiguationPatternRule> rules, String ruleID,
+      AnalyzedSentence sentence) throws IOException {
     AnalyzedSentence disambiguated = sentence;
-    for (final DisambiguationPatternRule rule : rules) {
+    for (DisambiguationPatternRule rule : rules) {
       if (ruleID.equals(rule.getId())) {
         break;
       }
@@ -205,7 +212,7 @@ public class DisambiguationRuleTest extends TestCase {
     return disambiguated;
   }
 
-  private static String cleanXML(final String str) {
+  private static String cleanXML(String str) {
     return str.replaceAll("<.*?>", "");
   }
 
@@ -213,13 +220,13 @@ public class DisambiguationRuleTest extends TestCase {
    * Test XML patterns, as a help for people developing rules that are not
    * programmers.
    */
-  public static void main(final String[] args) throws IOException, ParserConfigurationException, SAXException {
-    final DisambiguationRuleTest test = new DisambiguationRuleTest();
+  public static void main(String[] args) throws IOException, ParserConfigurationException, SAXException {
+    DisambiguationRuleTest test = new DisambiguationRuleTest();
     System.out.println("Running disambiguator rule tests...");
     if (args.length == 0) {
       test.testDisambiguationRulesFromXML(null);
     } else {
-      final Set<Language> ignoredLanguages = TestTools.getLanguagesExcept(args);
+      Set<Language> ignoredLanguages = TestTools.getLanguagesExcept(args);
       test.testDisambiguationRulesFromXML(ignoredLanguages);
     }
     System.out.println("Tests successful.");

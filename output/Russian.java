@@ -23,8 +23,10 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
+import java.util.regex.Pattern;
 
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.languagemodel.LuceneLanguageModel;
 import org.languagetool.rules.*;
@@ -47,12 +49,17 @@ public class Russian extends Language implements AutoCloseable {
   private LuceneLanguageModel languageModel;
 
   @Override
+  public Pattern getIgnoredCharactersRegex() {
+    return Pattern.compile("[\u00AD\u0301\u0300]");
+  }
+
+  @Override
   public String getName() {
     return "Russian";
   }
 
   @Override
-  public String getShortName() {
+  public String getShortCode() {
     return "ru";
   }
 
@@ -88,7 +95,7 @@ public class Russian extends Language implements AutoCloseable {
   @Override
   public SentenceTokenizer getSentenceTokenizer() {
     if (sentenceTokenizer == null) {
-       sentenceTokenizer = new SRXSentenceTokenizer(this);
+      sentenceTokenizer = new SRXSentenceTokenizer(this);
     }
     return sentenceTokenizer;
   }
@@ -113,6 +120,7 @@ public class Russian extends Language implements AutoCloseable {
             new RussianUnpairedBracketsRule(messages, this),
             new RussianCompoundRule(messages),
             new RussianSimpleReplaceRule(messages),
+            new RussianWordCoherencyRule(messages),
             new RussianWordRepeatRule(messages)
     );
   }
@@ -121,7 +129,7 @@ public class Russian extends Language implements AutoCloseable {
   @Override
   public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
     if (languageModel == null) {
-      languageModel = new LuceneLanguageModel(new File(indexDir, getShortName()));
+      languageModel = new LuceneLanguageModel(new File(indexDir, getShortCode()));
     }
     return languageModel;
   }
@@ -134,7 +142,10 @@ public class Russian extends Language implements AutoCloseable {
     );
   }
 
-  /** @since 3.1 */
+  /**
+   * Closes the language model, if any. 
+   * @since 3.1
+   */
   @Override
   public void close() throws Exception {
     if (languageModel != null) {
@@ -142,4 +153,9 @@ public class Russian extends Language implements AutoCloseable {
     }
   }
 
+  /** @since 3.3 */
+  @Override
+  public LanguageMaintainedState getMaintainedState() {
+    return LanguageMaintainedState.ActivelyMaintained;
+  }
 }

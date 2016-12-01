@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.ResourceBundle;
 
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.languagemodel.LuceneLanguageModel;
 import org.languagetool.rules.*;
@@ -53,7 +54,7 @@ public class Italian extends Language implements AutoCloseable {
   }
 
   @Override
-  public String getShortName() {
+  public String getShortCode() {
     return "it";
   }
   
@@ -104,7 +105,7 @@ public class Italian extends Language implements AutoCloseable {
   @Override
   public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
     if (languageModel == null) {
-      languageModel = new LuceneLanguageModel(new File(indexDir, getShortName()));
+      languageModel = new LuceneLanguageModel(new File(indexDir, getShortCode()));
     }
     return languageModel;
   }
@@ -117,7 +118,10 @@ public class Italian extends Language implements AutoCloseable {
     );
   }
 
-  /** @since 3.1 */
+  /**
+   * Closes the language model, if any. 
+   * @since 3.1
+   */
   @Override
   public void close() throws Exception {
     if (languageModel != null) {
@@ -131,6 +135,11 @@ public class Italian extends Language implements AutoCloseable {
       disambiguator = new ItalianRuleDisambiguator();
     }
     return disambiguator;
+  }
+
+  @Override
+  public LanguageMaintainedState getMaintainedState() {
+    return LanguageMaintainedState.ActivelyMaintained;
   }
 
 }

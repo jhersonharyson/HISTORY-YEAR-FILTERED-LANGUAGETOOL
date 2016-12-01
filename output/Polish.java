@@ -24,12 +24,9 @@ import java.util.List;
 import java.util.ResourceBundle;
 
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.rules.*;
-import org.languagetool.rules.pl.CompoundRule;
-import org.languagetool.rules.pl.MorfologikPolishSpellerRule;
-import org.languagetool.rules.pl.PolishUnpairedBracketsRule;
-import org.languagetool.rules.pl.PolishWordRepeatRule;
-import org.languagetool.rules.pl.SimpleReplaceRule;
+import org.languagetool.rules.pl.*;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.pl.PolishSynthesizer;
 import org.languagetool.tagging.Tagger;
@@ -55,7 +52,7 @@ public class Polish extends Language {
   }
 
   @Override
-  public String getShortName() {
+  public String getShortCode() {
     return "pl";
   }
 
@@ -115,7 +112,6 @@ public class Polish extends Language {
   public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
         new CommaWhitespaceRule(messages),
-        new DoublePunctuationRule(messages),
         new UppercaseSentenceStartRule(messages, this),
         new WordRepeatRule(messages, this),
         new MultipleWhitespaceRule(messages, this),
@@ -125,8 +121,14 @@ public class Polish extends Language {
         new MorfologikPolishSpellerRule(messages, this),
         new PolishWordRepeatRule(messages),
         new CompoundRule(messages),
-        new SimpleReplaceRule(messages)
+        new SimpleReplaceRule(messages),
+        new DashRule()
         );
+  }
+
+  @Override
+  public LanguageMaintainedState getMaintainedState() {
+    return LanguageMaintainedState.ActivelyMaintained;
   }
 
 }

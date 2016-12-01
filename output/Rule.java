@@ -48,8 +48,9 @@ public abstract class Rule {
 
   protected final ResourceBundle messages;
 
-  private List<String> correctExamples = new ArrayList<>();
+  private List<CorrectExample> correctExamples = new ArrayList<>();
   private List<IncorrectExample> incorrectExamples = new ArrayList<>();
+  private List<ErrorTriggeringExample> errorTriggeringExamples = new ArrayList<>();
   private ITSIssueType locQualityIssueType = ITSIssueType.Uncategorized;
   private Category category;
   private URL url;
@@ -62,8 +63,13 @@ public abstract class Rule {
   /**
    * Called by rules that require a translation of their messages.
    */
-  public Rule(final ResourceBundle messages) {
+  public Rule(ResourceBundle messages) {
     this.messages = messages;
+    if (messages != null) {
+      setCategory(Categories.MISC.getCategory(messages));  // the default, sub classes may overwrite this
+    } else {
+      setCategory(new Category(CategoryIds.MISC, "Misc"));
+    }
   }
 
   /**
@@ -149,7 +155,7 @@ public abstract class Rule {
    * Since LanguageTool 2.6, this also works {@link org.languagetool.rules.patterns.PatternRule}s
    * (before, it used to always return {@code false} for those).
    */
-  public boolean supportsLanguage(final Language language) {
+  public boolean supportsLanguage(Language language) {
     try {
       List<Class<? extends Rule>> relevantRuleClasses = new ArrayList<>();
       List<Rule> relevantRules = language.getRelevantRules(JLanguageTool.getMessageBundle());
@@ -186,21 +192,21 @@ public abstract class Rule {
   /**
    * Set the examples that are correct and thus do not trigger the rule.
    */
-  public final void setCorrectExamples(final List<String> correctExamples) {
+  public final void setCorrectExamples(List<CorrectExample> correctExamples) {
     this.correctExamples = Objects.requireNonNull(correctExamples);
   }
 
   /**
    * Get example sentences that are correct and thus will not match this rule.
    */
-  public final List<String> getCorrectExamples() {
+  public final List<CorrectExample> getCorrectExamples() {
     return Collections.unmodifiableList(correctExamples);
   }
 
   /**
    * Set the examples that are incorrect and thus do trigger the rule.
    */
-  public final void setIncorrectExamples(final List<IncorrectExample> incorrectExamples) {
+  public final void setIncorrectExamples(List<IncorrectExample> incorrectExamples) {
     this.incorrectExamples = Objects.requireNonNull(incorrectExamples);
   }
 
@@ -211,15 +217,34 @@ public abstract class Rule {
     return Collections.unmodifiableList(incorrectExamples);
   }
 
+  /**
+   * Set the examples that are correct but still trigger the rule due to an issue with the rule.
+   * @since 3.5
+   */
+  public final void setErrorTriggeringExamples(List<ErrorTriggeringExample> examples) {
+    this.errorTriggeringExamples = Objects.requireNonNull(examples);
+  }
+
+  /**
+   * Get the examples that are correct but still trigger the rule due to an issue with the rule.
+   * @since 3.5
+   */
+  public final List<ErrorTriggeringExample> getErrorTriggeringExamples() {
+    return Collections.unmodifiableList(this.errorTriggeringExamples);
+  }
+
+  /**
+   * @return a category (never null since LT 3.4)
+   */
   public final Category getCategory() {
     return category;
   }
 
-  public final void setCategory(final Category category) {
-    this.category = category;
+  public final void setCategory(Category category) {
+    this.category = Objects.requireNonNull(category, "category cannot be null");
   }
 
-  protected final RuleMatch[] toRuleMatchArray(final List<RuleMatch> ruleMatches) {
+  protected final RuleMatch[] toRuleMatchArray(List<RuleMatch> ruleMatches) {
     return ruleMatches.toArray(new RuleMatch[ruleMatches.size()]);
   }
 
@@ -292,7 +317,7 @@ public abstract class Rule {
    * with the error corrected.
    * @since 2.5
    */
-  protected void addExamplePair(IncorrectExample incorrectSentence, String correctSentence) {
+  protected void addExamplePair(IncorrectExample incorrectSentence, CorrectExample correctSentence) {
     incorrectExamples.add(incorrectSentence);
     correctExamples.add(correctSentence);
   }

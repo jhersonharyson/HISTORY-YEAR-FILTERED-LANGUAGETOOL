@@ -50,7 +50,7 @@ public abstract class AbstractEnglishSpellerRule extends MorfologikSpellerRule {
         RuleMatch oldMatch = ruleMatches.get(0);
         RuleMatch newMatch = new RuleMatch(this, oldMatch.getFromPos(), oldMatch.getToPos(), 
                 "Possible spelling mistake. Did you mean <suggestion>" + forms.forms.get(0) +
-                "</suggestion>, the irregular " + forms.formName + " form of the " + forms.posName +
+                "</suggestion>, the " + forms.formName + " form of the " + forms.posName +
                 " '" + forms.baseform + "'?");
         List<String> allSuggestions = new ArrayList<>();
         allSuggestions.addAll(forms.forms);
@@ -115,7 +115,6 @@ public abstract class AbstractEnglishSpellerRule extends MorfologikSpellerRule {
   }
 
   /**
-   * @throws IOException 
    * @since 2.7
    */
   @Override
@@ -128,6 +127,10 @@ public abstract class AbstractEnglishSpellerRule extends MorfologikSpellerRule {
       return Arrays.asList("through");
     } else if ("speach".equals(word)) {  // the replacement pairs would prefer "speak"
       return Arrays.asList("speech");
+    } else if ("icecreem".equals(word)) {
+      return Arrays.asList("ice cream");
+    } else if ("fora".equals(word)) {
+      return Arrays.asList("for a");
     }
     return super.getAdditionalTopSuggestions(suggestions, word);
   }

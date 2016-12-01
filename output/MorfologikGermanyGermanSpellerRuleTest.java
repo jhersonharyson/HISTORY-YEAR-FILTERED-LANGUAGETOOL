@@ -21,7 +21,6 @@ package org.languagetool.rules.de;
 import morfologik.speller.Speller;
 import morfologik.stemming.Dictionary;
 
-import org.apache.commons.lang.StringUtils;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.languagetool.JLanguageTool;
@@ -43,9 +42,9 @@ public class MorfologikGermanyGermanSpellerRuleTest {
 
   @Test
   public void testMorfologikSpeller() throws IOException {
-    final MorfologikGermanyGermanSpellerRule rule =
+    MorfologikGermanyGermanSpellerRule rule =
           new MorfologikGermanyGermanSpellerRule(TestTools.getMessages("en"), new German());
-    final JLanguageTool langTool = new JLanguageTool(new German());
+    JLanguageTool langTool = new JLanguageTool(new German());
 
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Hier stimmt jedes Wort!")).length);
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Hir nicht so ganz.")).length);
@@ -53,7 +52,7 @@ public class MorfologikGermanyGermanSpellerRuleTest {
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Überall äußerst böse Umlaute!")).length);
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Üperall äußerst böse Umlaute!")).length);
     
-    final RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence("daß"));
+    RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence("daß"));
     assertEquals(1, matches.length);
     assertEquals("dass", matches[0].getSuggestedReplacements().get(0));
   }
@@ -98,7 +97,7 @@ public class MorfologikGermanyGermanSpellerRuleTest {
     /*if (suggestions.size() > 10) {
       suggestions = suggestions.subList(0, 9);
     }*/
-    System.out.println(word + ": " + StringUtils.join(suggestions, ", "));
+    System.out.println(word + ": " + String.join(", ", suggestions));
   }
 
 }

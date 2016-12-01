@@ -18,61 +18,7 @@
  */
 package org.languagetool.gui;
 
-import java.awt.BasicStroke;
-import java.awt.Color;
-import java.awt.Component;
-import java.awt.ComponentOrientation;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.Rectangle;
-import java.awt.RenderingHints;
-import java.awt.Shape;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.MouseEvent;
-import java.awt.event.MouseListener;
-import java.io.File;
-import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.ResourceBundle;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JMenu;
-import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
-import javax.swing.JPopupMenu;
-import javax.swing.JSeparator;
-import javax.swing.SwingUtilities;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
-import javax.swing.event.EventListenerList;
-import javax.swing.event.PopupMenuEvent;
-import javax.swing.event.PopupMenuListener;
-import javax.swing.text.AbstractDocument;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.DefaultHighlighter;
-import javax.swing.text.Document;
-import javax.swing.text.Highlighter;
-import javax.swing.text.JTextComponent;
-import javax.swing.text.Position;
-import javax.swing.text.View;
-
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.Nullable;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
@@ -82,6 +28,27 @@ import org.languagetool.language.LanguageIdentifier;
 import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
+
+import javax.swing.*;
+import javax.swing.event.*;
+import javax.swing.text.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.io.File;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.util.*;
+import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.languagetool.rules.Category;
+import org.languagetool.rules.CategoryId;
 
 /**
  * Support for associating a LanguageTool instance and a JTextComponent
@@ -108,7 +75,6 @@ class LanguageToolSupport {
   private final JTextComponent textComponent;
   private final EventListenerList listenerList = new EventListenerList();
   private final ResourceBundle messages;
-  private final Map<Language, ConfigurationDialog> configDialogs = new HashMap<>();
   private final List<RuleMatch> ruleMatches;
   private final List<Span> documentSpans;
 
@@ -126,16 +92,15 @@ class LanguageToolSupport {
   /**
    * LanguageTool support for a JTextComponent
    */
-  public LanguageToolSupport(JFrame frame, JTextComponent textComponent) {
+  LanguageToolSupport(JFrame frame, JTextComponent textComponent) {
     this(frame, textComponent, null);
   }
 
   /**
    * LanguageTool support for a JTextComponent
-   * 
    * @since 2.7
    */
-  public LanguageToolSupport(JFrame frame, JTextComponent textComponent, UndoRedoSupport support) {
+  LanguageToolSupport(JFrame frame, JTextComponent textComponent, UndoRedoSupport support) {
     this.frame = frame;
     this.textComponent = textComponent;
     this.messages = JLanguageTool.getMessageBundle();
@@ -154,12 +119,21 @@ class LanguageToolSupport {
     listenerList.remove(LanguageToolListener.class, ltListener);
   }
 
+  private void fireEvent(LanguageToolEvent.Type type, Object caller, long elapsedTime) {
+    LanguageToolEvent event = new LanguageToolEvent(this, type, caller, elapsedTime);
+    fireEvent(event);
+  }
+
   private void fireEvent(LanguageToolEvent.Type type, Object caller) {
+    LanguageToolEvent event = new LanguageToolEvent(this, type, caller);
+    fireEvent(event);
+  }
+
+  private void fireEvent(LanguageToolEvent event) {
     // Guaranteed to return a non-null array
     Object[] listeners = listenerList.getListenerList();
     // Process the listeners last to first, notifying
     // those that are interested in this event
-    LanguageToolEvent event = new LanguageToolEvent(this, type, caller);
     for (int i = listeners.length - 2; i >= 0; i -= 2) {
       if (listeners[i] == LanguageToolListener.class) {
         // Lazily create the event:
@@ -174,18 +148,6 @@ class LanguageToolSupport {
 
   List<RuleMatch> getMatches() {
     return this.ruleMatches;
-  }
-
-  ConfigurationDialog getCurrentConfigDialog() {
-    Language language = this.languageTool.getLanguage();
-    final ConfigurationDialog configDialog;
-    if (configDialogs.containsKey(language)) {
-      configDialog = configDialogs.get(language);
-    } else {
-      configDialog = new ConfigurationDialog(frame, false, config);
-      configDialogs.put(language, configDialog);
-    }
-    return configDialog;
   }
 
   void reloadConfig() {
@@ -206,36 +168,53 @@ class LanguageToolSupport {
     Set<String> toEnable = new HashSet<>(languageTool.getDisabledRules());
     toEnable.removeAll(common);
     
-    for (final String ruleId : toDisable) {
+    for (String ruleId : toDisable) {
       languageTool.disableRule(ruleId);
       update = true;
     }
-    for (final String ruleId : toEnable) {
+    for (String ruleId : toEnable) {
       languageTool.enableRule(ruleId);
       update = true;
     }
 
-    Set<String> disabledCategories = config.getDisabledCategoryNames();
-    if (disabledCategories == null) {
-      disabledCategories = Collections.emptySet();
+    Set<String> disabledCategoryNames = config.getDisabledCategoryNames();
+    if (disabledCategoryNames == null) {
+      disabledCategoryNames = Collections.emptySet();
     }
-    common = new HashSet<>(disabledCategories);
-    common.retainAll(languageTool.getDisabledCategories());
-    toDisable = new HashSet<>(disabledCategories);
-    toDisable.removeAll(common);
-    toEnable = new HashSet<>(languageTool.getDisabledCategories());
-    toEnable.removeAll(common);
+    Set<CategoryId> disabledCategories = new HashSet<>();
+    Map<CategoryId, Category> langCategories = languageTool.getCategories();
+    
+    for (CategoryId id : langCategories.keySet()) {
+      String categoryName = langCategories.get(id).getName();
+      if (disabledCategoryNames.contains(categoryName)) {
+        disabledCategories.add(id);
+      }
+    }
 
-    if (!toDisable.isEmpty()) {
-      languageTool.getDisabledCategories().addAll(toDisable);
-      // ugly hack to trigger reInitSpellCheckIgnoreWords()
-      languageTool.disableRules(new ArrayList<String>());
-      update = true;
+    Set<CategoryId> ltDisabledCategories = new HashSet<>();
+    for (CategoryId id : langCategories.keySet()) {
+      if (languageTool.isCategoryDisabled(id)) {
+        ltDisabledCategories.add(id);
+      }
     }
-    if (!toEnable.isEmpty()) {
-      languageTool.getDisabledCategories().removeAll(toEnable);
+    
+    Set<CategoryId> commonCat = new HashSet<>(disabledCategories);
+    commonCat.retainAll(ltDisabledCategories);
+
+    Set<CategoryId> toDisableCat = new HashSet<>(disabledCategories);
+    toDisableCat.removeAll(commonCat);
+
+    Set<CategoryId> toEnableCat = new HashSet<>(ltDisabledCategories);
+    toEnableCat.removeAll(commonCat);
+
+    for(CategoryId id : toDisableCat) {
+      languageTool.disableCategory(id);
+    }
+    for(CategoryId id : toEnableCat) {
+      languageTool.enableRuleCategory(id);
+    }      
+    if (!toDisableCat.isEmpty() || !toEnableCat.isEmpty()) {
       // ugly hack to trigger reInitSpellCheckIgnoreWords()
-      languageTool.disableRules(new ArrayList<String>());
       update = true;
     }
 
@@ -244,8 +223,8 @@ class LanguageToolSupport {
       enabledRules = Collections.emptySet();
     }
     for (String ruleName : enabledRules) {
-      languageTool.enableDefaultOffRule(ruleName);
       languageTool.enableRule(ruleName);
+      update = true;
     }
 
     if (update) {
@@ -253,28 +232,6 @@ class LanguageToolSupport {
       //we could skip a full check if the user disabled but didn't enable rules
       checkImmediately(null);
       fireEvent(LanguageToolEvent.Type.RULE_ENABLED, null);
-    }
-  }
-
-  private void loadConfig() {
-    final Set<String> disabledRules = config.getDisabledRuleIds();
-    if (disabledRules != null) {
-      for (final String ruleId : disabledRules) {
-        languageTool.disableRule(ruleId);
-      }
-    }
-    final Set<String> disabledCategories = config.getDisabledCategoryNames();
-    if (disabledCategories != null) {
-      for (final String categoryName : disabledCategories) {
-        languageTool.disableCategory(categoryName);
-      }
-    }
-    final Set<String> enabledRules = config.getEnabledRuleIds();
-    if (enabledRules != null) {
-      for (String ruleName : enabledRules) {
-        languageTool.enableDefaultOffRule(ruleName);
-        languageTool.enableRule(ruleName);
-      }
     }
   }
 
@@ -290,9 +247,10 @@ class LanguageToolSupport {
       //  languageTool.shutdownWhenDone();
       //}
       languageTool = new MultiThreadedJLanguageTool(language, config.getMotherTongue());
-      loadConfig();
+      languageTool.setCleanOverlappingMatches(false);
+      Tools.configureFromRules(languageTool, config);
       if (config.getNgramDirectory() != null) {
-        File ngramLangDir = new File(config.getNgramDirectory(), language.getShortName());
+        File ngramLangDir = new File(config.getNgramDirectory(), language.getShortCode());
         if (ngramLangDir.exists()) {
           try {
             languageTool.activateLanguageModelRules(config.getNgramDirectory());
@@ -399,12 +357,7 @@ class LanguageToolSupport {
     };
     this.textComponent.addMouseListener(mouseListener);
 
-    actionListener = new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        _actionPerformed(e);
-      }
-    };
+    actionListener = e -> _actionPerformed(e);
 
     mustDetectLanguage = config.getAutoDetect();
     if (!this.textComponent.getText().isEmpty() && backgroundCheckEnabled) {
@@ -497,7 +450,6 @@ class LanguageToolSupport {
     }
     if (rule.isDefaultOff()) {
       config.getEnabledRuleIds().add(ruleId);
-      languageTool.enableDefaultOffRule(ruleId);
     } else {
       config.getDisabledRuleIds().remove(ruleId);
     }
@@ -508,7 +460,7 @@ class LanguageToolSupport {
 
   @Nullable
   private Span getSpan(int offset) {
-    for (final Span cur : documentSpans) {
+    for (Span cur : documentSpans) {
       if (cur.end > cur.start && cur.start <= offset && offset < cur.end) {
         return cur;
       }
@@ -523,7 +475,7 @@ class LanguageToolSupport {
     }
 
     int offset = this.textComponent.viewToModel(event.getPoint());
-    final Span span = getSpan(offset);
+    Span span = getSpan(offset);
     JPopupMenu popup = new JPopupMenu("Grammar Menu");
     if (span != null) {
       JLabel msgItem = new JLabel("<html>"
@@ -545,21 +497,11 @@ class LanguageToolSupport {
       popup.add(new JSeparator());
 
       JMenuItem moreItem = new JMenuItem(messages.getString("guiMore"));
-      moreItem.addActionListener(new ActionListener() {
-        @Override
-        public void actionPerformed(ActionEvent e) {
-          showDialog(textComponent, span.msg, span.desc, span.rule);
-        }
-      });
+      moreItem.addActionListener(e -> showDialog(textComponent, span.msg, span.desc, span.rule));
       popup.add(moreItem);
 
       JMenuItem ignoreItem = new JMenuItem(messages.getString("guiTurnOffRule"));
-      ignoreItem.addActionListener(new ActionListener() {
-        @Override
-        public void actionPerformed(ActionEvent e) {
-          disableRule(span.rule.getId());
-        }
-      });
+      ignoreItem.addActionListener(e -> disableRule(span.rule.getId()));
       popup.add(ignoreItem);
       popup.applyComponentOrientation(
         ComponentOrientation.getOrientation(Locale.getDefault()));
@@ -619,7 +561,7 @@ class LanguageToolSupport {
     TreeMap<String, ArrayList<Rule>> categories = new TreeMap<>();
     for (Rule rule : disabledRules) {
       if (!categories.containsKey(rule.getCategory().getName())) {
-        categories.put(rule.getCategory().getName(), new ArrayList<Rule>());
+        categories.put(rule.getCategory().getName(), new ArrayList<>());
       }
       categories.get(rule.getCategory().getName()).add(rule);
     }
@@ -653,14 +595,9 @@ class LanguageToolSupport {
 
     for (Rule rule : rules) {
       count++;
-      final String id = rule.getId();
+      String id = rule.getId();
       JMenuItem ruleItem = new JMenuItem(rule.getDescription());
-      ruleItem.addActionListener(new ActionListener() {
-        @Override
-        public void actionPerformed(ActionEvent e) {
-          enableRule(id);
-        }
-      });
+      ruleItem.addActionListener(e -> enableRule(id));
       menu.add(ruleItem);
 
       if (rules.size() <= MAX_RULES_PER_MENU) {
@@ -680,7 +617,7 @@ class LanguageToolSupport {
 
   @Nullable
   Rule getRuleForId(String ruleId) {
-    final List<Rule> allRules = languageTool.getAllRules();
+    List<Rule> allRules = languageTool.getAllRules();
     for (Rule rule : allRules) {
       if (rule.getId().equals(ruleId)) {
         return rule;
@@ -752,7 +689,7 @@ class LanguageToolSupport {
     return lang;
   }
 
-  private synchronized List<RuleMatch> checkText(final Object caller) throws IOException {
+  private synchronized List<RuleMatch> checkText(Object caller) throws IOException {
     if (this.mustDetectLanguage) {
       mustDetectLanguage = false;
       if (!this.textComponent.getText().isEmpty()) {
@@ -763,12 +700,7 @@ class LanguageToolSupport {
             fireEvent(LanguageToolEvent.Type.LANGUAGE_CHANGED, caller);
           } else {
             try {
-              SwingUtilities.invokeAndWait(new Runnable() {
-                @Override
-                public void run() {
-                  fireEvent(LanguageToolEvent.Type.LANGUAGE_CHANGED, caller);
-                }
-              });
+              SwingUtilities.invokeAndWait(() -> fireEvent(LanguageToolEvent.Type.LANGUAGE_CHANGED, caller));
             } catch (InterruptedException ex) {
               //ignore
             } catch (InvocationTargetException ex) {
@@ -782,32 +714,28 @@ class LanguageToolSupport {
       fireEvent(LanguageToolEvent.Type.CHECKING_STARTED, caller);
     } else {
       try {
-        SwingUtilities.invokeAndWait(new Runnable() {
-          @Override
-          public void run() {
-            fireEvent(LanguageToolEvent.Type.CHECKING_STARTED, caller);
-          }
-        });
+        SwingUtilities.invokeAndWait(() -> fireEvent(LanguageToolEvent.Type.CHECKING_STARTED, caller));
       } catch (InterruptedException ex) {
         //ignore
       } catch (InvocationTargetException ex) {
         throw new RuntimeException(ex);
       }
     }
-    final List<RuleMatch> matches = this.languageTool.check(this.textComponent.getText());
+
+    long startTime = System.currentTimeMillis();
+    List<RuleMatch> matches = this.languageTool.check(this.textComponent.getText());
+    long elapsedTime = System.currentTimeMillis() - startTime;
+
     int v = check.get();
     if (v == 0) {
       if (!SwingUtilities.isEventDispatchThread()) {
-        SwingUtilities.invokeLater(new Runnable() {
-          @Override
-          public void run() {
-            updateHighlights(matches);
-            fireEvent(LanguageToolEvent.Type.CHECKING_FINISHED, caller);
-          }
+        SwingUtilities.invokeLater(() -> {
+          updateHighlights(matches);
+          fireEvent(LanguageToolEvent.Type.CHECKING_FINISHED, caller, elapsedTime);
         });
       } else {
         updateHighlights(matches);
-        fireEvent(LanguageToolEvent.Type.CHECKING_FINISHED, caller);
+        fireEvent(LanguageToolEvent.Type.CHECKING_FINISHED, caller, elapsedTime);
       }
     }
     return matches;
@@ -906,94 +834,7 @@ class LanguageToolSupport {
   }
 
   private void showDialog(Component parent, String title, String message, Rule rule) {
-    Tools.showRuleInfoDialog(parent, title, message, rule, messages, languageTool.getLanguage().getShortNameWithCountryAndVariant());
-  }
-
-  private static class HighlightPainter extends DefaultHighlighter.DefaultHighlightPainter {
-
-    private static final BasicStroke OO_STROKE1 = new BasicStroke(1.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10.0f, new float[]{3.0f, 5.0f}, 2);
-    private static final BasicStroke OO_STROKE2 = new BasicStroke(1.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10.0f, new float[]{1.0f, 3.0f}, 3);
-    private static final BasicStroke OO_STROKE3 = new BasicStroke(1.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10.0f, new float[]{3.0f, 5.0f}, 6);
-    private static final BasicStroke ZIGZAG_STROKE1 = new BasicStroke(1.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10.0f, new float[]{1.0f, 1.0f}, 0);
-
-    private final Color underlineColor;
-    private final Color backgroundColor;
-
-    private HighlightPainter(Color backgroundColor, Color underlineColor) {
-      super(backgroundColor);
-      this.backgroundColor = backgroundColor;
-      this.underlineColor = underlineColor;
-    }
-
-    @Override
-    public Shape paintLayer(Graphics g, int offs0, int offs1, Shape bounds, JTextComponent c, View view) {
-      if (backgroundColor != null) {
-        super.paintLayer(g, offs0, offs1, bounds, c, view);
-      }
-      Rectangle rect;
-
-      if (offs0 == view.getStartOffset() && offs1 == view.getEndOffset()) {
-        if (bounds instanceof Rectangle) {
-          rect = (Rectangle) bounds;
-        } else {
-          rect = bounds.getBounds();
-        }
-      } else {
-        try {
-          Shape shape = view.modelToView(offs0, Position.Bias.Forward, offs1, Position.Bias.Backward, bounds);
-          rect = shape instanceof Rectangle ? (Rectangle) shape : shape.getBounds();
-        } catch (BadLocationException e) {
-          rect = null;
-        }
-      }
-
-      if (rect != null) {
-        Color color = underlineColor;
-
-        if (color == null) {
-          g.setColor(c.getSelectionColor());
-        } else {
-          g.setColor(color);
-        }
-
-        rect.width = Math.max(rect.width, 1);
-
-        int descent = c.getFontMetrics(c.getFont()).getDescent();
-
-        if (descent > 3) {
-          drawCurvedLine(g, rect);
-        } else if (descent > 2) {
-          drawCurvedLine(g, rect);
-        } else {
-          drawLine(g, rect);
-        }
-      }
-
-      return rect;
-    }
-
-    private void drawCurvedLine(Graphics g, Rectangle rect) {
-      int x1 = rect.x;
-      int x2 = rect.x + rect.width;
-      int y = rect.y + rect.height;
-      Graphics2D g2 = (Graphics2D) g;
-      g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-      g2.setStroke(OO_STROKE1);
-      g2.drawLine(x1, y - 1, x2, y - 1);
-      g2.setStroke(OO_STROKE2);
-      g2.drawLine(x1, y - 2, x2, y - 2);
-      g2.setStroke(OO_STROKE3);
-      g2.drawLine(x1, y - 3, x2, y - 3);
-    }
-
-    private void drawLine(Graphics g, Rectangle rect) {
-      int x1 = rect.x;
-      int x2 = rect.x + rect.width;
-      int y = rect.y + rect.height;
-      Graphics2D g2 = (Graphics2D) g;
-      g2.setStroke(ZIGZAG_STROKE1);
-      g2.drawLine(x1, y - 1, x2, y - 1);
-    }
+    Tools.showRuleInfoDialog(parent, title, message, rule, messages, languageTool.getLanguage().getShortCodeWithCountryAndVariant());
   }
 
   private static class ReplaceMenuItem extends JMenuItem {

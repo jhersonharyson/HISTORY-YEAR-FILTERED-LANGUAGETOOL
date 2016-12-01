@@ -24,8 +24,10 @@ import java.util.List;
 import java.util.ResourceBundle;
 
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.rules.*;
 import org.languagetool.rules.el.MorfologikGreekSpellerRule;
+import org.languagetool.rules.el.NumeralStressRule;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.el.GreekSynthesizer;
 import org.languagetool.tagging.Tagger;
@@ -49,7 +51,7 @@ public class Greek extends Language {
   private Tagger tagger;
 
   @Override
-  public String getShortName() {
+  public String getShortCode() {
     return "el";
   }
 
@@ -73,17 +75,23 @@ public class Greek extends Language {
   @Override
   public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
     return Arrays.asList(
-            new CommaWhitespaceRule(messages),
+            new CommaWhitespaceRule(messages, 
+                    Example.wrong("Το κόμμα χωρίζει προτάσεις<marker> ,</marker> όρους προτάσεων και φράσεις."),
+                    Example.fixed("Το κόμμα χωρίζει προτάσεις<marker>,</marker> όρους προτάσεων και φράσεις.")),
             new DoublePunctuationRule(messages),
             new GenericUnpairedBracketsRule("EL_UNPAIRED_BRACKETS", messages,
                     Arrays.asList("[", "(", "{", "“", "\"", "«"),
                     Arrays.asList("]", ")", "}", "”", "\"", "»")),
             new LongSentenceRule(messages),
             new MorfologikGreekSpellerRule(messages, this),
-            new UppercaseSentenceStartRule(messages, this),
+            new UppercaseSentenceStartRule(messages, this,
+                    Example.wrong("Η τελεία είναι σημείο στίξης. <marker>δείχνει</marker> το τέλος μίας πρότασης."),
+                    Example.fixed("Η τελεία είναι σημείο στίξης. <marker>Δείχνει</marker> το τέλος μίας πρότασης.")),
             new MultipleWhitespaceRule(messages, this),
             new WordRepeatBeginningRule(messages, this),
-            new WordRepeatRule(messages, this));
+            new WordRepeatRule(messages, this),
+            new NumeralStressRule(messages)
+    );
   }
 
   @Override
@@ -121,5 +129,10 @@ public class Greek extends Language {
       disambiguator = new XmlRuleDisambiguator(new Greek());
     }
     return disambiguator;
+  }
+
+  @Override
+  public LanguageMaintainedState getMaintainedState() {
+    return LanguageMaintainedState.ActivelyMaintained;
   }
 }

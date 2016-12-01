@@ -21,9 +21,10 @@ package org.languagetool.tools;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.rules.Category;
+import org.languagetool.rules.CategoryId;
 import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.RuleMatch;
-import org.languagetool.rules.patterns.PatternRule;
+import org.languagetool.rules.patterns.AbstractPatternRule;
 
 import java.util.List;
 
@@ -33,6 +34,7 @@ import static org.languagetool.tools.StringTools.*;
  * Generate XML to represent matching rules.
  * 
  * @since 2.5 (as 'RuleAsXmlSerializer' up to 3.1)
+ * @deprecated don't use for new use cases, the only place this should still be used is for the API mode of the command-line client (deprecated since 3.5) 
  */
 public class RuleMatchAsXmlSerializer {
 
@@ -45,18 +47,25 @@ public class RuleMatchAsXmlSerializer {
   public String getXmlStart(Language lang, Language motherTongue) {
     StringBuilder xml = new StringBuilder(CAPACITY);
     xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+            .append("<!-- THIS OUTPUT IS DEPRECATED, PLEASE SEE http://wiki.languagetool.org/http-server FOR A BETTER APPROACH -->\n")
             .append("<matches software=\"LanguageTool\" version=\"" + JLanguageTool.VERSION + "\"" + " buildDate=\"")
             .append(JLanguageTool.BUILD_DATE).append("\">\n");
     if (lang != null || motherTongue != null) {
       String languageXml = "<language ";
+      String warning = "";
       if (lang != null) {
-        languageXml += "shortname=\"" + lang.getShortNameWithCountryAndVariant() + "\" name=\"" + lang.getName() + "\"";
+        languageXml += "shortname=\"" + lang.getShortCodeWithCountryAndVariant() + "\" name=\"" + lang.getName() + "\"";
+        String longCode = lang.getShortCodeWithCountryAndVariant();
+        if ("en".equals(longCode) || "de".equals(longCode)) {
+          xml.append("<!-- NOTE: The language code you selected ('").append(longCode).append("') doesn't support spell checking. Consider using a code with a variant like 'en-US'. -->\n");
+        }
       }
-      if(motherTongue != null && (lang == null || !motherTongue.getShortName().equals(lang.getShortNameWithCountryAndVariant()))) {
-        languageXml += " mothertongueshortname=\"" + motherTongue.getShortName() + "\" mothertonguename=\"" + motherTongue.getName() + "\"";
+      if (motherTongue != null && (lang == null || !motherTongue.getShortCode().equals(lang.getShortCodeWithCountryAndVariant()))) {
+        languageXml += " mothertongueshortname=\"" + motherTongue.getShortCode() + "\" mothertonguename=\"" + motherTongue.getName() + "\"";
       }
       languageXml += "/>\n";
       xml.append(languageXml);
+      xml.append(warning);
     }
     return xml.toString();
   }
@@ -87,8 +96,8 @@ public class RuleMatchAsXmlSerializer {
 
     for (RuleMatch match : ruleMatches) {
       String subId = "";
-      if (match.getRule() instanceof PatternRule) {
-        PatternRule pRule = (PatternRule) match.getRule();
+      if (match.getRule() instanceof AbstractPatternRule) {
+        AbstractPatternRule pRule = (AbstractPatternRule) match.getRule();
         if (pRule.getSubId() != null) {
           subId = " subId=\"" + escapeXMLForAPIOutput(pRule.getSubId()) + "\" ";
         }
@@ -98,12 +107,15 @@ public class RuleMatchAsXmlSerializer {
               .append(" toy=\"").append(match.getEndLine()).append('"')
               .append(" tox=\"").append(match.getEndColumn() - 1).append('"')
               .append(" ruleId=\"").append(match.getRule().getId()).append('"');
-      String msg = match.getMessage().replaceAll("</?suggestion>", "'");
       xml.append(subId);
+      String msg = match.getMessage().replaceAll("</?suggestion>", "'");
       xml.append(" msg=\"").append(escapeXMLForAPIOutput(msg)).append('"');
-      String context = contextTools.getContext(match.getFromPos(), match.getToPos(), text);
+      if (!match.getShortMessage().isEmpty()) {
+        xml.append(" shortmsg=\"").append(escapeXMLForAPIOutput(match.getShortMessage())).append('"');
+      }
       xml.append(" replacements=\"").append(escapeXMLForAPIOutput(
               String.join("#", match.getSuggestedReplacements()))).append('"');
+      String context = contextTools.getContext(match.getFromPos(), match.getToPos(), text);
       // get position of error in context and remove artificial marker again:
       int contextOffset = context.indexOf(startMarker);
       context = context.replaceFirst(startMarker, "");
@@ -118,6 +130,10 @@ public class RuleMatchAsXmlSerializer {
       Category category = match.getRule().getCategory();
       if (category != null) {
         xml.append(" category=\"").append(escapeXMLForAPIOutput(category.getName())).append('"');
+        CategoryId id = category.getId();
+        if (id != null) {
+          xml.append(" categoryid=\"").append(escapeXMLForAPIOutput(id.toString())).append('"');
+        }
       }
       ITSIssueType type = match.getRule().getLocQualityIssueType();
       if (type != null) {
@@ -155,16 +171,16 @@ public class RuleMatchAsXmlSerializer {
    * @param unknownWords unknown words to be printed in a separated list
    * @since 3.0
    */
-  public String ruleMatchesToXml(List<RuleMatch> ruleMatches, String text, int contextSize, XmlPrintMode xmlMode, Language lang, List<String> unknownWords) {
+  public String ruleMatchesToXml(List<RuleMatch> ruleMatches, String text, int contextSize, ApiPrintMode xmlMode, Language lang, List<String> unknownWords) {
     String xmlSnippet = ruleMatchesToXmlSnippet(ruleMatches, text, contextSize);
     switch (xmlMode) {
-      case START_XML:
+      case START_API:
         return getXmlStart(lang, null) + xmlSnippet;
-      case CONTINUE_XML:
+      case CONTINUE_API:
         return xmlSnippet;
-      case END_XML:
+      case END_API:
         return xmlSnippet + getXmlUnknownWords(unknownWords) + getXmlEnd();
-      case NORMAL_XML:
+      case NORMAL_API:
         return getXmlStart(lang, null) + xmlSnippet + getXmlUnknownWords(unknownWords) + getXmlEnd();
     }
     throw new IllegalArgumentException("Unknown XML mode: " + xmlMode);

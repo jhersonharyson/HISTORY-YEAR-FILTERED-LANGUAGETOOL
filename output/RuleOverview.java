@@ -21,14 +21,20 @@ package org.languagetool.dev;
 import org.apache.commons.lang.StringUtils;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.Languages;
+import org.languagetool.databroker.ResourceDataBroker;
 import org.languagetool.language.Contributor;
+import org.languagetool.rules.ConfusionSetLoader;
+import org.languagetool.rules.Rule;
+import org.languagetool.rules.spelling.hunspell.HunspellNoSuggestionRule;
 import org.languagetool.tools.StringTools;
 import org.languagetool.tools.Tools;
 
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -40,11 +46,10 @@ import java.util.*;
  */
 @SuppressWarnings("StringConcatenationInsideStringBufferAppend")
 public final class RuleOverview {
-
-  private static final List<String> LANGUAGES_WITH_NEW_MAINTAINER_NEED = 
-          Arrays.asList("en", "ja", "is", "sv", "lt", "ro", "ml", "nl");
-  private static final List<String> LANGUAGES_WITH_CO_MAINTAINER_NEED = 
-          Arrays.asList("da", "be", "zh", "gl");
+  
+  enum SpellcheckSupport {
+    Full, NoSuggestion, None
+  }
 
   public static void main(final String[] args) throws IOException {
     if (args.length != 1) {
@@ -70,6 +75,8 @@ public final class RuleOverview {
     System.out.println("  <th></th>");
     System.out.println("  <th align=\"left\" width=\"60\">Java<br/>rules</th>");
     System.out.println("  <th align=\"left\" width=\"60\">False<br/>friends</th>");
+    System.out.println("  <th align=\"left\" width=\"60\">Spell<br/>check*</th>");
+    System.out.println("  <th align=\"left\" width=\"60\">Confusion<br/>pairs</th>");
     //System.out.println("  <th valign='bottom' width=\"65\">Auto-<br/>detected</th>");
     System.out.println("  <th valign='bottom' align=\"left\" width=\"70\">Activity</th>");
     System.out.println("  <th valign='bottom' align=\"left\">Rule Maintainers</th>");
@@ -92,12 +99,12 @@ public final class RuleOverview {
         continue;
       }
       System.out.print("<tr>");
-      final String langCode = lang.getShortName();
+      final String langCode = lang.getShortCode();
       final File langSpecificWebsite = new File(webRoot, langCode);
-      final List<String> variants = getVariants(sortedLanguages, lang);
+      final List<String> variants = getVariantNames(sortedLanguages, lang);
       String variantsText = "";
       if (variants.size() > 0) {
-        variantsText = "<br/><span class='langVariants'>Variants for: " + StringUtils.join(variants, ", ") + "</span>";
+        variantsText = "<br/><span class='langVariants'>Variants for: " + String.join(", ", variants) + "</span>";
       }
       if (langSpecificWebsite.isDirectory()) {
         System.out.print("<td valign=\"top\"><a href=\"../" + langCode + "/\">" + lang.getName() + "</a>" + variantsText + "</td>");
@@ -140,9 +147,18 @@ public final class RuleOverview {
         overallJavaCount++;
       }
 
-      // false friends:
-      final int count = countFalseFriendRules(falseFriendRules, lang);
-      System.out.print("<td valign=\"top\" align=\"right\">" + count + "</td>");
+      System.out.print("<td valign=\"top\" align=\"right\">" + countFalseFriendRules(falseFriendRules, lang) + "</td>");
+
+      SpellcheckSupport spellcheckSupport = spellcheckSupport(lang, sortedLanguages);
+      String spellSupportStr = "";
+      if (spellcheckSupport == SpellcheckSupport.Full) {
+        spellSupportStr = "✓";
+      } else if (spellcheckSupport == SpellcheckSupport.NoSuggestion) {
+        spellSupportStr = "<span title='spell check without suggestions'>(✓)</span>";
+      }
+      System.out.print("<td valign=\"top\" align=\"right\">" + spellSupportStr + "</td>");
+
+      System.out.print("<td valign=\"top\" align=\"right\">" + countConfusionPairs(lang) + "</td>");
 
       // activity:
       int commits = activity.getActivityFor(lang, 365/2);
@@ -159,13 +175,9 @@ public final class RuleOverview {
       String maintainerInfo = getMaintainerInfo(lang);
       String maintainerText;
       boolean greyOutMaintainer = false;
-      if (langCode.equals("pt")) {
-        maintainerText = "<span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for a maintainer for Brazilian Portuguese</a></span> - ";
-      } else if (LANGUAGES_WITH_NEW_MAINTAINER_NEED.contains(langCode)) {
-        maintainerText = "<span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for new maintainer</a></span> - ";
+      if (lang.getMaintainedState() != LanguageMaintainedState.ActivelyMaintained) {
+        maintainerText = "<span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for maintainer</a></span> - ";
         greyOutMaintainer = true;
-      } else if (LANGUAGES_WITH_CO_MAINTAINER_NEED.contains(langCode)) {
-        maintainerText = "<span class='maintainerNeeded'><a href='http://wiki.languagetool.org/tasks-for-language-maintainers'>Looking for co-maintainer</a></span> - ";
       } else {
         maintainerText = "";
       }
@@ -205,11 +217,20 @@ public final class RuleOverview {
     return count;
   }
 
-  private List<String> getVariants(List<Language> allLanguages, Language lang) {
-    List<String> variants = new ArrayList<>();
+  private List<String> getVariantNames(List<Language> allLanguages, Language lang) {
+    List<Language> variants = getVariants(allLanguages, lang);
+    List<String> result = new ArrayList<>();
+    for (Language l : variants) {
+      result.add(l.getName().replaceAll(".*\\((.*?)\\).*", "$1").trim());
+    }
+    return result;
+  }
+
+  private List<Language> getVariants(List<Language> allLanguages, Language lang) {
+    List<Language> variants = new ArrayList<>();
     for (Language sortedLanguage : allLanguages) {
-      if (sortedLanguage.isVariant() && lang.getShortName().equals(sortedLanguage.getShortName())) {
-        variants.add(sortedLanguage.getName().replaceAll(".*\\((.*?)\\).*", "$1").trim());
+      if (sortedLanguage.isVariant() && lang.getShortCode().equals(sortedLanguage.getShortCode())) {
+        variants.add(sortedLanguage);
       }
     }
     return variants;
@@ -222,36 +243,18 @@ public final class RuleOverview {
   }
 
   private int countXmlRules(String xmlRules) {
-    int pos = 0;
-    int count = 0;
-    while (true) {
-      pos = xmlRules.indexOf("<rule ", pos + 1);
-      if (pos == -1) {
-        break;
-      }
-      count++;
-    }
-    return count;
+    return StringUtils.countMatches(xmlRules, "<rule ");  // rules with IDs
   }
 
   private int countXmlRuleGroupRules(String xmlRules) {
-    int pos = 0;
-    int countInRuleGroup = 0;
-    while (true) {
-      pos = xmlRules.indexOf("<rule>", pos + 1);
-      if (pos == -1) {
-        break;
-      }
-      countInRuleGroup++;
-    }
-    return countInRuleGroup;
+    return StringUtils.countMatches(xmlRules, "<rule>"); // rules in rule groups have no ID
   }
 
   private int countFalseFriendRules(String falseFriendRules, Language lang) {
     int pos = 0;
     int count = 0;
     while (true) {
-      pos = falseFriendRules.indexOf("<pattern lang=\"" + lang.getShortName(), pos + 1);
+      pos = falseFriendRules.indexOf("<pattern lang=\"" + lang.getShortCode(), pos + 1);
       if (pos == -1) {
         break;
       }
@@ -260,6 +263,47 @@ public final class RuleOverview {
     return count;
   }
 
+
+  private SpellcheckSupport spellcheckSupport(Language lang, List<Language> allLanguages) throws IOException {
+    if (spellcheckSupport(lang) != SpellcheckSupport.None) {
+      return spellcheckSupport(lang);
+    }
+    List<Language> variants = getVariants(allLanguages, lang);
+    for (Language variant : variants) {
+      if (spellcheckSupport(variant) != SpellcheckSupport.None) {
+        return spellcheckSupport(variant);
+      }
+    }
+    return SpellcheckSupport.None;
+  }
+
+  private SpellcheckSupport spellcheckSupport(Language lang) throws IOException {
+    for (Rule rule : lang.getRelevantRules(JLanguageTool.getMessageBundle())) {
+      if (rule.isDictionaryBasedSpellingRule()) {
+        if (rule instanceof HunspellNoSuggestionRule) {
+          return SpellcheckSupport.NoSuggestion;
+        } else {
+          return SpellcheckSupport.Full;
+        }
+      }
+    }
+    return SpellcheckSupport.None;
+  }
+
+  private int countConfusionPairs(Language lang) {
+    String path = "/" + lang.getShortCode() + "/confusion_sets.txt";
+    ResourceDataBroker dataBroker = JLanguageTool.getDataBroker();
+    if (dataBroker.resourceExists(path)) {
+      try (InputStream confusionSetStream = dataBroker.getFromResourceDirAsStream(path)) {
+        ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader();
+        return confusionSetLoader.loadConfusionSet(confusionSetStream).size()/2;
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    }
+    return 0;
+  }
+  
   private String getMaintainerInfo(Language lang) {
     final StringBuilder maintainerInfo = new StringBuilder();
     if (lang.getMaintainers() != null) {

@@ -32,8 +32,9 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
-import static junit.framework.TestCase.assertFalse;
-import static junit.framework.TestCase.assertTrue;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
 
 public class SubjectVerbAgreementRuleTest {
 
@@ -107,6 +108,11 @@ public class SubjectVerbAgreementRuleTest {
     //assertFalse(rule.prevChunkIsNominative(getTokens("Der Katzen Fell ist süß"), 3));
   }
 
+  @Test
+  public void testArrayOutOfBoundsBug() throws IOException {
+    rule.match(langTool.getAnalyzedSentence("Die nicht Teil des Näherungsmodells sind"));
+  }
+
   private AnalyzedTokenReadings[] getTokens(String s) throws IOException {
     return langTool.getAnalyzedSentence(s).getTokensWithoutWhitespace();
   }
@@ -145,6 +151,7 @@ public class SubjectVerbAgreementRuleTest {
   @Test
   public void testRuleWithCorrectSingularVerb() throws IOException {
     List<String> sentences = Arrays.asList(
+        "All diesen Bereichen ist gemeinsam, dass sie unterfinanziert sind.",
         "Die Katze ist schön.",
         "Die eine Katze ist schön.",
         "Eine Katze ist schön.",

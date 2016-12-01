@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.ResourceBundle;
 
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.rules.*;
 import org.languagetool.rules.ca.AccentuationCheckRule;
 import org.languagetool.rules.ca.CatalanUnpairedBracketsRule;
@@ -36,6 +37,7 @@ import org.languagetool.rules.ca.MorfologikCatalanSpellerRule;
 import org.languagetool.rules.ca.ReflexiveVerbsRule;
 import org.languagetool.rules.ca.ReplaceOperationNamesRule;
 import org.languagetool.rules.ca.SimpleReplaceRule;
+import org.languagetool.rules.ca.SimpleReplaceBalearicRule;
 import org.languagetool.rules.ca.SimpleReplaceVerbsRule;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.ca.CatalanSynthesizer;
@@ -69,7 +71,7 @@ public class Catalan extends Language {
   }
   
   @Override
-  public String getShortName() {
+  public String getShortCode() {
     return "ca";
   }
 
@@ -102,6 +104,7 @@ public class Catalan extends Language {
             new CatalanWrongWordInContextRule(messages),
             new ReflexiveVerbsRule(messages),
             new SimpleReplaceVerbsRule(messages),
+            new SimpleReplaceBalearicRule(messages),
             new SimpleReplaceRule(messages),
             new ReplaceOperationNamesRule(messages)
     );
@@ -147,4 +150,24 @@ public class Catalan extends Language {
     return wordTokenizer;
   }
 
+  @Override
+  public LanguageMaintainedState getMaintainedState() {
+    return LanguageMaintainedState.ActivelyMaintained;
+  }
+
+  @Override
+  public int getPriorityForId(String id) {
+    switch (id) {
+      case "CA_SIMPLE_REPLACE_BALEARIC": return 100;
+      case "CONFUSIONS_ACCENT": return 20;
+      case "DIACRITICS": return 20;
+      case "ACCENTUATION_CHECK": return 10;
+      case "REGIONAL_VERBS": return -10;
+      case "FALTA_ELEMENT_ENTRE_VERB": return -10;
+      case "FALTA_COMA_FRASE_CONDICIONAL": return -20;
+      case "MORFOLOGIK_RULE_CA_ES": return -100;
+      case "UPPERCASE_SENTENCE_START": return -500;
+    }
+    return 0;
+  }
 }

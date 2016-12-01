@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.ResourceBundle;
 
 import org.languagetool.Language;
+import org.languagetool.LanguageMaintainedState;
 import org.languagetool.rules.*;
 import org.languagetool.rules.spelling.hunspell.HunspellNoSuggestionRule;
 import org.languagetool.tagging.Tagger;
@@ -60,10 +61,9 @@ public class Esperanto extends Language {
   public String getName() {
     return "Esperanto";
   }
-
-
+  
   @Override
-  public String getShortName() {
+  public String getShortCode() {
     return "eo";
   }
 
@@ -102,6 +102,11 @@ public class Esperanto extends Language {
             new MultipleWhitespaceRule(messages, this),
             new SentenceWhitespaceRule(messages)
     );
+  }
+
+  @Override
+  public LanguageMaintainedState getMaintainedState() {
+    return LanguageMaintainedState.ActivelyMaintained;
   }
 
 }
