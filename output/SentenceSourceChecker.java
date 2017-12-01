@@ -24,6 +24,7 @@ import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.Languages;
 import org.languagetool.MultiThreadedJLanguageTool;
+import org.languagetool.rules.CategoryId;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 
@@ -76,8 +77,10 @@ public class SentenceSourceChecker {
     String[] fileNames = commandLine.getOptionValues('f');
     File languageModelDir = commandLine.hasOption("languagemodel") ?
                             new File(commandLine.getOptionValue("languagemodel")) : null;
+    File word2vecModelDir = commandLine.hasOption("word2vecmodel") ?
+            new File(commandLine.getOptionValue("word2vecmodel")) : null;
     Pattern filter = commandLine.hasOption("filter") ? Pattern.compile(commandLine.getOptionValue("filter")) : null;
-    prg.run(propFile, disabledRuleIds, languageCode, Arrays.asList(fileNames), ruleIds, categoryIds, maxArticles, maxErrors, languageModelDir, filter);
+    prg.run(propFile, disabledRuleIds, languageCode, Arrays.asList(fileNames), ruleIds, categoryIds, maxArticles, maxErrors, languageModelDir, word2vecModelDir, filter);
   }
 
   private static void addDisabledRules(String languageCode, Set<String> disabledRuleIds, Properties disabledRules) {
@@ -141,12 +144,15 @@ public class SentenceSourceChecker {
   }
 
   private void run(File propFile, Set<String> disabledRules, String langCode, List<String> fileNames, String[] ruleIds,
-                   String[] additionalCategoryIds, int maxSentences, int maxErrors, File languageModelDir, Pattern filter) throws IOException {
+                   String[] additionalCategoryIds, int maxSentences, int maxErrors, File languageModelDir, File word2vecModelDir, Pattern filter) throws IOException {
     Language lang = Languages.getLanguageForShortCode(langCode);
     MultiThreadedJLanguageTool languageTool = new MultiThreadedJLanguageTool(lang);
     languageTool.setCleanOverlappingMatches(false);
     if (languageModelDir != null) {
       languageTool.activateLanguageModelRules(languageModelDir);
+    }
+    if (word2vecModelDir != null) {
+      languageTool.activateWord2VecModelRules(word2vecModelDir);
     }
     if (ruleIds != null) {
       enableOnlySpecifiedRules(ruleIds, languageTool);
@@ -244,7 +250,8 @@ public class SentenceSourceChecker {
     if (additionalCategoryIds != null) {
       for (String categoryId : additionalCategoryIds) {
         for (Rule rule : languageTool.getAllRules()) {
-          if (rule.getCategory().getName().equals(categoryId)) {
+          CategoryId id = rule.getCategory().getId();
+          if (id != null && id.toString().equals(categoryId)) {
             System.out.println("Activating " + rule.getId() + " in category " + categoryId);
             languageTool.enableRule(rule.getId());
           }

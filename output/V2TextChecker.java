@@ -38,8 +38,8 @@ class V2TextChecker extends TextChecker {
 
   private static final String JSON_CONTENT_TYPE = "application/json";
 
-  V2TextChecker(HTTPServerConfig config, boolean internalServer) {
-    super(config, internalServer);
+  V2TextChecker(HTTPServerConfig config, boolean internalServer, Queue<Runnable> workQueue) {
+    super(config, internalServer, workQueue);
   }
 
   @Override
@@ -48,9 +48,10 @@ class V2TextChecker extends TextChecker {
   }
 
   @Override
-  protected String getResponse(String text, Language lang, Language motherTongue, List<RuleMatch> matches) {
+  protected String getResponse(String text, Language lang, Language motherTongue, List<RuleMatch> matches,
+                               List<RuleMatch> hiddenMatches, String incompleteResultsReason) {
     RuleMatchesAsJsonSerializer serializer = new RuleMatchesAsJsonSerializer();
-    return serializer.ruleMatchesToJson(matches, text, CONTEXT_SIZE, lang);
+    return serializer.ruleMatchesToJson(matches, hiddenMatches, text, CONTEXT_SIZE, lang, incompleteResultsReason);
   }
 
   @NotNull
@@ -79,7 +80,7 @@ class V2TextChecker extends TextChecker {
   protected void checkParams(Map<String, String> parameters) {
     super.checkParams(parameters);
     if (StringTools.isEmpty(parameters.get("language"))) {
-      throw new IllegalArgumentException("Missing 'language' parameter");
+      throw new IllegalArgumentException("Missing 'language' parameter, e.g. 'language=en-US' for American English or 'language=fr' for French");
     }
     if (parameters.get("enabled") != null) {
       throw new IllegalArgumentException("You specified 'enabled' but the parameter is now called 'enabledRules' in v2 of the API");

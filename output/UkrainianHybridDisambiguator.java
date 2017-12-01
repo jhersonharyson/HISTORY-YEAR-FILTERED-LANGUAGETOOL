@@ -31,6 +31,7 @@ import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.language.Ukrainian;
 import org.languagetool.rules.uk.LemmaHelper;
+import org.languagetool.tagging.disambiguation.AbstractDisambiguator;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tagging.disambiguation.MultiWordChunker;
 import org.languagetool.tagging.disambiguation.rules.XmlRuleDisambiguator;
@@ -40,41 +41,47 @@ import org.languagetool.tagging.uk.PosTagHelper;
  * Hybrid chunker-disambiguator for Ukrainian.
  */
 
-public class UkrainianHybridDisambiguator implements Disambiguator {
+public class UkrainianHybridDisambiguator extends AbstractDisambiguator {
   private static final String LAST_NAME_TAG = ":lname";
   private static final Pattern INITIAL_REGEX = Pattern.compile("[А-ЯІЇЄҐ]\\.");
   private static final Pattern INANIM_VKLY = Pattern.compile("noun:inanim:.:v_kly.*");
   private static final Pattern PLURAL_NAME = Pattern.compile("noun:anim:p:.*:fname.*");
 //  private static final Pattern PLURAL_LNAME_OR_PATR = Pattern.compile("noun:anim:p:.*:lname.*");
-  private static final String PLURAL_LNAME = "noun:anim:p:.*:(lname|patr).*";
+  private static final String PLURAL_LNAME = "noun:anim:p:.*:[lp]name.*";
   
   private final Disambiguator chunker = new MultiWordChunker("/uk/multiwords.txt", true);
   private final Disambiguator disambiguator = new XmlRuleDisambiguator(new Ukrainian());
+  private final SimpleDisambiguator simpleDisambiguator = new SimpleDisambiguator();
 
+  
   /**
    * Calls two disambiguator classes: (1) a chunker; (2) a rule-based disambiguator.
    */
   @Override
   public final AnalyzedSentence disambiguate(AnalyzedSentence input) throws IOException {
-    firstPassDisambig(input);
+    preDisambiguate(input);
     
     return disambiguator.disambiguate(chunker.disambiguate(input));
   }
 
-  public void firstPassDisambig(AnalyzedSentence input) {
+  @Override
+  public AnalyzedSentence preDisambiguate(AnalyzedSentence input) {
     retagInitials(input);
-    removeIanimVKly(input);
+    removeInanimVKly(input);
     removePluralForNames(input);
+    simpleDisambiguator.removeRareForms(input);
+
+    return input;
   }
 
 
-  private void removeIanimVKly(AnalyzedSentence input) {
+  private void removeInanimVKly(AnalyzedSentence input) {
     AnalyzedTokenReadings[] tokens = input.getTokensWithoutWhitespace();
     for (int i = 1; i < tokens.length; i++) {
       List<AnalyzedToken> analyzedTokens = tokens[i].getReadings();
       
-      if( i < tokens.length -1 
-          && Arrays.asList(",", "!", "»").contains(tokens[i+1].getToken()) 
+      if( i < tokens.length -1
+          && Arrays.asList(",", "!", "»", "\u201C", "\u201D", "...").contains(tokens[i+1].getToken()) 
           && PosTagHelper.hasPosTag(tokens[i-1], "adj.*v_kly.*") )
         continue;
       
@@ -166,7 +173,7 @@ public class UkrainianHybridDisambiguator implements Disambiguator {
 
         int nextPos = i + 1 + spacedOffset;
         
-        // checking for :patr
+        // checking for :pname
         if( nextPos + 1 + spacedOffset < tokens.length
             && isInitial(tokens, nextPos)
             && (! spaced || isSpace(tokens[nextPos+1].getToken()) )
@@ -175,7 +182,7 @@ public class UkrainianHybridDisambiguator implements Disambiguator {
           int currPos = nextPos;
           nextPos += 1 + spacedOffset;
           
-          AnalyzedTokenReadings newReadings = getInitialReadings(tokens[currPos], tokens[nextPos], "patr");
+          AnalyzedTokenReadings newReadings = getInitialReadings(tokens[currPos], tokens[nextPos], "pname");
           tokens[currPos] = newReadings;
         }
         
@@ -208,6 +215,6 @@ public class UkrainianHybridDisambiguator implements Disambiguator {
   }
   
   private static boolean isSpace(String str) {
-    return str != null && (str.equals(" ") || str.equals("\u00A0"));
+    return str != null && (str.equals(" ") || str.equals("\u00A0")|| str.equals("\u202F"));
   }
 }

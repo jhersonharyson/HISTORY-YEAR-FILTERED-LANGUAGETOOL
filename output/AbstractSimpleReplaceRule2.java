@@ -184,7 +184,7 @@ public abstract class AbstractSimpleReplaceRule2 extends Rule {
           }
           int startPos = prevTokensList.get(len - crtWordCount).getStartPos();
           int endPos = prevTokensList.get(len - 1).getEndPos();
-          RuleMatch potentialRuleMatch = new RuleMatch(this, startPos, endPos, msg, getShort());
+          RuleMatch potentialRuleMatch = new RuleMatch(this, sentence, startPos, endPos, msg, getShort());
 
           if (!isCaseSensitive() && StringTools.startsWithUppercase(crt)) {
             for (int k = 0; k < replacements.size(); k++) {
@@ -198,10 +198,6 @@ public abstract class AbstractSimpleReplaceRule2 extends Rule {
       }
     }
     return toRuleMatchArray(ruleMatches);
-  }
-
-  @Override
-  public void reset() {
   }
 
 }

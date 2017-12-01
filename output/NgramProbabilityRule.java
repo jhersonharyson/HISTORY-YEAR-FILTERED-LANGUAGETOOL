@@ -142,7 +142,7 @@ public class NgramProbabilityRule extends Rule {
             Alternatives betterAlternatives = getBetterAlternatives(prevToken, token, next, googleToken, p, sentence);
             if (!betterAlternatives.alternativesConsidered || betterAlternatives.alternatives.size() > 0) {
               String message = "The phrase '" + ngram + "' rarely occurs in the reference corpus (" + p.getOccurrences() + " times)";
-              RuleMatch match = new RuleMatch(this, prevToken.startPos, next.endPos, message);
+              RuleMatch match = new RuleMatch(this, sentence, prevToken.startPos, next.endPos, message);
               List<String> suggestions = new ArrayList<>();
               for (Alternative betterAlternative : betterAlternatives.alternatives) {
                 suggestions.add(prevToken.token + " " + betterAlternative.token + " " + next.token);
@@ -248,10 +248,6 @@ public class NgramProbabilityRule extends Rule {
   @Override
   public String getDescription() {
     return "Assume errors for phrases (ngrams) that occur rarely in a reference index";
-  }
-
-  @Override
-  public void reset() {
   }
 
   protected Tokenizer getGoogleStyleWordTokenizer() {

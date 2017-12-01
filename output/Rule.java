@@ -55,6 +55,8 @@ public abstract class Rule {
   private Category category;
   private URL url;
   private boolean defaultOff;
+  private boolean officeDefaultOn = false;
+  private boolean officeDefaultOff = false;
 
   public Rule() {
     this(null);
@@ -68,7 +70,7 @@ public abstract class Rule {
     if (messages != null) {
       setCategory(Categories.MISC.getCategory(messages));  // the default, sub classes may overwrite this
     } else {
-      setCategory(new Category(CategoryIds.MISC, "Misc"));
+      setCategory(new Category(CategoryIds.MISC, "Miscellaneous"));
     }
   }
 
@@ -97,13 +99,6 @@ public abstract class Rule {
    * @return an array of {@link RuleMatch} objects
    */
   public abstract RuleMatch[] match(AnalyzedSentence sentence) throws IOException;
-
-  /**
-   * If a rule keeps its state over more than the check of one sentence, this
-   * must be implemented so the internal state is reset. It will be called
-   * before a new text is going to be checked.
-   */
-  public abstract void reset();
 
   /**
    * Overwrite this to avoid false alarms by ignoring these patterns -
@@ -268,6 +263,40 @@ public abstract class Rule {
    */
   public final void setDefaultOn() {
     defaultOff = false;
+  }
+  
+  /**
+   * Checks whether the rule has been turned off by default for Office Extension by the rule author.
+   * @return True if the rule is turned off. Overrides the default for LO/OO.
+   * @since 4.0
+  */
+  public final boolean isOfficeDefaultOff() {
+    return officeDefaultOff;
+  }
+
+  /**
+   * Checks whether the rule has been turned on by default for Office Extension by the rule author.
+   * @return True if the rule is turned on. Overrides the default for LO/OO.
+   * @since 4.0
+   */
+  public final boolean isOfficeDefaultOn() {
+    return officeDefaultOn;
+  }
+
+  /**
+   * Turns the rule off for Office Extension by default.
+   * @since 4.0
+   */
+  public final void setOfficeDefaultOff() {
+    officeDefaultOff = true;
+  }
+
+  /**
+   * Turns the rule on for Office Extension by default.
+   * @since 4.0
+   */
+  public final void setOfficeDefaultOn() {
+    officeDefaultOn = true;
   }
   
   /**

@@ -24,6 +24,7 @@ import org.languagetool.databroker.ResourceDataBroker;
 import org.languagetool.language.Contributor;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.rules.Rule;
+import org.languagetool.rules.neuralnetwork.Word2VecModel;
 import org.languagetool.rules.patterns.*;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.tagging.Tagger;
@@ -153,6 +154,25 @@ public abstract class Language {
    * @since 2.7
    */
   public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+    return Collections.emptyList();
+  }
+
+  /**
+   * @param indexDir directory with a subdirectories like 'en', each containing dictionary.txt and final_embeddings.txt
+   * @return a {@link Word2VecModel} or {@code null} if this language doesn't support one
+   * @since 4.0
+   */
+  @Nullable
+  public Word2VecModel getWord2VecModel(File indexDir) throws IOException {
+    return null;
+  }
+
+  /**
+   * Get a list of rules that require a {@link Word2VecModel}. Returns an empty list for
+   * languages that don't have such rules.
+   * @since 4.0
+   */
+  public List<Rule> getRelevantWord2VecModelRules(ResourceBundle messages, Word2VecModel word2vecModel) throws IOException {
     return Collections.emptyList();
   }
 
@@ -463,4 +483,19 @@ public abstract class Language {
     return 0;
   }
 
+  /**
+   * Considers languages as equal if their language code, including the country and variant codes are equal.
+   */
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Language other = (Language) o;
+    return Objects.equals(getShortCodeWithCountryAndVariant(), other.getShortCodeWithCountryAndVariant());
+  }
+
+  @Override
+  public int hashCode() {
+    return getShortCodeWithCountryAndVariant().hashCode();
+  }
 }

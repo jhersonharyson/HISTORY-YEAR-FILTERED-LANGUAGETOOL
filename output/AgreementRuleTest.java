@@ -38,12 +38,12 @@ import static org.junit.Assert.*;
 public class AgreementRuleTest {
 
   private AgreementRule rule;
-  private JLanguageTool langTool;
+  private JLanguageTool lt;
   
   @Before
   public void setUp() throws IOException {
     rule = new AgreementRule(TestTools.getMessages("de"), new GermanyGerman());
-    langTool = new JLanguageTool(new GermanyGerman());
+    lt = new JLanguageTool(new GermanyGerman());
   }
 
   @Test
@@ -82,6 +82,21 @@ public class AgreementRuleTest {
     assertGood("... wo es zu einer regen Bautätigkeit kam.");
     assertGood("Mancher ausscheidende Politiker hinterlässt eine Lücke.");
     assertGood("Kern einer jeden Tragödie ist es, ..");
+    assertGood("Das wenige Sekunden alte Baby schrie laut.");
+    assertGood("Meistens sind das Frauen, die damit besser umgehen können.");
+    assertGood("Er fragte, ob das Spaß macht.");
+    assertGood("Das viele Geld wird ihr helfen.");
+    assertGood("Er verspricht jedem hohe Gewinne.");
+    assertGood("Er versprach allen Renditen jenseits von 15 Prozent.");
+    assertGood("Sind das Eier aus Bodenhaltung?");
+    assertGood("Dir macht doch irgendwas Sorgen.");
+    assertGood("Sie fragte, ob das wirklich Kunst sei.");
+    assertGood("Für ihn ist das Alltag.");
+    assertGood("Für die Religiösen ist das Blasphemie.");
+    assertGood("Das ist ein super Tipp.");
+    assertGood("Er nahm allen Mut zusammen und ging los.");
+    assertGood("Sie kann einem Angst einjagen.");
+    assertGood("Damit sollten zum einen neue Energien gefördert werden, zum anderen der Sozialbereich.");
 
     assertGood("Das Dach von meinem Auto.");
     assertGood("Das Dach von meinen Autos.");
@@ -132,6 +147,13 @@ public class AgreementRuleTest {
     assertGood("Etwas, das einem Angst macht.");
     assertGood("Einem geschenkten Gaul schaut man nicht ins Maul.");
 
+    assertGood("Das erfordert Können.");
+    assertGood("Ist das Kunst?");
+    assertGood("Ist das Kunst oder Abfall?");
+    assertGood("Die Zeitdauer, während der Wissen nützlich bleibt, wird kürzer.");
+    assertGood("Es sollte nicht viele solcher Bilder geben");
+    assertGood("In den 80er Jahren.");
+
     // relative clauses:
     assertGood("Das Recht, das Frauen eingeräumt wird.");
     assertGood("Der Mann, in dem quadratische Fische schwammen.");
@@ -166,8 +188,22 @@ public class AgreementRuleTest {
     assertGood("Darf ich Ihren Füller für ein paar Minuten ausleihen?");
     assertGood("Bringen Sie diesen Gepäckaufkleber an Ihrem Gepäck an.");
     assertGood("Extras, die den Wert Ihres Autos erhöhen.");
+    assertGood("Er hat einen 34-jährigen Sohn.");
+    assertGood("Die Polizei erwischte die Diebin, weil diese Ausweis und Visitenkarte hinterließ.");
+    assertGood("Dieses Versäumnis soll vertuscht worden sein - es wurde Anzeige erstattet.");
+    assertGood("Die Firmen - nicht nur die ausländischen, auch die katalanischen - treibt diese Frage um.");
+    // TODO: assertGood("Der Obst und Getränke führende Fachmarkt.");
+    assertGood("Stell dich dem Leben lächelnd!");
+    assertGood("Die Messe wird auf das vor der Stadt liegende Ausstellungsgelände verlegt.");
+    assertGood("Sie sind ein den Frieden liebendes Volk.");
+    //assertGood("Zum Teil sind das Krebsvorstufen.");
+    assertGood("Er sagt, dass das Rache bedeutet.");
+    assertGood("Wenn das Kühe sind, bin ich ein Elefant.");
+    assertGood("Karl sagte, dass sie niemandem Bescheid gegeben habe.");
 
     // incorrect sentences:
+    assertBad("Meiner Chef raucht.");
+    assertBad("Er hat eine 34-jährigen Sohn.");
     assertBad("Es sind die Tisch.", "dem Tisch", "den Tisch", "der Tisch", "die Tische");
     assertBad("Es sind das Tisch.", "dem Tisch", "den Tisch", "der Tisch");
     assertBad("Es sind die Haus.", "das Haus", "dem Haus", "die Häuser");
@@ -224,6 +260,10 @@ public class AgreementRuleTest {
     //assertBad("Ich gebe dir das kleines Kaninchen.");  // already detected by ART_ADJ_SOL
     //assertBad("Ich gebe dir das klein Kaninchen.");  // already detected by MEIN_KLEIN_HAUS
     assertGood("Ich gebe dir das kleine Kaninchen.");
+    assertGood("Die Top 3 der Umfrage");
+    assertGood("Dein Vorschlag befindet sich unter meinen Top 5.");
+    assertGood("Unter diesen rief das großen Unmut hervor.");
+    assertGood("Bei mir löste das Panik aus.");
     
     assertBad("Hier steht Ihre Text.");
     assertBad("Hier steht ihre Text.");
@@ -237,7 +277,7 @@ public class AgreementRuleTest {
     //assertBad("Es ist das Haus dem Mann.");
     //assertBad("Das interessiert der Männer.");
     //assertBad("Das interessiert der Mann.");
-    //assertBad("Das gehört den Mann.");
+    //assertBad("Das gehört den Mann."); // detected by DEN_DEM
     //assertBad("Es sind der Frau.");
   }
 
@@ -302,17 +342,22 @@ public class AgreementRuleTest {
     assertBad("An der rote Ampel.");
     assertBad("An der rotes Ampel.");
     assertBad("An der rotem Ampel.");
+    assertBad("Er hatte ihn aus dem 1,4 Meter tiefem Wasser gezogen.");
+    assertBad("Er hatte ihn aus dem 1,4 Meter tiefem Wasser gezogen.");
+    assertBad("Er hatte eine sehr schweren Infektion.");
+    assertBad("Ein fast 5 Meter hohem Haus.");
+    assertBad("Ein fünf Meter hohem Haus.");
     // TODO: not yet detected:
     //assertBad("An der rot Ampel.");
   }
 
   private void assertGood(String s) throws IOException {
-    RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence(s));
+    RuleMatch[] matches = rule.match(lt.getAnalyzedSentence(s));
     assertEquals("Found unexpected match in sentence '" + s + "': " + Arrays.toString(matches), 0, matches.length);
   }
 
   private void assertBad(String s, String... expectedSuggestions) throws IOException {
-    RuleMatch[] matches = rule.match(langTool.getAnalyzedSentence(s));
+    RuleMatch[] matches = rule.match(lt.getAnalyzedSentence(s));
     assertEquals("Did not find one match in sentence '" + s + "'", 1, matches.length);
     if (expectedSuggestions.length > 0) {
       RuleMatch match = matches[0];
@@ -322,8 +367,8 @@ public class AgreementRuleTest {
   }
 
   private void assertBadWithMessage(String s, String expectedErrorSubstring) throws IOException {
-    assertEquals(1, rule.match(langTool.getAnalyzedSentence(s)).length);
-    String errorMessage = rule.match(langTool.getAnalyzedSentence(s))[0].getMessage();
+    assertEquals(1, rule.match(lt.getAnalyzedSentence(s)).length);
+    String errorMessage = rule.match(lt.getAnalyzedSentence(s))[0].getMessage();
     assertTrue("Got error '" + errorMessage + "', expected substring '" + expectedErrorSubstring + "'",
             errorMessage.contains(expectedErrorSubstring));
   }

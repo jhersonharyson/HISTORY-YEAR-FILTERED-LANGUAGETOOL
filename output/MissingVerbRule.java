@@ -40,7 +40,7 @@ import java.util.ResourceBundle;
  * "Und deine Schwester?", "Wie dumm von mir!", and book references like "Andreas Fecker: Fluglotsen."
  * @since 2.7
  */
-public class MissingVerbRule extends GermanRule {
+public class MissingVerbRule extends Rule {
 
   private static final int MIN_TOKENS_FOR_ERROR = 5;
 
@@ -97,7 +97,7 @@ public class MissingVerbRule extends GermanRule {
       i++;
     }
     if (!verbFound && lastToken != null && sentence.getTokensWithoutWhitespace().length >= MIN_TOKENS_FOR_ERROR) {
-      RuleMatch match = new RuleMatch(this, 0, lastToken.getStartPos() + lastToken.getToken().length(), "Dieser Satz scheint kein Verb zu enthalten");
+      RuleMatch match = new RuleMatch(this, sentence, 0, lastToken.getStartPos() + lastToken.getToken().length(), "Dieser Satz scheint kein Verb zu enthalten");
       return new RuleMatch[]{ match };
     }
     return new RuleMatch[0];
@@ -137,7 +137,4 @@ public class MissingVerbRule extends GermanRule {
     return false;
   }
 
-  @Override
-  public void reset() {
-  }
 }

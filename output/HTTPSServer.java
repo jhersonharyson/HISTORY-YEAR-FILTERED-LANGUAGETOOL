@@ -69,11 +69,15 @@ public class HTTPSServer extends Server {
       HttpsConfigurator configurator = getConfigurator(sslContext);
       ((HttpsServer)server).setHttpsConfigurator(configurator);
       RequestLimiter limiter = getRequestLimiterOrNull(config);
+      ErrorRequestLimiter errorLimiter = getErrorRequestLimiterOrNull(config);
       LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>();
-      httpHandler = new LanguageToolHttpHandler(config, allowedIps, runInternally, limiter, workQueue);
+      httpHandler = new LanguageToolHttpHandler(config, allowedIps, runInternally, limiter, errorLimiter, workQueue);
       server.createContext("/", httpHandler);
       executorService = getExecutorService(workQueue, config);
       server.setExecutor(executorService);
+      if (config.getWarmUp()) {
+        warmUp();
+      }
     } catch (BindException e) {
       ResourceBundle messages = JLanguageTool.getMessageBundle();
       String message = Tools.i18n(messages, "https_server_start_failed", host, Integer.toString(port));
