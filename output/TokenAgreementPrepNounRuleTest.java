@@ -83,9 +83,14 @@ public class TokenAgreementPrepNounRuleTest {
     assertEmptyMatch("зовсім не святкові товари Серед святкових товарів");
 
     assertEmptyMatch("при кому знайдено вогнепальну");
+    assertEmptyMatch("За його словами Україна – це країна...");
     
     assertEmptyMatch("славетних од цареві");
-    
+
+    assertEquals(1, rule.match(langTool.getAnalyzedSentence("що, незважаючи стислі терміни візиту")).length);
+    //TODO:
+//    assertEmptyMatch("залежно що вважати перемогою");
+
     //TODO: temporary until we have a better logic
     assertEmptyMatch("при їх опублікуванні");
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("при їх опублікування")).length);
@@ -97,6 +102,7 @@ public class TokenAgreementPrepNounRuleTest {
     assertEmptyMatch("до мінус сорока град");
     assertEmptyMatch("до мінус шістдесяти");
     assertEmptyMatch("через років 10");
+    assertEmptyMatch("через років зо два");
     assertEmptyMatch("на хвилин 9-10");
     assertEmptyMatch("співпрацювати із собі подібними");
     assertEmptyMatch("через усім відомі причини");

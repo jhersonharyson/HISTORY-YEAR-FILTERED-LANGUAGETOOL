@@ -41,8 +41,8 @@ public class HunspellRuleTest {
 
   @Test
   public void testRuleWithGerman() throws Exception {
-    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new GermanyGerman());
-    JLanguageTool langTool = new JLanguageTool(new German());
+    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new GermanyGerman(), null);
+    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
     commonGermanAsserts(rule, langTool);
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Der äußere Übeltäter.")).length);  // umlauts
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Der äussere Übeltäter.")).length);
@@ -65,8 +65,8 @@ public class HunspellRuleTest {
 
   @Test
   public void testRuleWithAustrianGerman() throws Exception {
-    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new AustrianGerman());
-    JLanguageTool langTool = new JLanguageTool(new German());
+    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new AustrianGerman(), null);
+    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
     commonGermanAsserts(rule, langTool);
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Der äußere Übeltäter.")).length);  // umlauts
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Der äussere Übeltäter.")).length);
@@ -74,8 +74,8 @@ public class HunspellRuleTest {
 
   @Test
   public void testRuleWithSwissGerman() throws Exception {
-    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new SwissGerman());
-    JLanguageTool langTool = new JLanguageTool(new German());
+    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new SwissGerman(), null);
+    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
     commonGermanAsserts(rule, langTool);
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Der äußere Übeltäter.")).length);  // ß not allowed in Swiss
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Der äussere Übeltäter.")).length);  // ss is used instead of ß

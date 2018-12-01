@@ -28,6 +28,7 @@ import org.languagetool.AnalyzedToken;
 import org.languagetool.tagging.BaseTagger;
 import org.languagetool.tagging.TaggedWord;
 import org.languagetool.tagging.WordTagger;
+import org.languagetool.tools.StringTools;
 
 /** 
  * Ukrainian part-of-speech tagger.
@@ -42,7 +43,7 @@ public class UkrainianTagger extends BaseTagger {
   
   private static final Pattern DATE = Pattern.compile("[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}");
   private static final Pattern TIME = Pattern.compile("([01]?[0-9]|2[0-3])[.:][0-5][0-9]");
-  private static final Pattern ALT_DASHES_IN_WORD = Pattern.compile("[а-яіїєґ0-9][\u2013][а-яіїєґ]", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+  private static final Pattern ALT_DASHES_IN_WORD = Pattern.compile("[а-яіїєґ0-9a-z]\u2013[а-яіїєґ]|[а-яіїєґ]\u2013[0-9]", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
   
   private final CompoundTagger compoundTagger = new CompoundTagger(this, wordTagger, conversionLocale);
 //  private BufferedWriter taggedDebugWriter;
@@ -76,9 +77,20 @@ public class UkrainianTagger extends BaseTagger {
       return additionalTaggedTokens;
     }
     
-    if ( word.indexOf('-') != -1 ) {
+    if ( word.indexOf('-') > 0 ) {
       List<AnalyzedToken> guessedCompoundTags = compoundTagger.guessCompoundTag(word);
       return guessedCompoundTags;
+    }
+        
+    return guessOtherTags(word);
+  }
+
+  private List<AnalyzedToken> guessOtherTags(String word) {
+    if( word.length() > 7
+        && StringTools.isCapitalizedWord(word)
+        && (word.endsWith("штрассе")
+        || word.endsWith("штрасе")) ) {
+      return PosTagHelper.generateTokensForNv(word, "f", ":prop");
     }
     
     return null;
@@ -97,34 +109,51 @@ public class UkrainianTagger extends BaseTagger {
 
         List<AnalyzedToken> newTokens = super.getAnalyzedTokens(newWord);
 
-        for (int i = 0; i < newTokens.size(); i++) {
-          AnalyzedToken analyzedToken = newTokens.get(i);
-          if( newWord.equals(analyzedToken.getToken()) ) {
-            String lemma = analyzedToken.getLemma();
-    // we probably want the original lemma
+        if( ! newTokens.get(0).hasNoTag() ) {
+          for (int i = 0; i < newTokens.size(); i++) {
+            AnalyzedToken analyzedToken = newTokens.get(i);
+            if( newWord.equals(analyzedToken.getToken()) ) {
+              String lemma = analyzedToken.getLemma();
+    // new lemma with regular dash allows rules to match
 //            if( lemma != null ) {
 //              lemma = lemma.replace('-', otherHyphen);
 //            }
-            AnalyzedToken newToken = new AnalyzedToken(word, analyzedToken.getPOSTag(), lemma);
-            newTokens.set(i, newToken);
+              AnalyzedToken newToken = new AnalyzedToken(word, analyzedToken.getPOSTag(), lemma);
+              newTokens.set(i, newToken);
+            }
           }
+
+          tokens = newTokens;
         }
-        
-        tokens = newTokens;
       }
       // try УКРАЇНА as Україна
       else if( StringUtils.isAllUpperCase(word) ) {
         String newWord = StringUtils.capitalize(StringUtils.lowerCase(word));
         List<AnalyzedToken> newTokens = super.getAnalyzedTokens(newWord);
 
-        for (int i = 0; i < newTokens.size(); i++) {
-          AnalyzedToken analyzedToken = newTokens.get(i);
-          String lemma = analyzedToken.getLemma();
-          AnalyzedToken newToken = new AnalyzedToken(word, analyzedToken.getPOSTag(), lemma);
-          newTokens.set(i, newToken);
-        }
+        if( ! newTokens.get(0).hasNoTag() ) {
+          for (int i = 0; i < newTokens.size(); i++) {
+            AnalyzedToken analyzedToken = newTokens.get(i);
+            String lemma = analyzedToken.getLemma();
+            AnalyzedToken newToken = new AnalyzedToken(word, analyzedToken.getPOSTag(), lemma);
+            newTokens.set(i, newToken);
+          }
 
-        tokens = newTokens;
+          tokens = newTokens;
+        }
+      }
+      else if( word.endsWith("м²") ||  word.endsWith("м³") ) {
+        tokens = super.getAnalyzedTokens(word.substring(0, word.length()-1));
+      }
+      // try г instead of ґ
+      else if( word.contains("ґ") ) {
+        tokens = convertTokens(tokens, word, "ґ", "г", ":alt");
+      }
+      else if( word.contains("ія") ) {
+        tokens = convertTokens(tokens, word, "ія", "іа", ":alt");
+      }
+      else if( word.endsWith("тер") ) {
+        tokens = convertTokens(tokens, word, "тер", "тр", ":alt");
       }
     }
 
@@ -133,6 +162,30 @@ public class UkrainianTagger extends BaseTagger {
 //    }
     
     return tokens;
+  }
+
+  private List<AnalyzedToken> convertTokens(List<AnalyzedToken> origTokens, String word, String str, String dictStr, String additionalTag) {
+    String newWord = word.replace(str, dictStr);
+    List<AnalyzedToken> newTokens = super.getAnalyzedTokens(newWord);
+
+    if( newTokens.get(0).hasNoTag() )
+        return origTokens;
+
+    for (int i = 0; i < newTokens.size(); i++) {
+      AnalyzedToken analyzedToken = newTokens.get(i);
+      String posTag = analyzedToken.getPOSTag();
+      if( ! PosTagHelper.hasPosTagPart(analyzedToken, additionalTag) ) {
+        posTag += additionalTag;
+      }
+      String lemma = analyzedToken.getLemma();
+      if( lemma != null ) {
+        lemma = lemma.replace(dictStr, str);
+      }
+      AnalyzedToken newToken = new AnalyzedToken(word, posTag, lemma);
+      newTokens.set(i, newToken);
+    }
+
+    return newTokens;
   }
 
   private static char getOtherHyphen(String word) {
@@ -147,6 +200,11 @@ public class UkrainianTagger extends BaseTagger {
 
   List<AnalyzedToken> asAnalyzedTokenListForTaggedWordsInternal(String word, List<TaggedWord> taggedWords) {
     return super.asAnalyzedTokenListForTaggedWords(word, taggedWords);
+  }
+  
+  // we need to expose this as some rules want to know if the word is in the dictionary
+  public WordTagger getWordTagger() {
+    return super.getWordTagger();
   }
   
 }

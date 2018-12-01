@@ -18,8 +18,11 @@
  */
 package org.languagetool.language;
 
+import org.languagetool.Language;
+import org.languagetool.UserConfig;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.de.SwissGermanSpellerRule;
+import org.languagetool.tagging.de.SwissGermanTagger;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -28,6 +31,10 @@ import java.util.ResourceBundle;
 
 @SuppressWarnings("deprecation")
 public class SwissGerman extends German {
+
+	public SwissGerman() {
+    super.tagger = new SwissGermanTagger();
+	}
 
   @Override
   public String[] getCountries() {
@@ -40,9 +47,9 @@ public class SwissGerman extends German {
   }
 
   @Override
-  public List<Rule> getRelevantRules(ResourceBundle messages) throws IOException {
-    List<Rule> rules = new ArrayList<>(super.getRelevantRules(messages));
-    rules.add(new SwissGermanSpellerRule(messages, this));
+  public List<Rule> getRelevantRules(ResourceBundle messages, UserConfig userConfig, List<Language> altLanguages) throws IOException {
+    List<Rule> rules = new ArrayList<>(super.getRelevantRules(messages, userConfig, altLanguages));
+    rules.add(new SwissGermanSpellerRule(messages, this, userConfig));
     return rules;
   }
   

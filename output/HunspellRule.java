@@ -27,19 +27,19 @@ import java.io.OutputStream;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Charsets;
 import com.google.common.io.Resources;
 
 import org.apache.commons.lang3.StringUtils;
-import org.languagetool.AnalyzedSentence;
-import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
+import org.languagetool.*;
 import org.languagetool.rules.Categories;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.spelling.SpellingCheckRule;
+import org.languagetool.tools.Tools;
 
 /**
  * A hunspell-based spellchecking-rule.
@@ -51,12 +51,20 @@ import org.languagetool.rules.spelling.SpellingCheckRule;
  */
 public class HunspellRule extends SpellingCheckRule {
 
+  private static final ConcurrentLinkedQueue<String> activeChecks = new ConcurrentLinkedQueue<>();
+  private final boolean monitorRules;
+
+  public static Queue<String> getActiveChecks() {
+    return activeChecks;
+  }
+
   public static final String RULE_ID = "HUNSPELL_RULE";
 
   protected boolean needsInit = true;
   protected Hunspell.Dictionary hunspellDict = null;
 
   private static final String NON_ALPHABETIC = "[^\\p{L}]";
+  protected static final String FILE_EXTENSION = ".dic";
 
   private static final String[] WHITESPACE_ARRAY = new String[20];
   static {
@@ -66,9 +74,20 @@ public class HunspellRule extends SpellingCheckRule {
   }
   protected Pattern nonWordPattern;
 
-  public HunspellRule(ResourceBundle messages, Language language) {
-    super(messages, language);
+  private final UserConfig userConfig;
+
+  public HunspellRule(ResourceBundle messages, Language language, UserConfig userConfig) {
+    this(messages, language, userConfig, Collections.emptyList());
+  }
+
+  /**
+   * @since 4.3
+   */
+   public HunspellRule(ResourceBundle messages, Language language, UserConfig userConfig, List<Language> altLanguages) {
+    super(messages, language, userConfig, altLanguages);
     super.setCategory(Categories.TYPOS.getCategory(messages));
+    this.userConfig = userConfig;
+    this.monitorRules = System.getProperty("monitorActiveRules") != null;
   }
 
   @Override
@@ -83,7 +102,7 @@ public class HunspellRule extends SpellingCheckRule {
 
   /**
    * Is the given token part of a hyphenated compound preceded by a quoted token (e.g., „Spiegel“-Magazin) 
-   * and should be treated as an ordinary hypenated compound (e.g., „Spiegel-Magazin“)
+   * and should be treated as an ordinary hyphenated compound (e.g., „Spiegel-Magazin“)
    */
   protected boolean isQuotedCompound (AnalyzedSentence analyzedSentence, int idx, String token) {
     return false;
@@ -99,53 +118,92 @@ public class HunspellRule extends SpellingCheckRule {
       // some languages might not have a dictionary, be silent about it
       return toRuleMatchArray(ruleMatches);
     }
-    String[] tokens = tokenizeText(getSentenceTextWithoutUrlsAndImmunizedTokens(sentence));
 
-    // starting with the first token to skip the zero-length START_SENT
-    int len = sentence.getTokens()[1].getStartPos();
-    for (int i = 0; i < tokens.length; i++) {
-      String word = tokens[i];
-      if (ignoreWord(Arrays.asList(tokens), i) || ignoreWord(word)) {
-        len += word.length() + 1;
-        continue;
+    String monitoringText = this.getClass().getName() + ":" + this.getId() + ":" + sentence.getText();
+    try {
+      if (monitorRules) {
+        activeChecks.add(monitoringText);
       }
-      if (isMisspelled(word)) {
-        RuleMatch ruleMatch = new RuleMatch(this, sentence,
+      String[] tokens = tokenizeText(getSentenceTextWithoutUrlsAndImmunizedTokens(sentence));
+
+      // starting with the first token to skip the zero-length START_SENT
+      int len = sentence.getTokens()[1].getStartPos();
+      for (int i = 0; i < tokens.length; i++) {
+        String word = tokens[i];
+        if ((ignoreWord(Arrays.asList(tokens), i) || ignoreWord(word)) && !isProhibited(removeTrailingDot(word))) {
+          len += word.length() + 1;
+          continue;
+        }
+        if (isMisspelled(word)) {
+          RuleMatch ruleMatch = new RuleMatch(this, sentence,
             len, len + word.length(),
             messages.getString("spelling"),
             messages.getString("desc_spelling_short"));
-        List<String> suggestions = getSuggestions(word);
-        List<String> additionalTopSuggestions = getAdditionalTopSuggestions(suggestions, word);
-        Collections.reverse(additionalTopSuggestions);
-        for (String additionalTopSuggestion : additionalTopSuggestions) {
-          if (!word.equals(additionalTopSuggestion)) {
-            suggestions.add(0, additionalTopSuggestion);
+          ruleMatch.setType(RuleMatch.Type.UnknownWord);
+          if (userConfig == null || userConfig.getMaxSpellingSuggestions() == 0 || ruleMatches.size() <= userConfig.getMaxSpellingSuggestions()) {
+            List<String> suggestions = getSuggestions(word);
+            List<String> additionalTopSuggestions = getAdditionalTopSuggestions(suggestions, word);
+            if (additionalTopSuggestions.size() == 0 && word.endsWith(".")) {
+              additionalTopSuggestions = getAdditionalTopSuggestions(suggestions, word.substring(0, word.length() - 1)).
+                stream().map(k -> k + ".").collect(Collectors.toList());
+            }
+            Collections.reverse(additionalTopSuggestions);
+            for (String additionalTopSuggestion : additionalTopSuggestions) {
+              if (!word.equals(additionalTopSuggestion)) {
+                suggestions.add(0, additionalTopSuggestion);
+              }
+            }
+            List<String> additionalSuggestions = getAdditionalSuggestions(suggestions, word);
+            for (String additionalSuggestion : additionalSuggestions) {
+              if (!word.equals(additionalSuggestion)) {
+                suggestions.addAll(additionalSuggestions);
+              }
+            }
+            Language acceptingLanguage = acceptedInAlternativeLanguage(word);
+            boolean isSpecialCase = word.matches(".+-[A-ZÖÄÜ].*");
+            if (acceptingLanguage != null && !isSpecialCase) {
+              // e.g. "Der Typ ist in UK echt famous" -> could be German 'famos'
+              ruleMatch = new RuleMatch(this, sentence,
+                len, len + word.length(),
+                Tools.i18n(messages, "accepted_in_alt_language", word, messages.getString(acceptingLanguage.getShortCode())));
+              ruleMatch.setType(RuleMatch.Type.Hint);
+            }
+            filterSuggestions(suggestions);
+            filterDupes(suggestions);
+            ruleMatch.setSuggestedReplacements(suggestions);
+          } else {
+            // limited to save CPU
+            ruleMatch.setSuggestedReplacement(messages.getString("too_many_errors"));
           }
+          ruleMatches.add(ruleMatch);
         }
-        List<String> additionalSuggestions = getAdditionalSuggestions(suggestions, word);
-        for (String additionalSuggestion : additionalSuggestions) {
-          if (!word.equals(additionalSuggestion)) {
-            suggestions.addAll(additionalSuggestions);
-          }
-        }
-        if (!suggestions.isEmpty()) {
-          filterSuggestions(suggestions);
-          filterDupes(suggestions);
-          ruleMatch.setSuggestedReplacements(suggestions);
-        }
-        ruleMatches.add(ruleMatch);
+        len += word.length() + 1;
       }
-      len += word.length() + 1;
+    } finally {
+      if (monitorRules) {
+        activeChecks.remove(monitoringText);
+      }
     }
     return toRuleMatchArray(ruleMatches);
   }
 
-  boolean isMisspelled(String word) {
-    boolean isAlphabetic = true;
-    if (word.length() == 1) { // hunspell dictionaries usually do not contain punctuation
-      isAlphabetic = Character.isAlphabetic(word.charAt(0));
+  /**
+   * @since public since 4.1
+   */
+  @Experimental
+  public boolean isMisspelled(String word) {
+    try {
+      if (needsInit) {
+        init();
+      }
+      boolean isAlphabetic = true;
+      if (word.length() == 1) { // hunspell dictionaries usually do not contain punctuation
+        isAlphabetic = Character.isAlphabetic(word.charAt(0));
+      }
+      return (isAlphabetic && !"--".equals(word) && hunspellDict.misspelled(word) && !ignoreWord(word)) || isProhibited(removeTrailingDot(word));
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
-    return (isAlphabetic && !"--".equals(word) && hunspellDict.misspelled(word)) || isProhibited(removeTrailingDot(word));
   }
   
   void filterDupes(List<String> words) {
@@ -183,12 +241,9 @@ public class HunspellRule extends SpellingCheckRule {
     AnalyzedTokenReadings[] sentenceTokens = getSentenceWithImmunization(sentence).getTokens();
     for (int i = 1; i < sentenceTokens.length; i++) {
       String token = sentenceTokens[i].getToken();
-      if (sentenceTokens[i].isImmunized() || isUrl(token) || isEMail(token) || sentenceTokens[i].isIgnoredBySpeller() || isQuotedCompound(sentence, i, token)) {
+      if (sentenceTokens[i].isImmunized() || sentenceTokens[i].isIgnoredBySpeller() || isUrl(token) || isEMail(token) || isQuotedCompound(sentence, i, token)) {
         if (isQuotedCompound(sentence, i, token)) {
-          int lastPos = sb.length()-1;
-          char lastChar = sb.charAt(lastPos);
-          sb.deleteCharAt(lastPos);
-          sb.append(token).append(lastChar);
+          sb.append(" ").append(token.substring(1));
         }
         // replace URLs and immunized tokens with whitespace to ignore them for spell checking:
         else if (token.length() < 20) {
@@ -220,17 +275,15 @@ public class HunspellRule extends SpellingCheckRule {
   @Override
   protected void init() throws IOException {
     super.init();
-    String langCountry;
+    String langCountry = language.getShortCode();
     if (language.getCountries().length > 0) {
-      langCountry = language.getShortCode() + "_" + language.getCountries()[0];
-    } else {
-      langCountry = language.getShortCode();
+      langCountry += "_" + language.getCountries()[0];
     }
     String shortDicPath = "/"
         + language.getShortCode()
         + "/hunspell/"
         + langCountry
-        + ".dic";
+        + FILE_EXTENSION;
     String wordChars = "";
     // set dictionary only if there are dictionary files:
     if (JLanguageTool.getDataBroker().resourceExists(shortDicPath)) {
@@ -239,7 +292,7 @@ public class HunspellRule extends SpellingCheckRule {
         hunspellDict = null;
       } else {
         hunspellDict = Hunspell.getInstance().getDictionary(path);
-        if (!"".equals(hunspellDict.getWordChars())) {
+        if (!hunspellDict.getWordChars().isEmpty()) {
           wordChars = "(?![" + hunspellDict.getWordChars().replace("-", "\\-") + "])";
         }
         addIgnoreWords();
@@ -251,6 +304,7 @@ public class HunspellRule extends SpellingCheckRule {
 
   private void addIgnoreWords() throws IOException {
     hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOL);
+    hunspellDict.addWord(SpellingCheckRule.LANGUAGETOOLER);
     URL ignoreUrl = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(getIgnoreFileName());
     List<String> ignoreLines = Resources.readLines(ignoreUrl, Charsets.UTF_8);
     for (String ignoreLine : ignoreLines) {
@@ -267,21 +321,24 @@ public class HunspellRule extends SpellingCheckRule {
     String dictionaryPath;
     //in the webstart, java EE or OSGi bundle version, we need to copy the files outside the jar
     //to the local temporary directory
-    if ("jar".equals(dictURL.getProtocol()) || "vfs".equals(dictURL.getProtocol()) || "bundle".equals(dictURL.getProtocol()) || "bundleresource".equals(dictURL.getProtocol())) {
+    if (StringUtils.equalsAny(dictURL.getProtocol(), "jar", "vfs", "bundle", "bundleresource")) {
       File tempDir = new File(System.getProperty("java.io.tmpdir"));
-      File tempDicFile = new File(tempDir, dicName + ".dic");
+      File tempDicFile = new File(tempDir, dicName + FILE_EXTENSION);
       JLanguageTool.addTemporaryFile(tempDicFile);
       try (InputStream dicStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(originalPath)) {
         fileCopy(dicStream, tempDicFile);
       }
       File tempAffFile = new File(tempDir, dicName + ".aff");
       JLanguageTool.addTemporaryFile(tempAffFile);
-      try (InputStream affStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(originalPath.replaceFirst(".dic$", ".aff"))) {
+      if (originalPath.endsWith(FILE_EXTENSION)) {
+        originalPath = originalPath.substring(0, originalPath.length() - FILE_EXTENSION.length()) + ".aff";
+      }
+      try (InputStream affStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(originalPath)) {
         fileCopy(affStream, tempAffFile);
       }
       dictionaryPath = tempDir.getAbsolutePath() + "/" + dicName;
     } else {
-      int suffixLength = ".dic".length();
+      int suffixLength = FILE_EXTENSION.length();
       try {
         dictionaryPath = new File(dictURL.toURI()).getAbsolutePath();
         dictionaryPath = dictionaryPath.substring(0, dictionaryPath.length() - suffixLength);
@@ -302,5 +359,5 @@ public class HunspellRule extends SpellingCheckRule {
       in.close();
     }
   }
-
+  
 }
