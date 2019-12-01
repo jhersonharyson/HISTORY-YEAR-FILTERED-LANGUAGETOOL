@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
 
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
+import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.UserConfig;
 import org.languagetool.rules.spelling.morfologik.MorfologikSpellerRule;
@@ -41,6 +42,7 @@ public final class MorfologikCatalanSpellerRule extends MorfologikSpellerRule {
   private static final String SPELLING_FILE = "/ca/spelling.txt";
   
   private static final Pattern PARTICULA_INICIAL = Pattern.compile("^(els?|als?|pels?|dels?|de|per|uns?|una|unes|la|les|[tms]eus?) (..+)$",Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
+  private static final Pattern PREFIX_AMB_ESPAI = Pattern.compile("^(avant|auto|ex|extra|macro|mega|meta|micro|multi|mono|mini|post|retro|semi|super|trans) (..+)$",Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
   
   private static final Pattern APOSTROF_INICI_VERBS = Pattern.compile("^([lnmts])(h?[aeiouàéèíòóú].*)$",Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
   private static final Pattern APOSTROF_INICI_NOM_SING = Pattern.compile("^([ld])(h?[aeiouàéèíòóú].+)$",Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
@@ -57,7 +59,7 @@ public final class MorfologikCatalanSpellerRule extends MorfologikSpellerRule {
     super(messages, language, userConfig, altLanguages);
     this.setIgnoreTaggedWords();
     tagger = new CatalanTagger(language);
-    dictFilename = "/ca/" + language.getShortCodeWithCountryAndVariant() + ".dict";
+    dictFilename = "/ca/" + language.getShortCodeWithCountryAndVariant() + JLanguageTool.DICTIONARY_FILENAME_EXTENSION;
   }
 
   @Override
@@ -86,10 +88,13 @@ public final class MorfologikCatalanSpellerRule extends MorfologikSpellerRule {
     //move some run-on-words suggestions to the top
     List<String> newSuggestions = new ArrayList<>();
     for (String suggestion : suggestions) {
-      if (PARTICULA_INICIAL.matcher(suggestion).matches()) {
-        newSuggestions.add(0, suggestion);
-      } else {
-        newSuggestions.add(suggestion);
+      //remove wrong split prefixes
+      if (!PREFIX_AMB_ESPAI.matcher(suggestion).matches()) {
+        if (PARTICULA_INICIAL.matcher(suggestion).matches()) {
+          newSuggestions.add(0, suggestion);
+        } else {
+          newSuggestions.add(suggestion);
+        }
       }
     }
     return newSuggestions;

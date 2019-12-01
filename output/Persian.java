@@ -1,5 +1,5 @@
 /* LanguageTool, a natural language style checker 
- * Copyright (C) 2014 Daniel Naber (http://www.danielnaber.de)
+ * Copyright (C) 2019 Daniel Naber (http://www.danielnaber.de)
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -55,7 +55,7 @@ public class Persian extends Language {
   public String[] getCountries() {
     return new String[]{"IR", "AF"};
   }
-  
+
   @Override
   public SentenceTokenizer getSentenceTokenizer() {
     if (sentenceTokenizer == null) {
@@ -82,7 +82,7 @@ public class Persian extends Language {
   }
 
   @Override
-  public List<Rule> getRelevantRules(ResourceBundle messages, UserConfig userConfig, List<Language> altLanguages) throws IOException {
+  public List<Rule> getRelevantRules(ResourceBundle messages, UserConfig userConfig, Language motherTongue, List<Language> altLanguages) throws IOException {
     return Arrays.asList(
         new CommaWhitespaceRule(messages),
         new DoublePunctuationRule(messages),

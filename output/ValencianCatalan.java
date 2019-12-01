@@ -71,7 +71,7 @@ public class ValencianCatalan extends Catalan {
   }
   
   @Override
-  public List<Rule> getRelevantRules(ResourceBundle messages, UserConfig userConfig, List<Language> altLanguages) throws IOException {
+  public List<Rule> getRelevantRules(ResourceBundle messages, UserConfig userConfig, Language motherTongue, List<Language> altLanguages) throws IOException {
     return Arrays.asList(
             new CommaWhitespaceRule(messages, 
                 Example.wrong("A parer seu<marker> ,</marker> no era veritat."),
@@ -108,18 +108,15 @@ public class ValencianCatalan extends Catalan {
 
   @Override
   public List<String> getDefaultEnabledRulesForVariant() {
-    List<String> rules = Arrays.asList("EXIGEIX_VERBS_VALENCIANS",
-        "EXIGEIX_ACCENTUACIO_VALENCIANA", "EXIGEIX_POSSESSIUS_U",
-        "EXIGEIX_VERBS_EIX", "EXIGEIX_VERBS_ISC", "PER_PER_A_INFINITIU");
+    List<String> rules = Arrays.asList("EXIGEIX_VERBS_VALENCIANS", "EXIGEIX_ACCENTUACIO_VALENCIANA",
+        "EXIGEIX_POSSESSIUS_U", "EXIGEIX_VERBS_EIX", "EXIGEIX_VERBS_ISC", "PER_PER_A_INFINITIU", "FINS_EL_AVL");
     return Collections.unmodifiableList(rules);
   }
 
   @Override
   public List<String> getDefaultDisabledRulesForVariant() {
-    List<String> rules = Arrays.asList("EXIGEIX_VERBS_CENTRAL",
-        "EXIGEIX_ACCENTUACIO_GENERAL", "EXIGEIX_POSSESSIUS_V",
-        "EVITA_PRONOMS_VALENCIANS", "EVITA_DEMOSTRATIUS_EIXE", "VOCABULARI_VALENCIA",
-        "EXIGEIX_US");
+    List<String> rules = Arrays.asList("EXIGEIX_VERBS_CENTRAL", "EXIGEIX_ACCENTUACIO_GENERAL", "EXIGEIX_POSSESSIUS_V",
+        "EVITA_PRONOMS_VALENCIANS", "EVITA_DEMOSTRATIUS_EIXE", "VOCABULARI_VALENCIA", "EXIGEIX_US", "FINS_EL_GENERAL");
     return Collections.unmodifiableList(rules);
   }
   

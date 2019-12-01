@@ -41,12 +41,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * Matches a pattern rule against text.
  */
 final public class PatternRuleMatcher extends AbstractPatternRulePerformer implements RuleMatcher {
+
+  public static final String MISTAKE = "<mistake/>";
+
   private static final Map<String,Integer> currentlyActiveRules = new ConcurrentHashMap<>();
 
   //private static final Logger logger = LoggerFactory.getLogger(PatternRuleMatcher.class);
   private static final String SUGGESTION_START_TAG = "<suggestion>";
   private static final String SUGGESTION_END_TAG = "</suggestion>";
-  private static final String MISTAKE = "<mistake/>";
 
   private final boolean useList;
   private final List<PatternTokenMatcher> patternTokenMatchers;
@@ -75,7 +77,8 @@ final public class PatternRuleMatcher extends AbstractPatternRulePerformer imple
       currentlyActiveRules.compute(key, (k, v) -> v == null ? 1 : v + 1);
     }
     try {
-      AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
+      boolean isPreDisambigMatch = rule instanceof PatternRule && ((PatternRule)rule).isInterpretPosTagsPreDisambiguation();
+      AnalyzedTokenReadings[] tokens = isPreDisambigMatch ? sentence.getPreDisambigTokensWithoutWhitespace() : sentence.getTokensWithoutWhitespace();
       List<Integer> tokenPositions = new ArrayList<>(tokens.length + 1);
       int patternSize = patternTokenMatchers.size();
       int limit = Math.max(0, tokens.length - patternSize + 1);
@@ -170,7 +173,7 @@ final public class PatternRuleMatcher extends AbstractPatternRulePerformer imple
       if (runTime > slowMatchThreshold) {
         logger.warn("Slow match for rule " + rule.getFullId() + ": " + runTime + "ms, sentence len: " + sentence.getText().length() + " (threshold: " + slowMatchThreshold + "ms)");
       }
-    }*/return filteredMatches.toArray(new RuleMatch[filteredMatches.size()]);
+    }*/return filteredMatches.toArray(new RuleMatch[0]);
     } finally {
       if (monitorRules) {
         currentlyActiveRules.computeIfPresent(key, (k, v) -> v - 1 > 0 ? v - 1 : null);
@@ -243,7 +246,7 @@ final public class PatternRuleMatcher extends AbstractPatternRulePerformer imple
         if (rule.getFilter() != null) {
           RuleFilterEvaluator evaluator = new RuleFilterEvaluator(rule.getFilter());
           AnalyzedTokenReadings[] patternTokens = Arrays.copyOfRange(tokens, firstMatchToken, lastMatchToken + 1);
-          return evaluator.runFilter(rule.getFilterArguments(), ruleMatch, patternTokens, tokenPositions);
+          return evaluator.runFilter(rule.getFilterArguments(), ruleMatch, patternTokens, firstMatchToken, tokenPositions);
         } else {
           return ruleMatch; 
         }
@@ -352,8 +355,8 @@ final public class PatternRuleMatcher extends AbstractPatternRulePerformer imple
             String rightSide = errorMessage.substring(backslashPos + numLen);
             if (matches.length == 1) {
               // if we removed optional token from suggestion then remove leading space from the next word
-              if (matches[0].isEmpty() && (leftSide.endsWith(" ") || leftSide.endsWith("suggestion>")) && rightSide.startsWith(" ")) {
-                errorMessage = leftSide + rightSide.substring(1);
+              if (matches[0].isEmpty() ) {
+                errorMessage = concatWithoutExtraSpace(leftSide, rightSide);
                 errorMessageProcessed = leftSide.length();
               } else {
                 errorMessage = leftSide + matches[0] + rightSide;
@@ -388,6 +391,17 @@ final public class PatternRuleMatcher extends AbstractPatternRulePerformer imple
       }
     }
     return errorMessage;
+  }
+
+  private static String concatWithoutExtraSpace(String leftSide, String rightSide) {
+    // can't do \\p{Punct} as it catches \2 placeholder
+    if( leftSide.endsWith(" ") && rightSide.matches("[\\s,:;.!?].*") ) {
+      return leftSide.substring(0, leftSide.length()-1) + rightSide;
+    }
+    if( leftSide.endsWith("suggestion>") && rightSide.startsWith(" ") ) {
+      return leftSide + rightSide.substring(1);
+    }
+    return leftSide + rightSide;
   }
 
   // non-private for tests
@@ -506,7 +520,7 @@ final public class PatternRuleMatcher extends AbstractPatternRulePerformer imple
         outputList.addAll(Arrays.asList(sList));
       }
     }
-    return outputList.toArray(new String[outputList.size()]);
+    return outputList.toArray(new String[0]);
   }
 
 }

@@ -21,12 +21,14 @@ package org.languagetool.openoffice;
 import org.jetbrains.annotations.Nullable;
 
 import com.sun.star.awt.XMenuBar;
+import com.sun.star.awt.XPopupMenu;
 import com.sun.star.beans.XPropertySet;
 import com.sun.star.frame.XDesktop;
 import com.sun.star.frame.XFrame;
 import com.sun.star.frame.XLayoutManager;
 import com.sun.star.lang.XComponent;
 import com.sun.star.lang.XMultiComponentFactory;
+import com.sun.star.text.XTextDocument;
 import com.sun.star.ui.XUIElement;
 import com.sun.star.uno.UnoRuntime;
 import com.sun.star.uno.XComponentContext;
@@ -36,7 +38,7 @@ import com.sun.star.uno.XComponentContext;
  * @since 4.3
  * @author Fred Kruse
  */
-public class OfficeTools {
+class OfficeTools {
   
   private static final String MENU_BAR = "private:resource/menubar/menubar";
 
@@ -45,7 +47,7 @@ public class OfficeTools {
    * Returns null if it fails
    */
   @Nullable
-  public static XDesktop getCurrentDesktop(XComponentContext xContext) {
+  static XDesktop getCurrentDesktop(XComponentContext xContext) {
     try {
       if (xContext == null) {
         return null;
@@ -71,7 +73,7 @@ public class OfficeTools {
    * Returns null if it fails
    */
   @Nullable
-  public static XComponent getCurrentComponent(XComponentContext xContext) {
+  static XComponent getCurrentComponent(XComponentContext xContext) {
     try {
       XDesktop xdesktop = getCurrentDesktop(xContext);
       if(xdesktop == null) {
@@ -84,7 +86,25 @@ public class OfficeTools {
     }
   }
     
-  public static XMenuBar getMenuBar(XComponentContext xContext) {
+  /**
+   * Returns the current text document (if any) 
+   * Returns null if it fails
+   */
+  @Nullable
+  static XTextDocument getCurrentDocument(XComponentContext xContext) {
+    try {
+      XComponent curComp = getCurrentComponent(xContext);
+      if (curComp == null) {
+        return null;
+      }
+      else return UnoRuntime.queryInterface(XTextDocument.class, curComp);
+    } catch (Throwable t) {
+      MessageHandler.printException(t);     // all Exceptions thrown by UnoRuntime.queryInterface are caught
+      return null;           // Return null as method failed
+    }
+  }
+
+  static XMenuBar getMenuBar(XComponentContext xContext) {
     try {
       XDesktop desktop = OfficeTools.getCurrentDesktop(xContext);
       if (desktop == null) {
@@ -111,6 +131,30 @@ public class OfficeTools {
     return null;
   }
   
-
+  /**
+   * Returns a empty Popup Menu 
+   * Returns null if it fails
+   */
+  @Nullable
+  static XPopupMenu getPopupMenu(XComponentContext xContext) {
+    try {
+      if (xContext == null) {
+        return null;
+      }
+      XMultiComponentFactory xMCF = UnoRuntime.queryInterface(XMultiComponentFactory.class,
+              xContext.getServiceManager());
+      if (xMCF == null) {
+        return null;
+      }
+      Object oPopupMenu = xMCF.createInstanceWithContext("com.sun.star.awt.PopupMenu", xContext);
+      if (oPopupMenu == null) {
+        return null;
+      }
+      return UnoRuntime.queryInterface(XPopupMenu.class, oPopupMenu);
+    } catch (Throwable t) {
+      MessageHandler.printException(t);     // all Exceptions thrown by UnoRuntime.queryInterface are caught
+      return null;           // Return null as method failed
+    }
+  }
 
 }

@@ -46,7 +46,7 @@ import org.languagetool.tagging.ca.CatalanTagger;
  */
 public class SimpleReplaceVerbsRule extends AbstractSimpleReplaceRule {
   
-  private static final Map<String, List<String>> wrongWords = load("/ca/replace_verbs.txt");
+  private static final Map<String, List<String>> wrongWords = loadFromPath("/ca/replace_verbs.txt");
   private static final Locale CA_LOCALE = new Locale("CA");
 
   @Override
@@ -165,8 +165,11 @@ public class SimpleReplaceVerbsRule extends AbstractSimpleReplaceRule {
                 "V.*", parts[0]);
             for (AnalyzedToken analyzedToken : analyzedTokenReadings) {
               try {
-                synthesized = synth.synthesize(infinitiveAsAnTkn,
-                    analyzedToken.getPOSTag());
+                String POSTag = analyzedToken.getPOSTag();
+                if (infinitiveAsAnTkn.getLemma().equals("haver")) {
+                  POSTag = "VA" + POSTag.substring(2);
+                }
+                synthesized = synth.synthesize(infinitiveAsAnTkn, POSTag);
               } catch (IOException e) {
                 throw new RuntimeException("Could not synthesize: "
                     + infinitiveAsAnTkn + " with tag "

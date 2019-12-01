@@ -20,10 +20,11 @@ package org.languagetool.rules.de;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.ResourceBundle;
-import java.util.regex.Pattern;
 
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedToken;
@@ -37,6 +38,9 @@ import org.languagetool.rules.Example;
 import org.languagetool.rules.ITSIssueType;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.patterns.PatternToken;
+import org.languagetool.rules.patterns.PatternTokenBuilder;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.languagetool.tools.Tools;
 
 import morfologik.speller.Speller;
@@ -49,14 +53,28 @@ import morfologik.stemming.Dictionary;
  * @since 4.4
  */
 public class CompoundInfinitivRule extends Rule {
-
-  private static final Pattern MARK_REGEX = Pattern.compile("[.?!…:;,()\\[\\]]");
   
   private static Dictionary dict;
   
   private final LinguServices linguServices;
-  private final Speller speller;
+  private Speller speller = null;
   private final Language lang;
+
+  private static final List<List<PatternToken>> ANTI_PATTERNS = Arrays.asList(
+    //
+    // NOTE: antipatterns only work when they cover "zu":
+    //
+    Arrays.asList(
+      token("auf"),
+      token("Nummer"),
+      token("sicher"),
+      token("zu")
+    )
+  );
+
+  private static PatternToken token(String s) {
+    return new PatternTokenBuilder().token(s).build();
+  }
 
   public CompoundInfinitivRule(ResourceBundle messages, Language lang, UserConfig userConfig) throws IOException {
     super.setCategory(Categories.COMPOUNDING.getCategory(messages));
@@ -69,16 +87,11 @@ public class CompoundInfinitivRule extends Rule {
     } else {
       linguServices = null;
     }
-    if (linguServices == null) {
-      speller = new Speller(getDictionary());
-    } else {
-      speller = null;
-    }
     setUrl(Tools.getUrl("https://www.duden.de/sprachwissen/sprachratgeber/Infinitiv-mit-zu"));
   }
 
   @NotNull
-  private Dictionary getDictionary() throws IOException {
+  private static Dictionary getDictionary() throws IOException {
     if (dict == null) {
       // Dictionary is thread-safe, so we can re-use it (https://github.com/morfologik/morfologik-stemming/issues/69)
       dict = Dictionary.read(JLanguageTool.getDataBroker().getFromResourceDirAsUrl("/de/hunspell/de_DE.dict"));
@@ -110,7 +123,7 @@ public class CompoundInfinitivRule extends Rule {
   }
 
   private boolean isRelevant(AnalyzedTokenReadings token) {
-    return token.hasPosTag("ZUS") && !"um".equals(token.getToken().toLowerCase());
+    return token.hasPosTag("ZUS") && !"um".equalsIgnoreCase(token.getToken());
   }
 
   private String getLemma(AnalyzedTokenReadings token) {
@@ -148,9 +161,9 @@ public class CompoundInfinitivRule extends Rule {
       return true;
     }
     String verb = null;
-    for (int i = n - 2; i > 0 && !MARK_REGEX.matcher(tokens[i].getToken()).matches() && verb == null; i--) {
+    for (int i = n - 2; i > 0 && !isPunctuation(tokens[i].getToken()) && verb == null; i--) {
       if (tokens[i].hasPosTagStartingWith("VER:IMP")) {
-        verb = getLemma(tokens[i]).toLowerCase();
+        verb = StringUtils.lowerCase(getLemma(tokens[i]));
       } else if (tokens[i].hasPosTagStartingWith("VER")) {
         verb = tokens[i].getToken().toLowerCase();
       } else if ("Fang".equals(tokens[i].getToken())) {
@@ -165,14 +178,14 @@ public class CompoundInfinitivRule extends Rule {
       }
     }
     if ("aus".equals(tokens[n - 1].getToken()) || "an".equals(tokens[n - 1].getToken())) {
-      for (int i = n - 2; i > 0 && !MARK_REGEX.matcher(tokens[i].getToken()).matches(); i--) {
+      for (int i = n - 2; i > 0 && !isPunctuation(tokens[i].getToken()); i--) {
         if ("von".equals(tokens[i].getToken()) || "vom".equals(tokens[i].getToken())) {
           return true;
         }
       }
     }
     if ("her".equals(tokens[n - 1].getToken())) {
-      for (int i = n - 2; i > 0 && !MARK_REGEX.matcher(tokens[i].getToken()).matches(); i--) {
+      for (int i = n - 2; i > 0 && !isPunctuation(tokens[i].getToken()); i--) {
         if ("vor".equals(tokens[i].getToken())) {
           return true;
         }
@@ -182,23 +195,41 @@ public class CompoundInfinitivRule extends Rule {
   }
 
   @Override
+  public List<DisambiguationPatternRule> getAntiPatterns() {
+    return makeAntiPatterns(ANTI_PATTERNS, lang);
+  }
+
+  @Override
   public RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
+    if (linguServices == null && speller == null) {
+      // speller can not initialized by constructor because of temporary initialization of LanguageTool in other rules,
+      // which leads to problems in LO/OO extension
+      speller = new Speller(getDictionary());
+    }
     List<RuleMatch> ruleMatches = new ArrayList<>();
-    AnalyzedTokenReadings[] tokens = sentence.getTokensWithoutWhitespace();
+    AnalyzedTokenReadings[] tokens = getSentenceWithImmunization(sentence).getTokensWithoutWhitespace();
     for (int i = 2; i < tokens.length - 1; i++) {
-      if ("zu".equals(tokens[i].getToken()) && isInfinitiv(tokens[i + 1])) {
-        if (isRelevant(tokens[i - 1]) && !isException(tokens, i) && !isMisspelled(tokens[i - 1].getToken() + tokens[i + 1].getToken())) {
-          String msg = "Wenn der erweiterte Infinitv von dem Verb '" + tokens[i - 1].getToken() + tokens[i + 1].getToken()
-                  + "' abgeleitet ist, muss er zusammengeschrieben werden";
-          RuleMatch ruleMatch = new RuleMatch(this, tokens[i - 1].getStartPos(), tokens[i + 1].getEndPos(), msg);
-          List<String> suggestions = new ArrayList<>();
-          suggestions.add(tokens[i - 1].getToken() + tokens[i].getToken() + tokens[i + 1].getToken());
-          ruleMatch.setSuggestedReplacements(suggestions);
-          ruleMatches.add(ruleMatch);
-        }
+      if ("zu".equals(tokens[i].getToken())
+        && isInfinitiv(tokens[i + 1])
+        && isRelevant(tokens[i - 1])
+        && !tokens[i].isImmunized()
+        && !isException(tokens, i)
+        && !isMisspelled(tokens[i - 1].getToken() + tokens[i + 1].getToken())) {
+        String msg = "Wenn der erweiterte Infinitv von dem Verb '" + tokens[i - 1].getToken() + tokens[i + 1].getToken()
+                   + "' abgeleitet ist, muss er zusammengeschrieben werden";
+        RuleMatch ruleMatch = new RuleMatch(this, sentence, tokens[i - 1].getStartPos(), tokens[i + 1].getEndPos(), msg);
+        List<String> suggestions = new ArrayList<>();
+        suggestions.add(tokens[i - 1].getToken() + tokens[i].getToken() + tokens[i + 1].getToken());
+        ruleMatch.setSuggestedReplacements(suggestions);
+        ruleMatches.add(ruleMatch);
       }
     }
     return toRuleMatchArray(ruleMatches);
   }
 
+  private boolean isPunctuation(String word) {
+    return word != null
+           && word.length() == 1
+           && StringUtils.equalsAny(word, ".", "?", "!", "…", ":", ";", ",", "(", ")", "[", "]");
+  }
 }

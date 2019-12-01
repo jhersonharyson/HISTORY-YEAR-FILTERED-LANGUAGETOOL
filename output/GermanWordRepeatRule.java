@@ -18,6 +18,8 @@
  */
 package org.languagetool.rules.de;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.ResourceBundle;
 
 import org.languagetool.AnalyzedTokenReadings;
@@ -25,20 +27,65 @@ import org.languagetool.Language;
 import org.languagetool.rules.Categories;
 import org.languagetool.rules.Example;
 import org.languagetool.rules.WordRepeatRule;
+import org.languagetool.rules.patterns.PatternToken;
+import org.languagetool.rules.patterns.PatternTokenBuilder;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
+
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.*;
 
 /**
- * Check if a word is repeated twice, taking into account an exception 
+ * Check if a word is repeated twice, taking into account an exception
  * for German where e.g. "..., die die ..." is often okay.
- *   
+ *
  * @author Daniel Naber
  */
 public class GermanWordRepeatRule extends WordRepeatRule {
+
+  private final Language GERMAN;
+  private static final List<List<PatternToken>> ANTI_PATTERNS = Arrays.asList(
+    Arrays.asList(
+      csToken("Bora"),
+      csToken("Bora")
+    ),
+    Arrays.asList(
+      token("Moin"),
+      token("Moin")
+    ),
+    Arrays.asList(
+      token("Na"),
+      token("na")
+    ),
+    Arrays.asList(
+      token("ha"),
+      token("ha")
+    ),
+    Arrays.asList( // Phi Phi Islands
+      token("Phi"),
+      token("Phi")
+    ),
+    Arrays.asList(// "wie Honda und Samsung, die die Bezahlung ihrer Firmenchefs..."
+      csToken(","),
+      new PatternTokenBuilder().csToken("der").matchInflectedForms().build(),
+      new PatternTokenBuilder().csToken("der").matchInflectedForms().build()
+    ),
+    Arrays.asList(// "Das Haus, in das das Kind läuft."
+      csToken(","),
+      posRegex("PRP:.+"),
+      new PatternTokenBuilder().csToken("der").matchInflectedForms().build(),
+      new PatternTokenBuilder().csToken("der").matchInflectedForms().build()
+    ),
+    Arrays.asList(// "Er will sein Leben leben"
+      csToken("Leben"),
+      csToken("leben")
+    )
+  );
 
   public GermanWordRepeatRule(ResourceBundle messages, Language language) {
     super(messages, language);
     super.setCategory(Categories.REDUNDANCY.getCategory(messages));
     addExamplePair(Example.wrong("In diesem Satz <marker>ist ist</marker> ein Wort doppelt."),
                    Example.fixed("In diesem Satz <marker>ist</marker> ein Wort doppelt."));
+    this.GERMAN = language;
   }
 
   @Override
@@ -48,20 +95,9 @@ public class GermanWordRepeatRule extends WordRepeatRule {
 
   @Override
   public boolean ignore(AnalyzedTokenReadings[] tokens, int position) {
-    // Don't mark error for cases like:
-    // "wie Honda und Samsung, die die Bezahlung ihrer Firmenchefs..."
-    // "Das Haus, in das das Kind läuft."
-    if (tokens[position - 1].getToken().length() == 3 && tokens[position - 1].getToken().charAt(0) == 'd') {
-      return ((position >= 2 && ",".equals(tokens[position - 2].getToken()))
-           || (position >= 3 && ",".equals(tokens[position - 3].getToken()) && isPreposition(tokens[position - 2])));
-    }
     // "Warum fragen Sie sie nicht selbst?"
     if (position != 2 && tokens[position - 1].getToken().equals("Sie") && tokens[position].getToken().equals("sie") ||
         tokens[position - 1].getToken().equals("sie") && tokens[position].getToken().equals("Sie")) {
-      return true;
-    }
-    // "Er will nur sein Leben leben."
-    if (position > 0 && tokens[position - 1].getToken().equals("Leben") && tokens[position].getToken().equals("leben")) {
       return true;
     }
     if (position > 2 && tokens[position - 1].getToken().equals("sie") && tokens[position].getToken().equals("sie")) {
@@ -71,15 +107,15 @@ public class GermanWordRepeatRule extends WordRepeatRule {
       }
       if (tokens.length-1 > position
         && ((tokens[position - 2].hasPosTagStartingWith("VER:3:") && tokens[position + 1].hasPosTag("ZUS")) // "Dann warfen sie sie weg."
-            || (tokens[position - 2].hasPosTagStartingWith("VER:MOD:3:") && tokens[position + 1].hasPosTag("VER:INF:NON")))) {// "Dann konnte sie sie sehen."
+            || (tokens[position - 2].hasPosTagStartingWith("VER:MOD:3") && tokens[position + 1].hasPosTag("VER:INF:NON")))) {// "Dann konnte sie sie sehen."
           return true;
       }
     }
     return false;
   }
 
-  private boolean isPreposition(AnalyzedTokenReadings token) {
-    return token.hasPosTagStartingWith("PRP:");
+  @Override
+  public List<DisambiguationPatternRule> getAntiPatterns() {
+    return makeAntiPatterns(ANTI_PATTERNS, GERMAN);
   }
-
 }

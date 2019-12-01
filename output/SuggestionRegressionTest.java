@@ -21,8 +21,10 @@ package org.languagetool.rules.de;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.languagetool.JLanguageTool;
+import org.languagetool.Languages;
 import org.languagetool.TestTools;
 import org.languagetool.language.GermanyGerman;
+import org.languagetool.rules.RuleMatch;
 
 import java.io.FileWriter;
 import java.io.IOException;
@@ -41,7 +43,7 @@ public class SuggestionRegressionTest {
   public void testSuggestions() throws IOException {
     String file = "src/test/resources/suggestions.txt";
     List<String> lines = Files.readAllLines(Paths.get(file));
-    GermanyGerman german = new GermanyGerman();
+    GermanyGerman german = (GermanyGerman) Languages.getLanguageForShortCode("de-DE");
     GermanSpellerRule rule = new GermanSpellerRule(TestTools.getEnglishMessages(), german);
     boolean different = false;
     StringBuilder result = new StringBuilder();
@@ -77,4 +79,24 @@ public class SuggestionRegressionTest {
     }
   }
 
+  @Test
+  @Ignore("interactive use to find words not yet accepted")
+  public void testGetExamples() throws IOException {
+    GermanyGerman german = (GermanyGerman) Languages.getLanguageForShortCode("de-DE");
+    GermanSpellerRule rule = new GermanSpellerRule(TestTools.getEnglishMessages(), german);
+    List<String> lines = Files.readAllLines(Paths.get("/home/dnaber/data/corpus/jan_schreiber/german.dic"));
+    JLanguageTool lt = new JLanguageTool(german);
+    int i = 0;
+    for (String line : lines) {
+      RuleMatch[] matches = rule.match(lt.getAnalyzedSentence(line));
+      if (matches.length >= 1) {
+        System.out.println(line);
+      }
+      if (i % 100 == 0) {
+        System.err.println(i + "...");
+      }
+      i++;
+    }
+  }
+  
 }

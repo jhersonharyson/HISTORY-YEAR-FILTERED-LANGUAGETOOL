@@ -45,16 +45,18 @@ import org.languagetool.tools.Tools;
  */
 public class SimpleReplaceRule extends AbstractSimpleReplaceRule {
 
-  private static final Map<String, List<String>> wrongWords = load("/uk/replace.txt");
+  private static final Map<String, List<String>> wrongWords = loadFromPath("/uk/replace.txt");
+  private final MorfologikUkrainianSpellerRule morfologikSpellerRule;
 
   @Override
   protected Map<String, List<String>> getWrongWords() {
     return wrongWords;
   }
 
-  public SimpleReplaceRule(ResourceBundle messages) throws IOException {
+  public SimpleReplaceRule(ResourceBundle messages, MorfologikUkrainianSpellerRule morfologikSpellerRule) throws IOException {
     super(messages);
     setIgnoreTaggedWords();
+    this.morfologikSpellerRule = morfologikSpellerRule;
   }
 
   @Override
@@ -114,15 +116,46 @@ public class SimpleReplaceRule extends AbstractSimpleReplaceRule {
 
         matches.add(match);
       }
+      else {
+        if( PosTagHelper.hasPosTagPart(tokenReadings, ":bad") ) {
+          try {
+            String msg = "Неправильно написане слово.";
+
+            RuleMatch match = new RuleMatch(this, sentence, tokenReadings.getStartPos(), tokenReadings.getStartPos()
+                + tokenReadings.getToken().length(), msg, getShort());
+            
+            RuleMatch[] spellerMatches = morfologikSpellerRule.match(new AnalyzedSentence(new AnalyzedTokenReadings[] {tokenReadings}));
+            if( spellerMatches.length > 0 ) {
+              match.setSuggestedReplacements(spellerMatches[0].getSuggestedReplacements());
+            }
+
+            matches.add(match);
+          }
+          catch (IOException e) {
+            throw new RuntimeException(e);
+          }
+        }
+      }
+    }
+    else {
+      if( PosTagHelper.hasPosTagPart(tokenReadings, ":subst") ) {
+        for(int i=0; i<matches.size(); i++) {
+          RuleMatch match = matches.get(i);
+          RuleMatch newMatch = new RuleMatch(match.getRule(), match.getSentence(), match.getFromPos(), match.getToPos(), "Це розмовна просторічна форма");
+          newMatch.setSuggestedReplacements(match.getSuggestedReplacements());
+          matches.set(i, newMatch);
+        }
+      }
     }
     return matches;
   }
-  
+
   private boolean isGoodPosTag(String posTag) {
     return posTag != null
         && !JLanguageTool.PARAGRAPH_END_TAGNAME.equals(posTag)
         && !JLanguageTool.SENTENCE_END_TAGNAME.equals(posTag)
         && !posTag.contains(IPOSTag.bad.getText())
+        && !posTag.contains("subst")
         && !posTag.startsWith("<");
   }
 

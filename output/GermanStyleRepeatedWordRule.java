@@ -24,12 +24,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
 
+import org.apache.commons.lang3.StringUtils;
 import org.languagetool.AnalyzedToken;
 import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.Language;
 import org.languagetool.UserConfig;
 import org.languagetool.rules.AbstractStyleRepeatedWordRule;
 import org.languagetool.rules.Categories;
+import org.languagetool.rules.Example;
 
 /**
  * A rule checks the appearance of same words in a sentence or in two consecutive sentences.
@@ -44,6 +46,8 @@ public class GermanStyleRepeatedWordRule extends AbstractStyleRepeatedWordRule {
   public GermanStyleRepeatedWordRule(ResourceBundle messages, Language lang, UserConfig userConfig) {
     super(messages, lang, userConfig);
     super.setCategory(Categories.STYLE.getCategory(messages));
+    addExamplePair(Example.wrong("Ich gehe zum Supermarkt, danach <marker>gehe</marker> ich nach Hause."),
+                   Example.fixed("Ich gehe zum Supermarkt, danach nach Hause."));
   }
 
   @Override
@@ -58,17 +62,17 @@ public class GermanStyleRepeatedWordRule extends AbstractStyleRepeatedWordRule {
   
   @Override
   protected String messageSameSentence() {
-    return "Stilproblem: Das Wort wird bereits im selben Satz verwendet!";
+    return "Mögliches Stilproblem: Das Wort wird bereits im selben Satz verwendet.";
   }
   
   @Override
   protected String messageSentenceBefore() {
-    return "Stilproblem: Das Wort wird bereits in einem vorhergehenden Satz verwendet!";
+    return "Mögliches Stilproblem: Das Wort wird bereits in einem vorhergehenden Satz verwendet.";
   }
   
   @Override
   protected String messageSentenceAfter() {
-    return "Stilproblem: Das Wort wird bereits in einem nachfolgenden Satz verwendet!";
+    return "Mögliches Stilproblem: Das Wort wird bereits in einem nachfolgenden Satz verwendet.";
   }
 
   /*
@@ -82,10 +86,10 @@ public class GermanStyleRepeatedWordRule extends AbstractStyleRepeatedWordRule {
    * Only substantive, names, verbs and adjectives are checked
    */
   protected boolean isTokenToCheck(AnalyzedTokenReadings token) {
-    return (token.matchesPosTagRegex("(SUB|EIG|VER|ADJ):.*") 
-        && !token.matchesPosTagRegex("(PRO|ART|ADV|VER:(AUX|MOD)):.*")
-        && !token.getToken().equals("Ich"))
-        || isUnknownWord(token);
+    return ((token.matchesPosTagRegex("(SUB|EIG|VER|ADJ):.*") 
+        && !token.matchesPosTagRegex("(PRO|A(RT|DV)|VER:(AUX|MOD)):.*")
+        || isUnknownWord(token))
+        && !StringUtils.equalsAny(token.getToken(), "sicher", "weit", "Sie", "Ich", "Euch", "Eure"));
   }
 
   /*
@@ -93,13 +97,17 @@ public class GermanStyleRepeatedWordRule extends AbstractStyleRepeatedWordRule {
    */
   protected boolean isTokenPair(AnalyzedTokenReadings[] tokens, int n, boolean before) {
     if (before) {
-      if (tokens[n-2].hasPosTagStartingWith("SUB:") && tokens[n-1].hasPosTagStartingWith("PRP:")
-              && tokens[n].hasPosTagStartingWith("SUB:")) {
+      if ((tokens[n-2].hasPosTagStartingWith("SUB") && tokens[n-1].hasPosTagStartingWith("PRP")
+              && tokens[n].hasPosTagStartingWith("SUB"))
+          || (!tokens[n-2].getToken().equals("hart") && !tokens[n-1].getToken().equals("auf") && !tokens[n].getToken().equals("hart"))
+         ) {
         return true;
       }
     } else {
-      if (tokens[n].hasPosTagStartingWith("SUB:") && tokens[n+1].hasPosTagStartingWith("PRP:")
-              && tokens[n+2].hasPosTagStartingWith("SUB:")) {
+      if ((tokens[n].hasPosTagStartingWith("SUB") && tokens[n+1].hasPosTagStartingWith("PRP")
+              && tokens[n+2].hasPosTagStartingWith("SUB"))
+          || (!tokens[n].getToken().equals("hart") && !tokens[n-1].getToken().equals("auf") && !tokens[n + 2].getToken().equals("hart"))
+         ) {
         return true;
       }
     }

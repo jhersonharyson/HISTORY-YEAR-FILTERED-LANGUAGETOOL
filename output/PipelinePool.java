@@ -27,15 +27,16 @@ import com.google.common.cache.LoadingCache;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.ResultCache;
-import org.languagetool.UserConfig;
+import org.languagetool.*;
 import org.languagetool.gui.Configuration;
+import org.languagetool.rules.DictionaryMatchFilter;
 import org.languagetool.tools.Tools;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -43,8 +44,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Caches pre-configured JLanguageTool instances to avoid costly setup time of rules, etc.
+ * TODO: reimplement using apache commons KeyedObjectPool
  */
 class PipelinePool {
+
+  private static final Logger logger = LoggerFactory.getLogger(PipelinePool.class);
 
   static final long PIPELINE_EXPIRE_TIME = 15 * 60 * 1000;
 
@@ -53,12 +57,14 @@ class PipelinePool {
     private final Language motherTongue;
     private final TextChecker.QueryParams query;
     private final UserConfig user;
-
-    PipelineSettings(Language lang, Language motherTongue, TextChecker.QueryParams params, UserConfig userConfig) {
+    private final GlobalConfig globalConfig;
+    
+    PipelineSettings(Language lang, Language motherTongue, TextChecker.QueryParams params, GlobalConfig globalConfig, UserConfig userConfig) {
       this.lang = lang;
       this.motherTongue = motherTongue;
       this.query = params;
       this.user = userConfig;
+      this.globalConfig = globalConfig;
     }
 
     @Override
@@ -67,6 +73,7 @@ class PipelinePool {
         .append(lang)
         .append(motherTongue)
         .append(query)
+        .append(globalConfig)
         .append(user)
         .toHashCode();
     }
@@ -82,6 +89,7 @@ class PipelinePool {
         .append(lang, other.lang)
         .append(motherTongue, other.motherTongue)
         .append(query, other.query)
+        .append(globalConfig, other.globalConfig)
         .append(user, other.user)
         .isEquals();
     }
@@ -92,6 +100,7 @@ class PipelinePool {
         .append("lang", lang)
         .append("motherTongue", motherTongue)
         .append("query", query)
+        .append("globalConfig", globalConfig)
         .append("user", user)
         .build();
     }
@@ -151,19 +160,19 @@ class PipelinePool {
       requests++;
       ConcurrentLinkedQueue<Pipeline> pipelines = pool.get(settings);
       if (requests % 1000 == 0) {
-        ServerTools.print(String.format("Pipeline cache stats: %f hit rate", (double) pipelinesUsed / requests));
+        logger.info(String.format("Pipeline cache stats: %f hit rate", (double) pipelinesUsed / requests));
       }
       Pipeline pipeline = pipelines.poll();
       if (pipeline == null) {
         //ServerTools.print(String.format("No prepared pipeline found for %s; creating one.", settings));
-        pipeline = createPipeline(settings.lang, settings.motherTongue, settings.query, settings.user);
+        pipeline = createPipeline(settings.lang, settings.motherTongue, settings.query, settings.globalConfig, settings.user, config.getDisabledRuleIds());
       } else {
         pipelinesUsed++;
         //ServerTools.print(String.format("Prepared pipeline found for %s; using it.", settings));
       }
       return pipeline;
     } else {
-      return createPipeline(settings.lang, settings.motherTongue, settings.query, settings.user);
+      return createPipeline(settings.lang, settings.motherTongue, settings.query, settings.globalConfig, settings.user, config.getDisabledRuleIds());
     }
   }
 
@@ -177,14 +186,15 @@ class PipelinePool {
   /**
    * Create a JLanguageTool instance for a specific language, mother tongue, and rule configuration.
    * Uses Pipeline wrapper to safely share objects
-   *
-   * @param lang the language to be used
+   *  @param lang the language to be used
    * @param motherTongue the user's mother tongue or {@code null}
    */
-  Pipeline createPipeline(Language lang, Language motherTongue, TextChecker.QueryParams params, UserConfig userConfig)
+  Pipeline createPipeline(Language lang, Language motherTongue, TextChecker.QueryParams params, GlobalConfig globalConfig,
+                          UserConfig userConfig, List<String> disabledRuleIds)
     throws Exception { // package-private for mocking
-    Pipeline lt = new Pipeline(lang, params.altLanguages, motherTongue, cache, userConfig);
+    Pipeline lt = new Pipeline(lang, params.altLanguages, motherTongue, cache, globalConfig, userConfig);
     lt.setMaxErrorsPerWordRate(config.getMaxErrorsPerWordRate());
+    lt.disableRules(disabledRuleIds);
     if (config.getLanguageModelDir() != null) {
       lt.activateLanguageModelRules(config.getLanguageModelDir());
     }
@@ -199,6 +209,9 @@ class PipelinePool {
     if (params.useQuerySettings) {
       Tools.selectRules(lt, new HashSet<>(params.disabledCategories), new HashSet<>(params.enabledCategories),
         new HashSet<>(params.disabledRules), new HashSet<>(params.enabledRules), params.useEnabledOnly);
+    }
+    if (userConfig.filterDictionaryMatches()) {
+      lt.addMatchFilter(new DictionaryMatchFilter(userConfig));
     }
     if (pool != null) {
       lt.setupFinished();

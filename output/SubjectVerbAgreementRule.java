@@ -38,6 +38,8 @@ import java.net.URL;
 import java.util.*;
 import java.util.regex.Pattern;
 
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.*;
+
 /**
  * Check subject verb agreement for verb forms "ist", "sind", "war" and "waren".
  * For example, it detects the errors in:
@@ -70,33 +72,49 @@ public class SubjectVerbAgreementRule extends Rule {
 
   private static final List<List<PatternToken>> ANTI_PATTERNS = Arrays.asList(
     Arrays.asList(
-      new PatternTokenBuilder().tokenRegex("ist|war").build(),
-      new PatternTokenBuilder().token("gemeinsam").build()
+      tokenRegex("ist|war"),
+      token("gemeinsam")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().pos(JLanguageTool.SENTENCE_START_TAGNAME).build(),
-      new PatternTokenBuilder().pos("ZAL").build(),
-      new PatternTokenBuilder().tokenRegex("Tage|Monate|Jahre").build(),
-      new PatternTokenBuilder().posRegex("VER:3:SIN:.*").build()
+      pos(JLanguageTool.SENTENCE_START_TAGNAME),
+      pos("ZAL"),
+      tokenRegex("Tage|Monate|Jahre"),
+      posRegex("VER:3:SIN:.*")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().pos(JLanguageTool.SENTENCE_START_TAGNAME).build(),
-      new PatternTokenBuilder().posRegex("ADV:MOD|ADJ:PRD:GRU").build(),
-      new PatternTokenBuilder().pos("ZAL").build(),
-      new PatternTokenBuilder().tokenRegex("Tage|Monate|Jahre").build(),
-      new PatternTokenBuilder().posRegex("VER:3:SIN:.*").build()
+      pos(JLanguageTool.SENTENCE_START_TAGNAME),
+      posRegex("ADV:MOD|ADJ:PRD:GRU"),
+      pos("ZAL"),
+      tokenRegex("Tage|Monate|Jahre"),
+      posRegex("VER:3:SIN:.*")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().pos(JLanguageTool.SENTENCE_START_TAGNAME).build(),
+      pos(JLanguageTool.SENTENCE_START_TAGNAME),
       new PatternTokenBuilder().pos("PRP:CAU:GEN").setSkip(4).build(),
       new PatternTokenBuilder().csToken("und").setSkip(4).build(),
-      new PatternTokenBuilder().tokenRegex("ist|war").build()
+      tokenRegex("ist|war")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().pos(JLanguageTool.SENTENCE_START_TAGNAME).build(),
-      new PatternTokenBuilder().posRegex("EIG:.*").build(),
-      new PatternTokenBuilder().csToken("und").setSkip(2).build(),
-      new PatternTokenBuilder().tokenRegex("sind|waren").build()
+      posRegex(JLanguageTool.SENTENCE_START_TAGNAME+"|KON:UNT"),
+      posRegex("(EIG|SUB):.*"),
+      new PatternTokenBuilder().csToken("und").setSkip(3).build(),
+      tokenRegex("sind|waren")
+    ),
+    Arrays.asList(
+      pos("KON:UNT"),
+      new PatternTokenBuilder().token("sie").setSkip(3).build(),
+      tokenRegex("sind|waren")
+    ),
+    Arrays.asList( //Bei komplexen und andauernden Störungen ist der Stress-Stoffwechsel des Hundes entgleist.
+      pos(JLanguageTool.SENTENCE_START_TAGNAME),
+      new PatternTokenBuilder().posRegex("PRP:.+").setSkip(4).build(),
+      tokenRegex("ist|war"),
+      tokenRegex("d(as|er)|eine?")
+    ),
+    Arrays.asList(
+      token("zu"),
+      csToken("Fuß"),
+      tokenRegex("sind|waren")
     )
   );
 
@@ -126,13 +144,18 @@ public class SubjectVerbAgreementRule extends Rule {
   }
 
   @Override
+  public int estimateContextForSureMatch() {
+    return ANTI_PATTERNS.stream().mapToInt(List::size).max().orElse(0);
+  }
+
+  @Override
   public List<DisambiguationPatternRule> getAntiPatterns() {
     return makeAntiPatterns(ANTI_PATTERNS, language);
   }
 
   @Override
   public URL getUrl() {
-    return Tools.getUrl("http://www.canoo.net/services/OnlineGrammar/Wort/Verb/Numerus-Person/ProblemNum.html");
+    return Tools.getUrl("http://www.canoonet.eu/services/OnlineGrammar/Wort/Verb/Numerus-Person/ProblemNum.html");
   }
 
   @Override
@@ -173,10 +196,7 @@ public class SubjectVerbAgreementRule extends Rule {
                       && !hasUnknownTokenToTheLeft(tokens, i)
                       && !hasQuestionPronounToTheLeft(tokens, i-1)
                       && !hasVerbToTheLeft(tokens, i-1)
-                      && !containsRegexToTheLeft("wer", tokens, i-1)
-                      && !containsRegexToTheLeft("(?i)alle[nr]?", tokens, i-1)
-                      && !containsRegexToTheLeft("(?i)jede[rs]?", tokens, i-1)
-                      && !containsRegexToTheLeft("(?i)manche[nrs]?", tokens, i-1)
+                      && !containsRegexToTheLeft("wer|(?i)alle[nr]?|(?i)jede[rs]?|(?i)manche[nrs]?", tokens, i-1)
                       && !containsOnlyInfinitivesToTheLeft(tokens, i-1);
       if (match) {
         String message = "Bitte prüfen, ob hier <suggestion>" + getPluralFor(tokenStr) + "</suggestion> stehen sollte.";
@@ -258,7 +278,7 @@ public class SubjectVerbAgreementRule extends Rule {
 
   private boolean hasVerbToTheLeft(AnalyzedTokenReadings[] tokens, int startPos) {
     for (int i = startPos; i > 0; i--) {
-      if (tokens[i].matchesPosTagRegex("VER:[1-3]:.*")) {
+      if (tokens[i].matchesPosTagRegex("VER:[1-3]:.+")) {
         return true;
       }
     }
@@ -296,7 +316,7 @@ public class SubjectVerbAgreementRule extends Rule {
     for (int i = startPos; i < tokens.length; i++) {
       AnalyzedTokenReadings token = tokens[i];
       if (token.hasAnyPartialPosTag("SUB", "PRO")
-      		&& (token.hasPartialPosTag("NOM:PLU") || token.getChunkTags().contains(new ChunkTag("NPP")))) {  // NPP catches 'und' phrases
+          && (token.hasPartialPosTag("NOM:PLU") || token.getChunkTags().contains(NPP))) {  // NPP catches 'und' phrases
         return true;
       }
     }

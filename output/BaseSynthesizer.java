@@ -18,21 +18,23 @@
  */
 package org.languagetool.synthesis;
 
+import morfologik.stemming.Dictionary;
+import morfologik.stemming.DictionaryLookup;
+import morfologik.stemming.IStemmer;
+import morfologik.stemming.WordData;
+import org.languagetool.AnalyzedToken;
+import org.languagetool.JLanguageTool;
+import org.languagetool.Language;
+
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import morfologik.stemming.Dictionary;
-import morfologik.stemming.DictionaryLookup;
-import morfologik.stemming.IStemmer;
-import morfologik.stemming.WordData;
-
-import org.languagetool.AnalyzedToken;
-import org.languagetool.JLanguageTool;
 
 public class BaseSynthesizer implements Synthesizer {
 
@@ -41,22 +43,56 @@ public class BaseSynthesizer implements Synthesizer {
   private final String tagFileName;
   private final String resourceFileName;
   private final IStemmer stemmer;
-
+  private final ManualSynthesizer manualSynthesizer;
+  private final ManualSynthesizer removalSynthesizer;
+  private final String sorosFileName;
+  private final Soros numberSpeller;
+  
+  public final String SPELLNUMBER_TAG = "_spell_number_";
+  
   private volatile Dictionary dictionary;
 
   /**
    * @param resourceFileName The dictionary file name.
    * @param tagFileName The name of a file containing all possible tags.
    */
-  public BaseSynthesizer(String resourceFileName, String tagFileName) {
+  public BaseSynthesizer(String sorosFileName, String resourceFileName, String tagFileName, Language lang) {
     this.resourceFileName = resourceFileName;
     this.tagFileName = tagFileName;
     this.stemmer = createStemmer();
+    this.sorosFileName = sorosFileName;
+    this.numberSpeller = createNumberSpeller(lang.getShortCode());
+    try {
+      String path = "/" + lang.getShortCode() + "/added.txt";
+      if (JLanguageTool.getDataBroker().resourceExists(path)) {
+        try (InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(path)) {
+          this.manualSynthesizer = new ManualSynthesizer(stream);
+        }
+      } else {
+        this.manualSynthesizer = null;
+      }
+      String removalPath = "/" + lang.getShortCode() + "/removed.txt";
+      if (JLanguageTool.getDataBroker().resourceExists(removalPath)) {
+        try (InputStream stream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(removalPath)) {
+          this.removalSynthesizer = new ManualSynthesizer(stream);
+        }
+      } else {
+        this.removalSynthesizer = null;
+      }
+      
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+  
+  public BaseSynthesizer(String resourceFileName, String tagFileName, Language lang) {
+    this(null, resourceFileName, tagFileName, lang);
+    
   }
 
   /**
    * Returns the {@link Dictionary} used for this synthesizer.
-   * The dictionary file can be defined in the {@link #BaseSynthesizer(String, String) constructor}.
+   * The dictionary file can be defined in the {@link #BaseSynthesizer(String, String, Language) constructor}.
    * @throws IOException In case the dictionary cannot be loaded.
    */
   protected Dictionary getDictionary() throws IOException {
@@ -85,6 +121,24 @@ public class BaseSynthesizer implements Synthesizer {
       throw new RuntimeException("Could not load dictionary", e);
     }
   }
+  
+  private Soros createNumberSpeller(String langcode) {
+    Soros s = null;
+    try {
+      URL url = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(sorosFileName);
+      BufferedReader f = new BufferedReader(new InputStreamReader(url.openStream(), "UTF-8"));
+      StringBuffer st = new StringBuffer();
+      String line = null;
+      while ((line = f.readLine()) != null) {
+        st.append(line);
+        st.append("\n");
+      }
+      s = new Soros(new String(st), langcode);
+    } catch (Exception e) {
+      return null;
+    }
+    return s;
+  }
 
   /**
    * Lookup the inflected forms of a lemma defined by a part-of-speech tag.
@@ -99,6 +153,18 @@ public class BaseSynthesizer implements Synthesizer {
         results.add(wd.getStem().toString());
       }
     }
+    if (manualSynthesizer != null) {
+      List<String> manualForms = manualSynthesizer.lookup(lemma, posTag);
+      if (manualForms != null) {
+        results.addAll(manualForms);
+      }
+    }
+    if (removalSynthesizer != null) {
+      List<String> removeForms = removalSynthesizer.lookup(lemma, posTag);
+      if (removeForms != null) {
+        results.removeAll(removeForms);
+      }
+    }
   }
 
   /**
@@ -110,14 +176,17 @@ public class BaseSynthesizer implements Synthesizer {
    */
   @Override
   public String[] synthesize(AnalyzedToken token, String posTag) throws IOException {
+    if (posTag.equals(SPELLNUMBER_TAG)) {
+      String[] strArray = new String[] {getSpelledNumber(token.getToken())};
+      return strArray;
+    }
     List<String> wordForms = new ArrayList<>();
     lookup(token.getLemma(), posTag, wordForms);
-    return wordForms.toArray(new String[wordForms.size()]);
+    return wordForms.toArray(new String[0]);
   }
 
   @Override
-  public String[] synthesize(AnalyzedToken token, String posTag,
-      boolean posTagRegExp) throws IOException {
+  public String[] synthesize(AnalyzedToken token, String posTag, boolean posTagRegExp) throws IOException {
     if (posTagRegExp) {
       initPossibleTags();
       Pattern p = Pattern.compile(posTag);
@@ -128,7 +197,7 @@ public class BaseSynthesizer implements Synthesizer {
           lookup(token.getLemma(), tag, results);
         }
       }
-      return results.toArray(new String[results.size()]);
+      return results.toArray(new String[0]);
     }
     return synthesize(token, posTag);
   }
@@ -156,8 +225,24 @@ public class BaseSynthesizer implements Synthesizer {
             possibleTags = SynthesizerTools.loadWords(stream);
           }
         }
+        // needed to be moved into synchronized block, should fix ConcurrentModificationException in synthesize
+        if (manualSynthesizer != null) {
+          for (String tag : manualSynthesizer.getPossibleTags()) {
+            if (!possibleTags.contains(tag)) {
+              possibleTags.add(tag);
+            }
+          }
+        }
       }
     }
+  }
+
+  @Override
+  public String getSpelledNumber(String arabicNumeral) {
+    if (numberSpeller != null) {
+      return numberSpeller.run(arabicNumeral);
+    }
+    return arabicNumeral;
   }
 
 }

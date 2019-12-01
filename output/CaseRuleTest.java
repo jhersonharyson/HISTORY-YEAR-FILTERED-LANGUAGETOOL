@@ -29,8 +29,9 @@ import org.junit.Before;
 import org.junit.Test;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.JLanguageTool;
+import org.languagetool.Languages;
 import org.languagetool.TestTools;
-import org.languagetool.language.GermanyGerman;
+import org.languagetool.language.German;
 
 public class CaseRuleTest {
 
@@ -38,27 +39,32 @@ public class CaseRuleTest {
   private JLanguageTool lt;
 
   @Before
-  public void setUp() throws IOException {
-    rule = new CaseRule(TestTools.getMessages("de"), new GermanyGerman());
-    lt = new JLanguageTool(new GermanyGerman());
+  public void setUp() {
+    rule = new CaseRule(TestTools.getMessages("de"), (German) Languages.getLanguageForShortCode("de-DE"));
+    lt = new JLanguageTool(Languages.getLanguageForShortCode("de-DE"));
   }
 
   @Test
-  public void testRuleActivation() throws IOException {
-    assertTrue(rule.supportsLanguage(new GermanyGerman()));
+  public void testRuleActivation() {
+    assertTrue(rule.supportsLanguage(Languages.getLanguageForShortCode("de-DE")));
   }
 
   @Test
   public void testRule() throws IOException {
 
     // correct sentences:
+    assertGood("Das ist eine Abkehr von Gottes Geboten.");
     assertGood("Dem Hund Futter geben");
     assertGood("Heute spricht Frau Stieg.");
+    assertGood("So könnte es auch den Handwerksbetrieben gehen, die ausbilden und deren Ausbildung dann Industriebetrieben zugutekäme.");
+    assertGood("Die Firma Drosch hat nicht pünktlich geliefert.");
+    assertGood("3.1 Technische Dokumentation");
     assertGood("Ein einfacher Satz zum Testen.");
     assertGood("Das Laufen fällt mir leicht.");
     assertGood("Das Winseln stört.");
     assertGood("Das schlägt nicht so zu Buche.");
     assertGood("Dirk Hetzel ist ein Name.");
+    assertGood("Aber sie tat es, sodass unsere Klasse das sehen und fotografieren konnte.");
     assertGood("Sein Verhalten war okay.");
     assertGood("Hier ein Satz. \"Ein Zitat.\"");
     assertGood("Hier ein Satz. 'Ein Zitat.'");
@@ -111,6 +117,7 @@ public class CaseRuleTest {
     assertGood("Du kannst das machen.");
     assertGood("Vor dem Aus stehen.");
     assertGood("Ich Armer!");
+    assertGood("Hallo Malte,");
     assertGood("Parks Vertraute Choi Soon Sil ist zu drei Jahren Haft verurteilt worden.");
     assertGood("Bei einer Veranstaltung Rechtsextremer passierte es.");
     assertGood("Eine Gruppe Betrunkener singt.");
@@ -118,6 +125,7 @@ public class CaseRuleTest {
     assertGood("Das Aus für Italien ist bitter.");
     assertGood("Das Aus kam unerwartet.");
     assertGood("Anmeldung bis Fr. 1.12.");
+    assertGood("Gibt es die Schuhe auch in Gr. 43?");
     assertGood("Weil er Unmündige sexuell missbraucht haben soll, wurde ein Lehrer verhaftet.");
     assertGood("Tausende Gläubige kamen.");
     assertGood("Es kamen Tausende Gläubige.");
@@ -132,6 +140,37 @@ public class CaseRuleTest {
     assertGood("Das ist ihr Zuhause.");
     assertGood("Das ist Sandras Zuhause.");
     assertGood("Das machen eher wohlhabende Leute.");
+    assertGood("Als Erstes würde ich sofort die Struktur ändern.");
+    assertGood("Er sagte: Als Erstes würde ich sofort die Struktur ändern.");
+    assertGood("Das schaffen moderne E-Autos locker.");
+    assertGood("Das schaffen moderne E-Autos schneller");
+    assertGood("Das schaffen moderne und effizientere E-Autos schneller.");
+    assertGood("Das verwalten User.");
+    assertGood("Man kann das generalisieren");
+    assertGood("Vielleicht kann man das erweitern");
+    assertGood("Vielleicht soll er das generalisieren");
+    assertGood("Wahrscheinlich müssten sie das überarbeiten");
+    assertGood("Assistenzsysteme warnen rechtzeitig vor Gefahren.");
+    assertGood("Jeremy Schulte rannte um sein Leben.");
+    assertGood("Das war Fiete Lang.");
+    assertGood("Wenn du an das glaubst, was du tust, kannst du Großes erreichen.");
+    assertGood("Dann hat er Großes erreicht.");
+    assertGood("Dann hat er Großes geleistet.");
+    assertGood("Das Thema Datenaustauschverfahren ist mir wichtig.");
+    assertGood("Ist das eine Frage ? Müsste das nicht anders sein?");
+    assertGood("Das ist ein Satz !!! Das auch.");
+    assertGood("Der russische Erdölmagnat Emanuel Nobel, der Erbauer des ersten Dieselmotorschiffes.");
+
+    // https://github.com/languagetool-org/languagetool/issues/1515:
+    assertGood("▶︎ Dies ist ein Test");
+    assertGood("▶ Dies ist ein Test");
+    assertGood("* Dies ist ein Test");
+    assertGood("- Dies ist ein Test");
+    assertGood("• Dies ist ein Test");
+    assertGood(":-) Dies ist ein Test");
+    assertGood(";-) Dies ist ein Test");
+    assertGood(":) Dies ist ein Test");
+    assertGood(";) Dies ist ein Test");
 
     //assertBad("Sie sind nicht Verständlich");
     assertBad("Das machen der Töne ist schwierig.");
@@ -176,6 +215,7 @@ public class CaseRuleTest {
     assertGood("Anders als physikalische Konstanten werden mathematische Konstanten unabhängig von jedem physikalischen Maß definiert.");
     assertGood("Eine besonders einfache Klasse bilden die polylogarithmischen Konstanten.");
     assertGood("Das südlich von Berlin gelegene Dörfchen.");
+    assertGood("Weil er das kommen sah, traf er Vorkehrungen.");
     
     assertGood("Sie werden im Allgemeinen gefasst.");
     assertGood("Sie werden im allgemeinen Fall gefasst.");
@@ -288,6 +328,7 @@ public class CaseRuleTest {
     assertGood("Wenn Sie das schaffen, retten Sie mein Leben!");
     assertGood("Etwas Grünes, Schleimiges klebte an dem Stein.");
     assertGood("Er befürchtet Schlimmeres.");
+    assertBad("Bis Bald!");
     
     // uppercased adjective compounds
     assertGood("Er isst UV-bestrahltes Obst.");
@@ -324,7 +365,7 @@ public class CaseRuleTest {
     assertGood("Das lesen Sie doch sicher in einer Minute durch!");
     assertGood("Formationswasser, das oxidiert war.");
 
-    // Source of the following examples: http://www.canoo.net/services/GermanSpelling/Amtlich/GrossKlein/pgf57-58.html
+    // Source of the following examples: http://www.canoonet.eu/services/GermanSpelling/Amtlich/GrossKlein/pgf57-58.html
     assertGood("Das Lesen fällt mir schwer.");
     assertGood("Sie hörten ein starkes Klopfen.");
     assertGood("Wer erledigt das Fensterputzen?");

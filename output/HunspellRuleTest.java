@@ -26,23 +26,26 @@ import org.languagetool.Languages;
 import org.languagetool.TestTools;
 import org.languagetool.language.AustrianGerman;
 import org.languagetool.language.German;
-import org.languagetool.language.GermanyGerman;
 import org.languagetool.language.SwissGerman;
+import org.languagetool.rules.RuleMatch;
 import org.languagetool.rules.de.GermanSpellerRule;
+import static org.hamcrest.CoreMatchers.is;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.ResourceBundle;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
 
 public class HunspellRuleTest {
 
   @Test
   public void testRuleWithGerman() throws Exception {
-    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new GermanyGerman(), null);
-    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
+    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), Languages.getLanguageForShortCode("de-DE"), null);
+    JLanguageTool langTool = new JLanguageTool(Languages.getLanguageForShortCode("de-DE"));
     commonGermanAsserts(rule, langTool);
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Der äußere Übeltäter.")).length);  // umlauts
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Der äussere Übeltäter.")).length);
@@ -64,9 +67,57 @@ public class HunspellRuleTest {
   }
 
   @Test
+  public void testRuleWithWrongSplit() throws Exception {
+    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), Languages.getLanguageForShortCode("de-DE"), null);
+    JLanguageTool lt = new JLanguageTool(Languages.getLanguageForShortCode("de-DE"));
+    assertResult("Vielen Dan kfür die Blumen", "Dank für", 7, 15, rule, lt);
+    assertResult("Vielen Dankf ür die Blumen", "Dank für", 7, 15, rule, lt);
+    assertResult("Viele nDank für die Blumen", "Vielen Dank", 0, 11, rule, lt);
+    assertResult("VielenD ank für die Blumen", "Vielen Dank", 0, 11, rule, lt);
+    assertResult("Vielen Dank für di eBlumen", "die Blumen", 16, 26, rule, lt);
+    assertResult("Vielen Dank für di eBlumen.", "die Blumen", 16, 26, rule, lt);
+    assertResult("Vielen Dank für dieB lumen", "die Blumen", 16, 26, rule, lt);
+    assertResult("Vielen Dank für dieB lumen.", "die Blumen", 16, 26, rule, lt);
+    assertResult("Das ist g anz falsch", "ganz", 8, 13, rule, lt);
+
+    RuleMatch[] matches = rule.match(lt.getAnalyzedSentence("Vielen Dak für dieB lumen"));
+    assertThat(matches.length, is(3));
+    assertThat(matches[0].getSuggestedReplacements().get(0), is("DAK"));  // not really a good first suggestion...
+    assertThat(matches[1].getSuggestedReplacements().size(), is(1));
+    assertThat(matches[1].getSuggestedReplacements().get(0), is("die Blumen"));
+    assertThat(matches[1].getFromPos(), is(15));
+    assertThat(matches[1].getToPos(), is(25));
+    assertThat(matches[2].getSuggestedReplacements().get(0), is("Lumen"));
+
+    RuleMatch[] matches2 = rule.match(lt.getAnalyzedSentence("Und gan viele nDank"));
+    assertThat(matches2.length, is(3));
+    assertThat(matches2[0].getSuggestedReplacements().get(0), is("gab"));  // not really a good first suggestion...
+    assertThat(matches2[1].getSuggestedReplacements().size(), is(1));
+    assertThat(matches2[1].getSuggestedReplacements().get(0), is("vielen Dank"));
+    assertThat(matches2[1].getFromPos(), is(8));
+    assertThat(matches2[1].getToPos(), is(19));
+    assertThat(matches2[2].getSuggestedReplacements().get(0), is("Dank"));
+
+    RuleMatch[] matches3 = rule.match(lt.getAnalyzedSentence("Vielen Dank für dieB lumen und auuch falsch"));
+    assertThat(matches3.length, is(3));
+    assertThat(matches3[0].getSuggestedReplacements().get(0), is("die Blumen"));
+    assertThat(matches3[1].getSuggestedReplacements().get(0), is("Lumen"));
+    assertThat(matches3[2].getSuggestedReplacements().get(0), is("auch"));
+  }
+  
+  private void assertResult(String input, String expectedResult, int fromPos, int toPos, HunspellRule rule, JLanguageTool lt) throws IOException {
+    RuleMatch[] matches = rule.match(lt.getAnalyzedSentence(input));
+    assertThat("Got != 2 match(es): " + Arrays.toString(matches), matches.length, is(2));
+    assertThat(matches[0].getSuggestedReplacements().size(), is(1));
+    assertThat(matches[0].getSuggestedReplacements().get(0), is(expectedResult));
+    assertThat(matches[0].getFromPos(), is(fromPos));
+    assertThat(matches[0].getToPos(), is(toPos));
+  }
+
+  @Test
   public void testRuleWithAustrianGerman() throws Exception {
-    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new AustrianGerman(), null);
-    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
+    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), Languages.getLanguageForShortCode("de-AT"), null);
+    JLanguageTool langTool = new JLanguageTool(Languages.getLanguageForShortCode("de-DE"));
     commonGermanAsserts(rule, langTool);
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Der äußere Übeltäter.")).length);  // umlauts
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Der äussere Übeltäter.")).length);
@@ -74,8 +125,8 @@ public class HunspellRuleTest {
 
   @Test
   public void testRuleWithSwissGerman() throws Exception {
-    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), new SwissGerman(), null);
-    JLanguageTool langTool = new JLanguageTool(new GermanyGerman());
+    HunspellRule rule = new HunspellRule(TestTools.getMessages("de"), Languages.getLanguageForShortCode("de-CH"), null);
+    JLanguageTool langTool = new JLanguageTool(Languages.getLanguageForShortCode("de-DE"));
     commonGermanAsserts(rule, langTool);
     assertEquals(1, rule.match(langTool.getAnalyzedSentence("Der äußere Übeltäter.")).length);  // ß not allowed in Swiss
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("Der äussere Übeltäter.")).length);  // ss is used instead of ß
@@ -122,7 +173,7 @@ public class HunspellRuleTest {
     //slow:
     //HunspellRule rule = new HunspellRule(messages, Language.GERMANY_GERMAN);
     //fast:
-    CompoundAwareHunspellRule rule = new GermanSpellerRule(messages, new GermanyGerman());
+    CompoundAwareHunspellRule rule = new GermanSpellerRule(messages, (German) Languages.getLanguageForShortCode("de-DE"));
     rule.init();
     String[] words = {"foo", "warmup", "Rechtschreipreform", "Theatrekasse", "Zoobesuck", "Handselvertreter", "Mückenstick", "gewönlich", "Traprennen", "Autoverkehrr"};
     for (String word : words) {

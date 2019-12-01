@@ -18,15 +18,17 @@
  */
 package org.languagetool.rules.spelling.hunspell;
 
+import org.apache.commons.lang3.StringUtils;
 import org.languagetool.Language;
 import org.languagetool.UserConfig;
+import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.rules.spelling.morfologik.MorfologikMultiSpeller;
 import org.languagetool.tokenizers.CompoundWordTokenizer;
 import org.languagetool.tools.StringTools;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Stream;
+import java.util.stream.IntStream;
 
 /**
  * A spell checker that combines Hunspell und Morfologik spell checking
@@ -51,7 +53,13 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
    */
   public CompoundAwareHunspellRule(ResourceBundle messages, Language language, CompoundWordTokenizer compoundSplitter, 
                                    MorfologikMultiSpeller morfoSpeller, UserConfig userConfig, List<Language> altLanguages) {
-    super(messages, language, userConfig, altLanguages);
+    this(messages, language, compoundSplitter, morfoSpeller, userConfig, altLanguages, null);
+  }
+
+  public CompoundAwareHunspellRule(ResourceBundle messages, Language language, CompoundWordTokenizer compoundSplitter,
+                                   MorfologikMultiSpeller morfoSpeller, UserConfig userConfig, List<Language> altLanguages,
+                                   LanguageModel languageModel) {
+    super(messages, language, userConfig, altLanguages, languageModel);
     this.compoundSplitter = compoundSplitter;
     this.morfoSpeller = morfoSpeller;
   }
@@ -67,8 +75,11 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
     if (needsInit) {
       init();
     }
+    //System.out.println("Computing suggestions for " + word);
     List<String> candidates = getCandidates(word);
     List<String> simpleSuggestions = getCorrectWords(candidates);
+    simpleSuggestions = getFilteredSuggestions(simpleSuggestions);
+    //System.out.println("simpleSuggestions: " + simpleSuggestions);
 
     List<String> noSplitSuggestions = morfoSpeller.getSuggestions(word);  // after getCorrectWords() so spelling.txt is considered
     handleWordEndPunctuation(".", word, noSplitSuggestions);
@@ -78,28 +89,35 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
       // almost all words can be uppercase because they can appear at the start of a sentence:
       noSplitLowercaseSuggestions = morfoSpeller.getSuggestions(word.toLowerCase());
     }
+    //System.out.println("noSplitSuggestions: " + noSplitSuggestions);
+    //System.out.println("noSplitLcSuggestions: " + noSplitLowercaseSuggestions);
     // We don't know about the quality of the results here, so mix both lists together,
     // taking elements from both lists on a rotating basis:
     List<String> suggestions = new ArrayList<>();
-    int max = Stream.of(simpleSuggestions.size(), noSplitSuggestions.size(), noSplitLowercaseSuggestions.size()).mapToInt(v -> v).max().orElse(0);
+    int max = IntStream.of(simpleSuggestions.size(), noSplitSuggestions.size(), noSplitLowercaseSuggestions.size()).max().orElse(0);
     for (int i = 0; i < max; i++) {
-      if (i < simpleSuggestions.size()) {
-        suggestions.add(simpleSuggestions.get(i));
-      }
       if (i < noSplitSuggestions.size()) {
         suggestions.add(noSplitSuggestions.get(i));
       }
       if (i < noSplitLowercaseSuggestions.size()) {
         suggestions.add(StringTools.uppercaseFirstChar(noSplitLowercaseSuggestions.get(i)));
       }
+      // put these behind suggestions by Morfologik, often low-quality / made-up words
+      if (i < simpleSuggestions.size()) {
+        suggestions.add(simpleSuggestions.get(i));
+      }
     }
+    //System.out.println("suggestions (mixed from simpleSuggestions, noSplitSuggestions, noSplitLowerCaseSuggestions): " + suggestions);
 
     filterDupes(suggestions);
     filterForLanguage(suggestions);
+
     List<String> sortedSuggestions = sortSuggestionByQuality(word, suggestions);
+    //System.out.println("sortSuggestionByQuality(): " + sortedSuggestions);
     // This is probably be the right place to sort suggestions by probability:
     //SuggestionSorter sorter = new SuggestionSorter(new LuceneLanguageModel(new File("/home/dnaber/data/google-ngram-index/de")));
     //sortedSuggestions = sorter.sortSuggestions(sortedSuggestions);
+    //System.out.println();
     return sortedSuggestions.subList(0, Math.min(MAX_SUGGESTIONS, sortedSuggestions.size()));
   }
 
@@ -125,15 +143,23 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
     int partCount = 0;
     List<String> candidates = new ArrayList<>();
     for (String part : parts) {
-      if (hunspellDict.misspelled(part)) {
+      if (!hunspell.spell(part)) {
         // assume noun, so use uppercase:
         boolean doUpperCase = partCount > 0 && !StringTools.startsWithUppercase(part);
         List<String> suggestions = morfoSpeller.getSuggestions(doUpperCase ? StringTools.uppercaseFirstChar(part) : part);
         if (suggestions.isEmpty()) {
           suggestions = morfoSpeller.getSuggestions(doUpperCase ? StringTools.lowercaseFirstChar(part) : part);
         }
+        boolean appendS = false;
+        if (doUpperCase && part.endsWith("s")) {  // maybe infix-s as in "Dampfschiffahrtskapitän" -> "Dampfschifffahrtskapitän"
+          suggestions.addAll(morfoSpeller.getSuggestions(StringUtils.removeEnd(part, "s")));
+          appendS = true;
+        }
         for (String suggestion : suggestions) {
           List<String> partsCopy = new ArrayList<>(parts);
+          if (appendS) {
+            suggestion += "s";
+          }
           if (partCount > 0 && parts.get(partCount).startsWith("-") && parts.get(partCount).length() > 1) {
             partsCopy.set(partCount, "-" + StringTools.uppercaseFirstChar(suggestion.substring(1)));
           } else if (partCount > 0 && !parts.get(partCount-1).endsWith("-")) {
@@ -163,8 +189,19 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
     return candidates;
   }
 
+  @Override
   protected List<String> sortSuggestionByQuality(String misspelling, List<String> suggestions) {
-    return suggestions;
+    List<String> result = new ArrayList<>();
+    for (String suggestion : suggestions) {
+      if (StringUtils.remove(suggestion, ' ').equals(misspelling)
+          && Arrays.stream(StringUtils.split(suggestion, ' ')).noneMatch(k -> k.length() == 1)) {
+        // prefer run-on words unless a single letter is split off:
+        result.add(0, suggestion);
+      } else {
+        result.add(suggestion);
+      }
+    }
+    return result;
   }
 
   // avoid over-accepting words, as the Morfologik approach above might construct
@@ -176,7 +213,7 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
       String[] words = tokenizeText(wordOrPhrase);
       boolean wordIsOkay = true;
       for (String word : words) {
-        if (hunspellDict.misspelled(word)) {
+        if (!hunspell.spell(word)) {
           wordIsOkay = false;
           break;
         }
@@ -188,4 +225,11 @@ public abstract class CompoundAwareHunspellRule extends HunspellRule {
     return result;
   }
 
+  /**
+   * @since 4.7
+   */
+  protected List<String> getFilteredSuggestions(List<String> wordsOrPhrases) {
+    return wordsOrPhrases;
+  }
+  
 }

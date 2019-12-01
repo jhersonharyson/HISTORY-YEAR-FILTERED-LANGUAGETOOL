@@ -49,6 +49,7 @@ public abstract class AbstractStyleRepeatedWordRule  extends TextLevelRule {
   
   private final LinguServices linguServices;
   private final Language lang;
+  
   protected int maxDistanceOfSentences = 1;
 
   public AbstractStyleRepeatedWordRule(ResourceBundle messages, Language lang, UserConfig userConfig) {
@@ -202,7 +203,7 @@ public abstract class AbstractStyleRepeatedWordRule  extends TextLevelRule {
         }
       }
     }
-    if(synonyms.size() == 0) {
+    if(synonyms.isEmpty()) {
       List<String> rawSynonyms = linguServices.getSynonyms(token.getToken(), lang);
       for (String synonym : rawSynonyms) {
         synonym = synonym.replaceAll("\\(.*\\)", "").trim();
@@ -222,15 +223,15 @@ public abstract class AbstractStyleRepeatedWordRule  extends TextLevelRule {
       return false;
     }
     List<AnalyzedToken> readings = testToken.getReadings();
-    List<String> lemmas = new ArrayList<String>();
-    for (int i = 0; i < readings.size(); i++) {
-      if (readings.get(i).getLemma() != null) {
-        lemmas.add(readings.get(i).getLemma());
+    List<String> lemmas = new ArrayList<>();
+    for (AnalyzedToken reading : readings) {
+      if (reading.getLemma() != null) {
+        lemmas.add(reading.getLemma());
       }
     }
     for (int i = 0; i < tokens.length; i++) {
       if (i != notCheck && isTokenToCheck(tokens[i])) {
-        if ((!lemmas.isEmpty() && tokens[i].hasAnyLemma(lemmas.toArray(new String[lemmas.size()]))) 
+        if ((!lemmas.isEmpty() && tokens[i].hasAnyLemma(lemmas.toArray(new String[0]))) 
             || isPartOfWord(testToken.getToken(), tokens[i].getToken())) {
           if (notCheck >= 0) {
             if (notCheck == i - 2) {
@@ -316,6 +317,11 @@ public abstract class AbstractStyleRepeatedWordRule  extends TextLevelRule {
       pos += sentences.get(n).getText().length();
     }
     return toRuleMatchArray(ruleMatches);
+  }
+  
+  @Override
+  public int minToCheckParagraph() {
+    return maxDistanceOfSentences;
   }
   
 }

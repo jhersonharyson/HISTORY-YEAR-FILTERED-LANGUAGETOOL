@@ -23,7 +23,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -49,7 +48,6 @@ import org.languagetool.Languages;
 import org.languagetool.MultiThreadedJLanguageTool;
 import org.languagetool.TestTools;
 import org.languagetool.XMLValidator;
-import org.languagetool.databroker.ResourceDataBroker;
 import org.languagetool.rules.Category;
 import org.languagetool.rules.CorrectExample;
 import org.languagetool.rules.ErrorTriggeringExample;
@@ -62,7 +60,7 @@ import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 /**
  * @author Daniel Naber
  */
-public class PatternRuleTest extends AbstractPatternRuleTest{
+public class PatternRuleTest extends AbstractPatternRuleTest {
 
   // A test sentence should only be a single sentence - if that's not the case it can
   // happen that rules are checked as being correct that in reality will never match.
@@ -118,14 +116,14 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
    */
   protected void runGrammarRulesFromXmlTest() throws IOException {
     for (Language lang : Languages.get()) {
-      runGrammarRuleForLanguage(lang);
+        runGrammarRuleForLanguage(lang);
     }
     if (Languages.get().isEmpty()) {
       System.err.println("Warning: no languages found in classpath - cannot run any grammar rule tests");
     }
   }
 
-  private void runGrammarRuleForLanguage(Language lang) throws IOException {
+  protected void runGrammarRuleForLanguage(Language lang) throws IOException {
     if (skipCountryVariant(lang)) {
       System.out.println("Skipping " + lang + " because there are no specific rules for that variant");
       return;
@@ -145,14 +143,101 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
 
   public void runTestForLanguage(Language lang) throws IOException {
     validatePatternFile(lang);
-    System.out.print("Running pattern rule tests for " + lang.getName() + "... ");
-    MultiThreadedJLanguageTool languageTool = new MultiThreadedJLanguageTool(lang);
+    System.out.println("Running pattern rule tests for " + lang.getName() + "... ");
+    MultiThreadedJLanguageTool lt = new MultiThreadedJLanguageTool(lang);
     if (CHECK_WITH_SENTENCE_SPLITTING) {
-      disableSpellingRules(languageTool);
+      disableSpellingRules(lt);
     }
-    MultiThreadedJLanguageTool allRulesLanguageTool = new MultiThreadedJLanguageTool(lang);
-    validateRuleIds(lang, allRulesLanguageTool);
-    List<AbstractPatternRule> rules = getAllPatternRules(lang, languageTool);
+    MultiThreadedJLanguageTool allRulesLt = new MultiThreadedJLanguageTool(lang);
+    validateRuleIds(lang, allRulesLt);
+    validateSentenceStartNotInMarker(allRulesLt);
+    List<AbstractPatternRule> rules = getAllPatternRules(lang, lt);
+    testRegexSyntax(lang, rules);
+    testExamplesExist(lang, rules);
+    testGrammarRulesFromXML(rules, lt, allRulesLt, lang);
+    System.out.println(rules.size() + " rules tested.");
+    allRulesLt.shutdown();
+    lt.shutdown();
+  }
+
+  private void validatePatternFile(Language lang) throws IOException {
+    validatePatternFile(getGrammarFileNames(lang));
+  }
+  
+  protected void validatePatternFile(List<String> grammarFiles) throws IOException {
+    XMLValidator validator = new XMLValidator();
+    for (String grammarFile : grammarFiles) {
+      System.out.println("Running XML validation for " + grammarFile + "...");
+      String rulesDir = JLanguageTool.getDataBroker().getRulesDir();
+      String ruleFilePath = rulesDir + "/" + grammarFile;
+      try (InputStream xmlStream = this.getClass().getResourceAsStream(ruleFilePath)) {
+        if (xmlStream == null) {
+          System.out.println("No rule file found at " + ruleFilePath + " in classpath. THIS SHOULD BE FIXED!");
+          continue;
+        }
+        // if there are multiple xml grammar files we'll prepend all unification elements 
+        // from the first file to the rest of them 
+        if (grammarFiles.size() > 1 && !grammarFiles.get(0).equals(grammarFile)) {
+          validator.validateWithXmlSchema(rulesDir + "/" + grammarFiles.get(0), ruleFilePath, rulesDir + "/rules.xsd");
+        } else {
+          validator.validateWithXmlSchema(ruleFilePath, rulesDir + "/rules.xsd");
+        }
+      }
+    }
+  }
+
+  private void validateRuleIds(Language lang, JLanguageTool lt) {
+    List<Rule> allRules = lt.getAllRules();
+    Set<String> categoryIds = new HashSet<>();
+    new RuleIdValidator(lang).validateUniqueness();
+    for (Rule rule : allRules) {
+      if (rule.getId().equalsIgnoreCase("ID")) {
+        System.err.println("WARNING: " + lang.getShortCodeWithCountryAndVariant() + " has a rule with id 'ID', this should probably be changed");
+      }
+      Category category = rule.getCategory();
+      if (category != null && category.getId() != null) {
+        String catId = category.getId().toString();
+        if (!catId.matches("[A-Z0-9_-]+") && !categoryIds.contains(catId)) {
+          System.err.println("WARNING: category id '" + catId + "' doesn't match expected regexp [A-Z0-9_-]+");
+          categoryIds.add(catId);
+        }
+      }
+    }
+  }
+
+  /*
+   * A <marker> that covers the SENT_START can lead to obscure offset issues, so warn about that. 
+   */
+  private void validateSentenceStartNotInMarker(JLanguageTool lt) {
+    System.out.println("Check that sentence start tag is not included in <marker>....");
+    List<Rule> rules = lt.getAllRules();
+    for (Rule rule : rules) {
+      if (rule instanceof AbstractPatternRule) {
+        List<PatternToken> patternTokens = ((AbstractPatternRule) rule).getPatternTokens();
+        if (patternTokens != null) {
+          boolean hasExplicitMarker = patternTokens.stream().anyMatch(PatternToken::isInsideMarker);
+          for (PatternToken patternToken : patternTokens) {
+            if ((patternToken.isInsideMarker() || !hasExplicitMarker) && patternToken.isSentenceStart()) {
+              System.err.println("WARNING: Sentence start in <marker>: " + ((AbstractPatternRule) rule).getFullId() +
+                      " (hasExplicitMarker: " + hasExplicitMarker + ") - please move the <marker> so the SENT_START is not covered");
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private void disableSpellingRules(JLanguageTool lt) {
+    List<Rule> allRules = lt.getAllRules();
+    for (Rule rule : allRules) {
+      if (rule instanceof SpellingCheckRule) {
+        lt.disableRule(rule.getId());
+      }
+    }
+  }
+
+  private void testRegexSyntax(Language lang, List<AbstractPatternRule> rules) {
+    System.out.println("Checking regexp syntax of " + rules.size() + " rules for " + lang + "...");
     for (AbstractPatternRule rule : rules) {
       // Test the rule pattern.
       /* check for useless 'marker' elements commented out - too slow to always run:
@@ -164,7 +249,7 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
 
       // too aggressive for now:
       //PatternTestTools.failIfWhitespaceInToken(rule.getPatternTokens(), rule, lang);
-              
+
       PatternTestTools.warnIfRegexpSyntaxNotKosher(rule.getPatternTokens(),
               rule.getId(), rule.getSubId(), lang);
 
@@ -172,8 +257,13 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
       List<DisambiguationPatternRule> antiPatterns = rule.getAntiPatterns();
       for (DisambiguationPatternRule antiPattern : antiPatterns) {
         PatternTestTools.warnIfRegexpSyntaxNotKosher(antiPattern.getPatternTokens(),
-            antiPattern.getId(), antiPattern.getSubId(), lang);
+                antiPattern.getId(), antiPattern.getSubId(), lang);
       }
+    }
+  }
+
+  private void testExamplesExist(Language lang, List<AbstractPatternRule> rules) {
+    for (AbstractPatternRule rule : rules) {
       if (rule.getCorrectExamples().isEmpty()) {
         boolean correctionExists = false;
         for (IncorrectExample incorrectExample : rule.getIncorrectExamples()) {
@@ -189,109 +279,58 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
         }
       }
     }
-    testGrammarRulesFromXML(rules, languageTool, allRulesLanguageTool, lang);
-    System.out.println(rules.size() + " rules tested.");
-    allRulesLanguageTool.shutdown();
-    languageTool.shutdown();
-  }
-
-  private void validatePatternFile(Language lang) throws IOException {
-    XMLValidator validator = new XMLValidator();
-    List<String> grammarFiles = getGrammarFileNames(lang);
-    for (String grammarFile : grammarFiles) {
-      System.out.println("Running XML validation for " + grammarFile + "...");
-      String rulesDir = JLanguageTool.getDataBroker().getRulesDir();
-      String ruleFilePath = rulesDir + "/" + grammarFile;
-      try (InputStream xmlStream = this.getClass().getResourceAsStream(ruleFilePath)) {
-        if (xmlStream == null) {
-          System.out.println("No rule file found at " + ruleFilePath + " in classpath");
-          continue;
-        }
-        // if there are multiple xml grammar files we'll prepend all unification elements 
-        // from the first file to the rest of them 
-        if (grammarFiles.size() > 1 && !grammarFiles.get(0).equals(grammarFile)) {
-          validator.validateWithXmlSchema(rulesDir + "/" + grammarFiles.get(0), ruleFilePath, rulesDir + "/rules.xsd");
-        } else {
-          validator.validateWithXmlSchema(ruleFilePath, rulesDir + "/rules.xsd");
-        }
-      }
-    }
-  }
-
-  private void validateRuleIds(Language lang, JLanguageTool languageTool) {
-    List<Rule> allRules = languageTool.getAllRules();
-    Set<String> ids = new HashSet<>();
-    Set<Class> ruleClasses = new HashSet<>();
-    Set<String> categoryIds = new HashSet<>();
-    for (Rule rule : allRules) {
-      assertIdUniqueness(ids, ruleClasses, lang, rule);
-      if (rule.getId().equalsIgnoreCase("ID")) {
-        System.err.println("WARNING: " + lang.getShortCodeWithCountryAndVariant() + " has a rule with id 'ID', this should probably be changed");
-      }
-      Category category = rule.getCategory();
-      if (category != null && category.getId() != null) {
-        String catId = category.getId().toString();
-        if (!catId.matches("[A-Z0-9_-]+") && !categoryIds.contains(catId)) {
-          System.err.println("WARNING: category id '" + catId + "' doesn't match expected regexp [A-Z0-9_-]+");
-          categoryIds.add(catId);
-        }
-      }
-    }
-  }
-
-  private void assertIdUniqueness(Set<String> ids, Set<Class> ruleClasses, Language language, Rule rule) {
-    String ruleId = rule.getId();
-    Class relevantClass = rule instanceof AbstractPatternRule ? AbstractPatternRule.class : rule.getClass();
-    if (ids.contains(ruleId) && !ruleClasses.contains(relevantClass)) {
-      throw new RuntimeException("Rule id occurs more than once: '" + ruleId + "', language: " + language);
-    }
-    ids.add(ruleId);
-    ruleClasses.add(relevantClass);
-  }
-
-  private void disableSpellingRules(JLanguageTool languageTool) {
-    List<Rule> allRules = languageTool.getAllRules();
-    for (Rule rule : allRules) {
-      if (rule instanceof SpellingCheckRule) {
-        languageTool.disableRule(rule.getId());
-      }
-    }
   }
 
   public void testGrammarRulesFromXML(List<AbstractPatternRule> rules,
-                                      JLanguageTool languageTool,
-                                      JLanguageTool allRulesLanguageTool, Language lang) throws IOException {
+                                      JLanguageTool lt,
+                                      JLanguageTool allRulesLt, Language lang) throws IOException {
+    System.out.println("Checking example sentences of " + rules.size() + " rules for " + lang + "...");
     Map<String, AbstractPatternRule> complexRules = new HashMap<>();
+    int skipCount = 0;
+    int i = 0;
     for (AbstractPatternRule rule : rules) {
-      testCorrectSentences(languageTool, allRulesLanguageTool, lang, rule);
-      testBadSentences(languageTool, allRulesLanguageTool, lang, complexRules, rule);
-      testErrorTriggeringSentences(languageTool, lang, rule);
+      String sourceFile = rule.getSourceFile();
+      if (lang.isVariant() && sourceFile != null &&
+        sourceFile.matches("/org/languagetool/rules/" + lang.getShortCode() + "/grammar.*\\.xml") &&
+        !sourceFile.contains("-l2-")) {
+        //System.out.println("Skipping " + rule.getFullId() + " in " + sourceFile + " because we're checking a variant");
+        skipCount++;
+        continue;
+      }
+      testCorrectSentences(lt, allRulesLt, lang, rule);
+      testBadSentences(lt, allRulesLt, lang, complexRules, rule);
+      testErrorTriggeringSentences(lt, lang, rule);
+      if (++i % 100 == 0) {
+        System.out.println("Testing rule " +  i + "...");
+      }
     }
+    System.out.println("Skipped " + skipCount + " rules for variant language to avoid checking rules more than once");
+    
     if (!complexRules.isEmpty()) {
       Set<String> set = complexRules.keySet();
       List<AbstractPatternRule> badRules = new ArrayList<>();
       for (String aSet : set) {
         AbstractPatternRule badRule = complexRules.get(aSet);
-        if (badRule != null && badRule instanceof PatternRule) {
+        if (badRule instanceof PatternRule) {
           ((PatternRule)badRule).notComplexPhrase();
           badRule.setMessage("The rule contains a phrase that never matched any incorrect example.\n" + ((PatternRule) badRule).toPatternString());
           badRules.add(badRule);
         }
       }
       if (!badRules.isEmpty()) {
-        testGrammarRulesFromXML(badRules, languageTool, allRulesLanguageTool, lang);
+        testGrammarRulesFromXML(badRules, lt, allRulesLt, lang);
       }
     }
   }
 
-  private void testBadSentences(JLanguageTool languageTool, JLanguageTool allRulesLanguageTool, Language lang,
+  private void testBadSentences(JLanguageTool lt, JLanguageTool allRulesLt, Language lang,
                                 Map<String, AbstractPatternRule> complexRules, AbstractPatternRule rule) throws IOException {
     List<IncorrectExample> badSentences = rule.getIncorrectExamples();
     if (badSentences.isEmpty()) {
       fail("No incorrect examples found for rule " + rule.getFullId());
     }
     // necessary for XML Pattern rules containing <or>
-    List<AbstractPatternRule> rules = allRulesLanguageTool.getPatternRulesByIdAndSubId(rule.getId(), rule.getSubId());
+    List<AbstractPatternRule> rules = allRulesLt.getPatternRulesByIdAndSubId(rule.getId(), rule.getSubId());
     for (IncorrectExample origBadExample : badSentences) {
       // enable indentation use
       String origBadSentence = origBadExample.getExample().replaceAll("[\\n\\t]+", "");
@@ -301,18 +340,18 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
       if (expectedMatchStart == -1 || expectedMatchEnd == -1) {
         fail(lang + ": No error position markup ('<marker>...</marker>') in bad example in rule " + rule.getFullId());
       }
-      String badSentence = cleanXML(origBadSentence);
+      String badSentence = cleanMarkersInExample(origBadSentence);
       assertTrue(badSentence.trim().length() > 0);
       
       // necessary for XML Pattern rules containing <or>
       List<RuleMatch> matches = new ArrayList<>();
       for (Rule auxRule : rules) { 
-        matches.addAll(getMatches(auxRule, badSentence, languageTool));
+        matches.addAll(getMatches(auxRule, badSentence, lt));
       }
       
       if (rule instanceof RegexPatternRule || rule instanceof PatternRule && !((PatternRule)rule).isWithComplexPhrase()) {
         if (matches.size() != 1) {
-          AnalyzedSentence analyzedSentence = languageTool.getAnalyzedSentence(badSentence);
+          AnalyzedSentence analyzedSentence = lt.getAnalyzedSentence(badSentence);
           StringBuilder sb = new StringBuilder("Analyzed token readings:");
           for (AnalyzedTokenReadings atr : analyzedSentence.getTokens()) {
             sb.append(" ").append(atr);
@@ -352,7 +391,7 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
           for (String replacement : matches.get(0).getSuggestedReplacements()) {
             String fixedSentence = badSentence.substring(0, fromPos)
                 + replacement + badSentence.substring(toPos);
-            matches = getMatches(rule, fixedSentence, languageTool);
+            matches = getMatches(rule, fixedSentence, lt);
             if (matches.size() > 0) {
                 fail("Incorrect input:\n"
                         + "  " + badSentence
@@ -367,7 +406,7 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
         }
       } else { // for multiple rules created with complex phrases
 
-        matches = getMatches(rule, badSentence, languageTool);
+        matches = getMatches(rule, badSentence, lt);
         if (matches.isEmpty()
             && !complexRules.containsKey(rule.getId() + badSentence)) {
           complexRules.put(rule.getId() + badSentence, rule);
@@ -383,17 +422,17 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
           assertEquals(lang + ": Incorrect match position markup (end) for rule " + rule.getFullId(),
                   expectedMatchEnd, matches.get(0).getToPos());
           assertSuggestions(badSentence, lang, expectedCorrections, rule, matches);
-          assertSuggestionsDoNotCreateErrors(badSentence, languageTool, rule, matches);
+          assertSuggestionsDoNotCreateErrors(badSentence, lt, rule, matches);
         }
       }
 
       // check for overlapping rules
-      /*matches = getMatches(rule, badSentence, languageTool);
-      List<RuleMatch> matchesAllRules = allRulesLanguageTool.check(badSentence);
+      /*matches = getMatches(rule, badSentence, lt);
+      List<RuleMatch> matchesAllRules = allRulesLt.check(badSentence);
       for (RuleMatch match : matchesAllRules) {
         if (!match.getRule().getId().equals(rule.getId()) && !matches.isEmpty()
             && rangeIsOverlapping(matches.get(0).getFromPos(), matches.get(0).getToPos(), match.getFromPos(), match.getToPos()))
-          System.err.println("WARN: " + lang.getShortCode() + ": '" + badSentence + "' in "
+          System.err.println("WARNING: " + lang.getShortCode() + ": '" + badSentence + "' in "
                   + rule.getId() + " also matched " + match.getRule().getId());
       }*/
     }
@@ -409,11 +448,11 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
     return max;
   }
 
-  private void testErrorTriggeringSentences(JLanguageTool languageTool, Language lang,
+  private void testErrorTriggeringSentences(JLanguageTool lt, Language lang,
                                             AbstractPatternRule rule) throws IOException {
     for (ErrorTriggeringExample example : rule.getErrorTriggeringExamples()) {
       String sentence = cleanXML(example.getExample());
-      List<RuleMatch> matches = getMatches(rule, sentence, languageTool);
+      List<RuleMatch> matches = getMatches(rule, sentence, lt);
       if (matches.isEmpty()) {
         fail(lang + ": " + rule.getFullId() + ": Example sentence marked with 'triggers_error' didn't actually trigger an error: '" + sentence + "'");
       }
@@ -454,25 +493,25 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
     }
   }
 
-  private void assertSuggestionsDoNotCreateErrors(String badSentence, JLanguageTool languageTool, AbstractPatternRule rule, List<RuleMatch> matches) throws IOException {
+  private void assertSuggestionsDoNotCreateErrors(String badSentence, JLanguageTool lt, AbstractPatternRule rule, List<RuleMatch> matches) throws IOException {
     if (matches.get(0).getSuggestedReplacements().size() > 0) {
       int fromPos = matches.get(0).getFromPos();
       int toPos = matches.get(0).getToPos();
       for (String replacement : matches.get(0).getSuggestedReplacements()) {
         String fixedSentence = badSentence.substring(0, fromPos)
             + replacement + badSentence.substring(toPos);
-        List<RuleMatch> tempMatches = getMatches(rule, fixedSentence, languageTool);
+        List<RuleMatch> tempMatches = getMatches(rule, fixedSentence, lt);
         assertEquals("Corrected sentence for rule " + rule.getFullId()
             + " triggered error: " + fixedSentence, 0, tempMatches.size());
       }
     }
   }
 
-  private void testCorrectSentences(JLanguageTool languageTool, JLanguageTool allRulesLanguageTool,
+  private void testCorrectSentences(JLanguageTool lt, JLanguageTool allRulesLt,
                                     Language lang, AbstractPatternRule rule) throws IOException {
     List<CorrectExample> goodSentences = rule.getCorrectExamples();
     // necessary for XML Pattern rules containing <or>
-    List<AbstractPatternRule> rules = allRulesLanguageTool.getPatternRulesByIdAndSubId(rule.getId(), rule.getSubId());
+    List<AbstractPatternRule> rules = allRulesLt.getPatternRulesByIdAndSubId(rule.getId(), rule.getSubId());
     for (CorrectExample goodSentenceObj : goodSentences) {
       // enable indentation use
       String goodSentence = goodSentenceObj.getExample().replaceAll("[\\n\\t]+", "");
@@ -481,10 +520,10 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
       boolean isMatched = false;
       // necessary for XML Pattern rules containing <or>
       for (Rule auxRule : rules) {
-        isMatched = isMatched || match(auxRule, goodSentence, languageTool);
+        isMatched = isMatched || match(auxRule, goodSentence, lt);
       }
       if (isMatched) {
-        AnalyzedSentence analyzedSentence = languageTool.getAnalyzedSentence(goodSentence);
+        AnalyzedSentence analyzedSentence = lt.getAnalyzedSentence(goodSentence);
         StringBuilder sb = new StringBuilder("Analyzed token readings:");
         for (AnalyzedTokenReadings atr : analyzedSentence.getTokens()) {
           sb.append(" ").append(atr);
@@ -492,13 +531,13 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
         fail(lang + ": Did not expect error in:\n" +
                 "  " + goodSentence + "\n" +
                 "  " + sb + "\n" +
-                "Matching Rule: " + rule.getFullId());
+                "Matching Rule: " + rule.getFullId() + " from " + rule.getSourceFile());
       }
       // avoid matches with all the *other* rules:
       /*
-      List<RuleMatch> matches = allRulesLanguageTool.check(goodSentence);
+      List<RuleMatch> matches = allRulesLt.check(goodSentence);
       for (RuleMatch match : matches) {
-        System.err.println("WARN: " + lang.getShortCode() + ": '" + goodSentence + "' did not match "
+        System.err.println("WARNING: " + lang.getShortCode() + ": '" + goodSentence + "' did not match "
                 + rule.getId() + " but matched " + match.getRule().getId());
       }
       */
@@ -509,23 +548,26 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
     return str.replaceAll("<([^<].*?)>", "");
   }
 
-  private boolean match(Rule rule, String sentence, JLanguageTool languageTool) throws IOException {
-    AnalyzedSentence analyzedSentence = languageTool.getAnalyzedSentence(sentence);
+  protected String cleanMarkersInExample(String str) {
+    return str.replace("<marker>", "").replace("</marker>", "");
+  }
+
+  private boolean match(Rule rule, String sentence, JLanguageTool lt) throws IOException {
+    AnalyzedSentence analyzedSentence = lt.getAnalyzedSentence(sentence);
     RuleMatch[] matches = rule.match(analyzedSentence);
     return matches.length > 0;
   }
 
-  private List<RuleMatch> getMatches(Rule rule, String sentence,
-      JLanguageTool languageTool) throws IOException {
-    AnalyzedSentence analyzedSentence = languageTool.getAnalyzedSentence(sentence);
+  private List<RuleMatch> getMatches(Rule rule, String sentence, JLanguageTool lt) throws IOException {
+    AnalyzedSentence analyzedSentence = lt.getAnalyzedSentence(sentence);
     RuleMatch[] matches = rule.match(analyzedSentence);
     if (CHECK_WITH_SENTENCE_SPLITTING) {
       // "real check" with sentence splitting:
-      for (Rule r : languageTool.getAllActiveRules()) {
-        languageTool.disableRule(r.getId());
+      for (Rule r : lt.getAllActiveRules()) {
+        lt.disableRule(r.getId());
       }
-      languageTool.enableRule(rule.getId());
-      List<RuleMatch> realMatches = languageTool.check(sentence);
+      lt.enableRule(rule.getId());
+      List<RuleMatch> realMatches = lt.check(sentence);
       List<String> realMatchRuleIds = new ArrayList<>();
       for (RuleMatch realMatch : realMatches) {
         realMatchRuleIds.add(realMatch.getRule().getId());
@@ -533,7 +575,7 @@ public class PatternRuleTest extends AbstractPatternRuleTest{
       for (RuleMatch match : matches) {
         String ruleId = match.getRule().getId();
         if (!match.getRule().isDefaultOff() && !realMatchRuleIds.contains(ruleId)) {
-          System.err.println("WARNING: " + languageTool.getLanguage().getName()
+          System.err.println("WARNING: " + lt.getLanguage().getName()
                   + ": missing rule match " + ruleId + " when splitting sentences for test sentence '" + sentence + "'");
         }
       }

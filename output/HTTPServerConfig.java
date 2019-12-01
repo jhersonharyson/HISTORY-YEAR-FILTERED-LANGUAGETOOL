@@ -21,14 +21,14 @@ package org.languagetool.server;
 import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.languagetool.Experimental;
-import org.languagetool.Language;
-import org.languagetool.Languages;
+import org.languagetool.*;
 import org.languagetool.rules.spelling.morfologik.suggestions_ordering.SuggestionsOrdererConfig;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.*;
 
 /**
@@ -51,6 +51,8 @@ public class HTTPServerConfig {
   protected boolean publicAccess = false;
   protected int port = DEFAULT_PORT;
   protected String allowOriginUrl = null;
+
+  protected URI serverURL = null;
   protected int maxTextLength = Integer.MAX_VALUE;
   protected int maxTextHardLength = Integer.MAX_VALUE;
   protected int maxTextLengthWithApiKey = Integer.MAX_VALUE;
@@ -78,19 +80,29 @@ public class HTTPServerConfig {
   protected int maxWorkQueueSize;
   protected File rulesConfigFile = null;
   protected int cacheSize = 0;
-  @Deprecated
-  protected boolean warmUp = false;
+  protected long cacheTTLSeconds = 300;
   protected float maxErrorsPerWordRate = 0;
   protected int maxSpellingSuggestions = 0;
   protected List<String> blockedReferrers = new ArrayList<>();
   protected String hiddenMatchesServer;
   protected int hiddenMatchesServerTimeout;
+  protected int hiddenMatchesServerFailTimeout;
   protected List<Language> hiddenMatchesLanguages = new ArrayList<>();
   protected String dbDriver = null;
   protected String dbUrl = null;
   protected String dbUsername = null;
   protected String dbPassword = null;
   protected boolean dbLogging;
+  protected boolean prometheusMonitoring = false;
+  protected int prometheusPort = 9301;
+  protected GlobalConfig globalConfig = new GlobalConfig();
+  protected List<String> disabledRuleIds = new ArrayList<>();
+  protected boolean stoppable = false;
+
+  protected boolean skipLoggingRuleMatches = false;
+  protected boolean skipLoggingChecks = false;
+
+  protected int slowRuleLoggingThreshold = -1; // threshold in milliseconds, used by SlowRuleLogger; < 0 - disabled
 
   protected String abTest = null;
   /**
@@ -160,6 +172,9 @@ public class HTTPServerConfig {
         case NN_MODEL_OPTION:
           setNeuralNetworkModelDir(args[++i]);
           break;
+        case "--stoppable":  // internal only, doesn't need to be documented
+          stoppable = true;
+          break;
         default:
           if (args[i].contains("=")) {
             System.out.println("WARNING: unknown option: " + args[i] +
@@ -196,6 +211,8 @@ public class HTTPServerConfig {
         if (maxWorkQueueSize < 0) {
           throw new IllegalArgumentException("maxWorkQueueSize must be >= 0: " + maxWorkQueueSize);
         }
+        String url = getOptionalProperty(props, "serverURL", null);
+        setServerURL(url);
         String langModel = getOptionalProperty(props, "languageModel", null);
         if (langModel != null && loadLangModel) {
           setLanguageModelDirectory(langModel);
@@ -232,22 +249,19 @@ public class HTTPServerConfig {
         if (cacheSize < 0) {
           throw new IllegalArgumentException("Invalid value for cacheSize: " + cacheSize + ", use 0 to deactivate cache");
         }
-        if (props.containsKey("warmUp")) {
-          System.err.println("Setting deprecated: 'warmUp'. Look into using pipelineCaching and pipelinePrewarming instead.");
+        if (props.containsKey("cacheTTLSeconds") && !props.containsKey("cacheSize")) {
+          throw new IllegalArgumentException("Use of cacheTTLSeconds without also setting cacheSize has no effect.");
         }
-        String warmUpStr = getOptionalProperty(props, "warmUp", "false");
-        if (warmUpStr.equals("true")) {
-          warmUp = true;
-        } else if (warmUpStr.equals("false")) {
-          warmUp = false;
-        } else {
-          throw new IllegalArgumentException("Invalid value for warmUp: '" + warmUpStr + "', use 'true' or 'false'");
+        cacheTTLSeconds = Integer.parseInt(getOptionalProperty(props, "cacheTTLSeconds", "300"));
+        if (props.containsKey("warmUp")) {
+          System.err.println("Setting ignored: 'warmUp'. Look into using pipelineCaching and pipelinePrewarming instead.");
         }
         maxErrorsPerWordRate = Float.parseFloat(getOptionalProperty(props, "maxErrorsPerWordRate", "0"));
         maxSpellingSuggestions = Integer.parseInt(getOptionalProperty(props, "maxSpellingSuggestions", "0"));
         blockedReferrers = Arrays.asList(getOptionalProperty(props, "blockedReferrers", "").split(",\\s*"));
         hiddenMatchesServer = getOptionalProperty(props, "hiddenMatchesServer", null);
         hiddenMatchesServerTimeout = Integer.parseInt(getOptionalProperty(props, "hiddenMatchesServerTimeout", "1000"));
+        hiddenMatchesServerFailTimeout = Integer.parseInt(getOptionalProperty(props, "hiddenMatchesServerFailTimeout", "10000"));
         String langCodes = getOptionalProperty(props, "hiddenMatchesLanguages", "");
         for (String code : langCodes.split(",\\s*")) {
           if (!code.isEmpty()) {
@@ -259,10 +273,20 @@ public class HTTPServerConfig {
         dbUsername = getOptionalProperty(props, "dbUsername", null);
         dbPassword = getOptionalProperty(props, "dbPassword", null);
         dbLogging = Boolean.valueOf(getOptionalProperty(props, "dbLogging", "false"));
+        prometheusMonitoring = Boolean.valueOf(getOptionalProperty(props, "prometheusMonitoring", "false"));
+        prometheusPort = Integer.parseInt(getOptionalProperty(props, "prometheusPort", "9301"));
+        skipLoggingRuleMatches = Boolean.valueOf(getOptionalProperty(props, "skipLoggingRuleMatches", "false"));
+        skipLoggingChecks = Boolean.valueOf(getOptionalProperty(props, "skipLoggingChecks", "false"));
         if (dbLogging && (dbDriver == null || dbUrl == null || dbUsername == null || dbPassword == null)) {
           throw new IllegalArgumentException("dbLogging can only be true if dbDriver, dbUrl, dbUsername, and dbPassword are all set");
         }
+        slowRuleLoggingThreshold = Integer.valueOf(getOptionalProperty(props, "slowRuleLoggingThreshold", "-1"));
+        disabledRuleIds = Arrays.asList(getOptionalProperty(props, "disabledRuleIds", "").split(",\\s*"));
+        globalConfig.setGrammalecteServer(getOptionalProperty(props, "grammalecteServer", null));
+        globalConfig.setGrammalecteUser(getOptionalProperty(props, "grammalecteUser", null));
+        globalConfig.setGrammalectePassword(getOptionalProperty(props, "grammalectePassword", null));
 
+        addDynamicLanguages(props);
         setAbTest(getOptionalProperty(props, "abTest", null));
       }
     } catch (IOException e) {
@@ -270,7 +294,38 @@ public class HTTPServerConfig {
     }
   }
 
-  private void setLanguageModelDirectory(String langModelDir) {
+  private void addDynamicLanguages(Properties props) throws IOException {
+    for (Object keyObj : props.keySet()) {
+      String key = (String)keyObj;
+      if (key.startsWith("lang-") && !key.contains("-dictPath")) {
+        String code = key.substring("lang-".length());
+        if (!code.contains("-") && code.length() != 2 && code.length() != 3) {
+          throw new IllegalArgumentException("code is supposed to be a 2 (or rarely 3) character code (unless it uses a format with variant, like xx-YY): '" + code + "'");
+        }
+        String nameKey = "lang-" + code;
+        String name = props.getProperty(nameKey);
+        String dictPathKey = "lang-" + code + "-dictPath";
+        String dictPath = props.getProperty(dictPathKey);
+        if (dictPath == null) {
+          throw new IllegalArgumentException(dictPathKey + " must be set");
+        }
+        File dictPathFile = new File(dictPath);
+        if (!dictPathFile.exists() || !dictPathFile.isFile()) {
+          throw new IllegalArgumentException("dictionary file does not exist or is not a file: '" + dictPath + "'");
+        }
+        ServerTools.print("Adding dynamic spell checker language " + name + ", code: " + code + ", dictionary: " + dictPath);
+        Language lang = Languages.addLanguage(name, code, new File(dictPath));
+        // better fail early in case of misconfiguration, so use the language now:
+        if (!new File(lang.getCommonWordsPath()).exists()) {
+          throw new IllegalArgumentException("Common words path not found: '" + lang.getCommonWordsPath() + "'");
+        }
+        JLanguageTool lt = new JLanguageTool(lang);
+        lt.check("test");
+      }
+    }
+  }
+
+  public void setLanguageModelDirectory(String langModelDir) {
     SuggestionsOrdererConfig.setNgramsPath(langModelDir);
     languageModelDir = new File(langModelDir);
     if (!languageModelDir.exists() || !languageModelDir.isDirectory()) {
@@ -333,6 +388,32 @@ public class HTTPServerConfig {
    */
   public void setAllowOriginUrl(String allowOriginUrl) {
     this.allowOriginUrl = allowOriginUrl;
+  }
+
+  /**
+   * @since 4.8
+   * @return prefix / base URL for API requests
+   */
+  @Nullable
+  public URI getServerURL() {
+    return serverURL;
+  }
+
+  /**
+   * @since 4.8
+   * @param url prefix / base URL for API requests
+   */
+  public void setServerURL(@Nullable String url) {
+    if (url != null) {
+      try {
+        // ignore different protocols, ports,... just use path for relative requests
+        serverURL = new URI(new URI(url).getPath());
+      } catch (URISyntaxException e) {
+        throw new IllegalArgumentException("Could not parse provided serverURL: '" + url + "'", e);
+      }
+    } else {
+      serverURL = null;
+    }
   }
 
   /**
@@ -451,7 +532,6 @@ public class HTTPServerConfig {
     return word2vecModelDir;
   }
 
-
   /**
    * Get base directory for neural network models or {@code null}
    * @since 4.4
@@ -537,15 +617,14 @@ public class HTTPServerConfig {
 
   /**
    * @since 4.4
-   * Cache initalized JLanguageTool instances and share between non-parallel requests with identical paramenters
+   * Cache initialized JLanguageTool instances and share between non-parallel requests with identical parameters.
    * Improves response time (especially when dealing with many small requests without specific settings),
    * but increases memory usage
    */
   public boolean isPipelineCachingEnabled() {
     return pipelineCaching;
   }
-
-
+  
   /**
    * @since 4.4
    * Before starting to listen for requests, create a few pipelines for frequently used request settings
@@ -608,12 +687,20 @@ public class HTTPServerConfig {
     this.cacheSize = sentenceCacheSize;
   }
 
-  /** @since 3.7
-   * @deprecated Use pipeline cache and prewarming instead.
-   * */
-  @Deprecated
-  boolean getWarmUp() {
-    return warmUp;
+  /**
+   * Cache entry TTL; refreshed on access; in seconds
+   * @since 4.6
+   */
+  long getCacheTTLSeconds() {
+    return cacheTTLSeconds;
+  }
+
+  /**
+   * Set cache entry TTL in seconds
+   * @since 4.6
+   */
+  void setCacheTTLSeconds(long cacheTTLSeconds) {
+    this.cacheTTLSeconds = cacheTTLSeconds;
   }
 
   /**
@@ -669,6 +756,15 @@ public class HTTPServerConfig {
   @Experimental
   int getHiddenMatchesServerTimeout() {
     return hiddenMatchesServerTimeout;
+  }
+
+  /**
+   * Period to skip requests to hidden matches server after a timeout (in milliseconds)
+   * @since 4.5
+   */
+  @Experimental
+  int getHiddenMatchesServerFailTimeout() {
+    return hiddenMatchesServerFailTimeout;
   }
 
   /**
@@ -780,6 +876,58 @@ public class HTTPServerConfig {
 
 
   /**
+   * @since 4.6
+   */
+  public boolean isPrometheusMonitoring() {
+    return prometheusMonitoring;
+  }
+
+  /**
+   * @since 4.6
+   */
+  public int getPrometheusPort() {
+    return prometheusPort;
+  }
+
+  /**
+   * @since 4.5
+   * @return threshold for rule computation time until a warning gets logged, in milliseconds
+   */
+  @Experimental
+  public int getSlowRuleLoggingThreshold() {
+    return slowRuleLoggingThreshold;
+  }
+
+  /**
+   * @since 4.5
+   */
+  boolean isSkipLoggingRuleMatches() {
+    return this.skipLoggingRuleMatches;
+  }
+
+
+  /**
+   * @since 4.6
+   */
+  public boolean isSkipLoggingChecks() {
+    return skipLoggingChecks;
+  }
+
+  /**
+   * @since 4.7
+   */
+  public List<String> getDisabledRuleIds() {
+    return disabledRuleIds;
+  }
+
+  /**
+   * Whether the server can be stopped by sending a command (useful for tests only).
+   */
+  boolean isStoppable() {
+    return stoppable;
+  }
+  
+  /**
    * @since 4.4
    * See if a specific A/B-Test is to be run
    */
@@ -795,13 +943,12 @@ public class HTTPServerConfig {
    */
   @Experimental
   public void setAbTest(@Nullable String abTest) {
-    List<String> values = Arrays.asList("SuggestionsOrderer");
+    List<String> values = Arrays.asList("SuggestionsOrderer", "SuggestionsRanker");
     if (abTest != null && !values.contains(abTest)) {
         throw new IllegalConfigurationException("Unknown value for 'abTest' property: Must be one of: " + values);
     }
     this.abTest = abTest;
   }
-
 
   /**
    * @throws IllegalConfigurationException if property is not set 

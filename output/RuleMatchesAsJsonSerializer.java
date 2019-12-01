@@ -22,13 +22,9 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import org.languagetool.DetectedLanguage;
 import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
 import org.languagetool.markup.AnnotatedText;
 import org.languagetool.markup.AnnotatedTextBuilder;
-import org.languagetool.rules.Category;
-import org.languagetool.rules.CategoryId;
-import org.languagetool.rules.RuleInformation;
-import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.*;
 import org.languagetool.rules.patterns.AbstractPatternRule;
 
 import java.io.IOException;
@@ -46,9 +42,21 @@ public class RuleMatchesAsJsonSerializer {
   private static final String STATUS = "";
   private static final String PREMIUM_HINT = "You might be missing errors only the Premium version can find. Contact us at support<at>languagetoolplus.com.";
   private static final String START_MARKER = "__languagetool_start_marker";
-
-  private final JsonFactory factory = new JsonFactory();
+  private static final JsonFactory factory = new JsonFactory();
   
+  private final int compactMode;
+
+  public RuleMatchesAsJsonSerializer() {
+    this.compactMode = 0;
+  }
+
+  /**
+   * @since 4.7
+   */
+  public RuleMatchesAsJsonSerializer(int compactMode) {
+    this.compactMode = compactMode;
+  }
+
   public String ruleMatchesToJson(List<RuleMatch> matches, String text, int contextSize, DetectedLanguage detectedLang) {
     return ruleMatchesToJson(matches, new ArrayList<>(), text, contextSize, detectedLang, null);
   }
@@ -82,9 +90,9 @@ public class RuleMatchesAsJsonSerializer {
         writeSoftwareSection(g);
         writeWarningsSection(g, incompleteResultsReason);
         writeLanguageSection(g, detectedLang);
-        writeMatchesSection("matches", g, matches, text, contextTools, detectedLang.getGivenLanguage());
+        writeMatchesSection("matches", g, matches, text, contextTools);
         if (hiddenMatches != null && hiddenMatches.size() > 0) {
-          writeMatchesSection("hiddenMatches", g, hiddenMatches, text, contextTools, detectedLang.getGivenLanguage());
+          writeMatchesSection("hiddenMatches", g, hiddenMatches, text, contextTools);
         }
         g.writeEndObject();
       }
@@ -95,6 +103,9 @@ public class RuleMatchesAsJsonSerializer {
   }
 
   private void writeSoftwareSection(JsonGenerator g) throws IOException {
+    if (compactMode == 1) {
+      return;
+    }
     g.writeObjectFieldStart("software");
     g.writeStringField("name", "LanguageTool");
     g.writeStringField("version", JLanguageTool.VERSION);
@@ -109,6 +120,9 @@ public class RuleMatchesAsJsonSerializer {
   }
 
   private void writeWarningsSection(JsonGenerator g, String incompleteResultsReason) throws IOException {
+    if (compactMode == 1 && incompleteResultsReason == null) {
+      return;
+    }
     g.writeObjectFieldStart("warnings");
     if (incompleteResultsReason != null) {
       g.writeBooleanField("incompleteResults", true);
@@ -123,15 +137,21 @@ public class RuleMatchesAsJsonSerializer {
     g.writeObjectFieldStart("language");
     g.writeStringField("name", detectedLang.getGivenLanguage().getName());
     g.writeStringField("code", detectedLang.getGivenLanguage().getShortCodeWithCountryAndVariant());
+    if (detectedLang.getGivenLanguage().isSpellcheckOnlyLanguage()) {
+      g.writeBooleanField("spellCheckOnly", true);
+    }
     g.writeObjectFieldStart("detectedLanguage");
     g.writeStringField("name", detectedLang.getDetectedLanguage().getName());
     g.writeStringField("code", detectedLang.getDetectedLanguage().getShortCodeWithCountryAndVariant());
     g.writeNumberField("confidence", detectedLang.getDetectionConfidence());
+    if (detectedLang.getDetectedLanguage().isSpellcheckOnlyLanguage()) {
+      g.writeBooleanField("spellCheckOnly", true);
+    }
     g.writeEndObject();
     g.writeEndObject();
   }
 
-  private void writeMatchesSection(String sectionName, JsonGenerator g, List<RuleMatch> matches, AnnotatedText text, ContextTools contextTools, Language lang) throws IOException {
+  private void writeMatchesSection(String sectionName, JsonGenerator g, List<RuleMatch> matches, AnnotatedText text, ContextTools contextTools) throws IOException {
     g.writeArrayFieldStart(sectionName);
     for (RuleMatch match : matches) {
       g.writeStartObject();
@@ -147,7 +167,11 @@ public class RuleMatchesAsJsonSerializer {
       g.writeStringField("typeName", match.getType().toString());
       g.writeEndObject();
       writeRule(g, match);
-      g.writeBooleanField("ignoreForIncompleteSentence", RuleInformation.ignoreForIncompleteSentences(match.getRule().getId(), lang));
+      // 3 is a guess - key 'ignoreForIncompleteSentence' isn't official and can hopefully be removed in the future
+      // now that we have 'contextForSureMatch':
+      int contextEstimate = match.getRule().estimateContextForSureMatch();
+      g.writeBooleanField("ignoreForIncompleteSentence", contextEstimate == -1 || contextEstimate > 3);
+      g.writeNumberField("contextForSureMatch", contextEstimate);
       g.writeEndObject();
     }
     g.writeEndArray();
@@ -159,9 +183,20 @@ public class RuleMatchesAsJsonSerializer {
   
   private void writeReplacements(JsonGenerator g, RuleMatch match) throws IOException {
     g.writeArrayFieldStart("replacements");
-    for (String replacement : match.getSuggestedReplacements()) {
+    boolean autoCorrect = match.isAutoCorrect();
+    for (SuggestedReplacement replacement : match.getSuggestedReplacementObjects()) {
       g.writeStartObject();
-      g.writeStringField("value", replacement);
+      g.writeStringField("value", replacement.getReplacement());
+      if (replacement.getShortDescription() != null) {
+        g.writeStringField("shortDescription", replacement.getShortDescription());
+      }
+      if (autoCorrect) {
+        g.writeBooleanField("autoCorrect", true);
+        autoCorrect = false; // only for first replacement
+      }
+      if (replacement.getConfidence() != null) {
+        g.writeNumberField("confidence", replacement.getConfidence());
+      }
       g.writeEndObject();
     }
     g.writeEndArray();
@@ -171,13 +206,15 @@ public class RuleMatchesAsJsonSerializer {
     String context = contextTools.getContext(match.getFromPos(), match.getToPos(), text.getTextWithMarkup());
     int contextOffset = context.indexOf(START_MARKER);
     context = context.replaceFirst(START_MARKER, "");
-    g.writeObjectFieldStart("context");
-    g.writeStringField("text", context);
-    g.writeNumberField("offset", contextOffset);
-    g.writeNumberField("length", match.getToPos()-match.getFromPos());
-    g.writeEndObject();
-    if (match.getSentence() != null) {
-      g.writeStringField("sentence", match.getSentence().getText().trim());
+    if (compactMode != 1) {
+      g.writeObjectFieldStart("context");
+      g.writeStringField("text", context);
+      g.writeNumberField("offset", contextOffset);
+      g.writeNumberField("length", match.getToPos()-match.getFromPos());
+      g.writeEndObject();
+      if (match.getSentence() != null) {
+        g.writeStringField("sentence", match.getSentence().getText().trim());
+      }
     }
   }
 

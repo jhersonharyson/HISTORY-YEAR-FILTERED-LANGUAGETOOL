@@ -23,8 +23,12 @@ import java.util.List;
 
 import org.jetbrains.annotations.Nullable;
 
+import com.sun.star.beans.Property;
+import com.sun.star.beans.UnknownPropertyException;
+import com.sun.star.beans.XPropertySet;
 import com.sun.star.frame.XController;
 import com.sun.star.frame.XModel;
+import com.sun.star.lang.WrappedTargetException;
 import com.sun.star.lang.XComponent;
 import com.sun.star.text.XParagraphCursor;
 import com.sun.star.text.XText;
@@ -45,28 +49,11 @@ class DocumentCursorTools {
   
   private final XParagraphCursor xPCursor;
   private final XTextViewCursor xVCursor;
+  private final List<Integer> headerNumbers = new ArrayList<Integer>();
   
   DocumentCursorTools(XComponentContext xContext) {
     xPCursor = getParagraphCursor(xContext);
     xVCursor = getViewCursor(xContext);
-  }
-
-  /**
-   * Returns the current text document (if any) 
-   * Returns null if it fails
-   */
-  @Nullable
-  private XTextDocument getCurrentDocument(XComponentContext xContext) {
-    try {
-      XComponent curComp = OfficeTools.getCurrentComponent(xContext);
-      if (curComp == null) {
-        return null;
-      }
-      else return UnoRuntime.queryInterface(XTextDocument.class, curComp);
-    } catch (Throwable t) {
-      MessageHandler.printException(t);     // all Exceptions thrown by UnoRuntime.queryInterface are caught
-      return null;           // Return null as method failed
-    }
   }
 
   /** 
@@ -76,7 +63,7 @@ class DocumentCursorTools {
   @Nullable
   private XTextCursor getCursor(XComponentContext xContext) {
     try {
-      XTextDocument curDoc = getCurrentDocument(xContext);
+      XTextDocument curDoc = OfficeTools.getCurrentDocument(xContext);
       if (curDoc == null) {
         return null;
       }
@@ -107,7 +94,17 @@ class DocumentCursorTools {
       MessageHandler.printException(t);     // all Exceptions thrown by UnoRuntime.queryInterface are caught
       return null;           // Return null as method failed
     }
-}
+  }
+  
+  /** 
+   * Returns ParagraphCursor from TextCursor 
+   * Returns null if it fails
+   * @return 
+   */
+  @Nullable
+  public XParagraphCursor getParagraphCursor() {
+    return xPCursor;
+  }
   
   /** 
    * Returns ViewCursor 
@@ -141,6 +138,30 @@ class DocumentCursorTools {
   }
   
   /** 
+   * Returns a Paragraph cursor from ViewCursor 
+   * Returns null if method fails
+   */
+  XParagraphCursor getParagraphCursorFromViewCursor() {
+    try {
+      if (xVCursor == null) {
+        return null;
+      }
+      XText xDocumentText = xVCursor.getText();
+      if (xDocumentText == null) {
+        return null;
+      }
+      XTextCursor xModelCursor = xDocumentText.createTextCursorByRange(xVCursor.getStart());
+      if (xModelCursor == null) {
+        return null;
+      }
+      return UnoRuntime.queryInterface(XParagraphCursor.class, xModelCursor);
+    } catch (Throwable t) {
+      MessageHandler.printException(t);     // all Exceptions thrown by UnoRuntime.queryInterface are caught
+      return null;             // Return null as method failed
+    }
+  }
+  
+  /** 
    * Returns Number of all Paragraphs of Document without footnotes etc.  
    * Returns 0 if it fails
    */
@@ -167,17 +188,26 @@ class DocumentCursorTools {
   List<String> getAllTextParagraphs() {
     try {
       List<String> allParas = new ArrayList<>();
+      headerNumbers.clear();
       if (xPCursor == null) {
         return null;
       }
+      int paraNum = 0;
       xPCursor.gotoStart(false);
       xPCursor.gotoStartOfParagraph(false);
       xPCursor.gotoEndOfParagraph(true);
       allParas.add(xPCursor.getString());
+      if(isHeadingOrTitle()) {
+        headerNumbers.add(paraNum);
+      }
       while (xPCursor.gotoNextParagraph(false)) {
         xPCursor.gotoStartOfParagraph(false);
         xPCursor.gotoEndOfParagraph(true);
         allParas.add(xPCursor.getString());
+        paraNum++;
+        if(isHeadingOrTitle()) {
+          headerNumbers.add(paraNum);
+        }
       }
       return allParas;
     } catch (Throwable t) {
@@ -192,19 +222,7 @@ class DocumentCursorTools {
    */
   int getViewCursorParagraph() {
     try {
-      if (xVCursor == null) {
-        return -4;
-      }
-      XText xDocumentText = xVCursor.getText();
-      if (xDocumentText == null) {
-        return -3;
-      }
-      XTextCursor xModelCursor = xDocumentText.createTextCursorByRange(xVCursor.getStart());
-      if (xModelCursor == null) {
-        return -2;
-      }
-      XParagraphCursor xParagraphCursor = UnoRuntime.queryInterface(
-          XParagraphCursor.class, xModelCursor);
+      XParagraphCursor xParagraphCursor = getParagraphCursorFromViewCursor();
       if (xParagraphCursor == null) {
         return -1;
       }
@@ -214,6 +232,63 @@ class DocumentCursorTools {
     } catch (Throwable t) {
       MessageHandler.printException(t);     // all Exceptions thrown by UnoRuntime.queryInterface are caught
       return -5;             // Return negative value as method failed
+    }
+  }
+  
+  /** 
+   * Returns character number in paragraph
+   * Returns a negative value if it fails
+   */
+  int getViewCursorCharacter() {
+    try {
+      XParagraphCursor xParagraphCursor = getParagraphCursorFromViewCursor();
+      if (xParagraphCursor == null) {
+        return -1;
+      }
+      xParagraphCursor.gotoStartOfParagraph(true);
+      return xParagraphCursor.getString().length();
+    } catch (Throwable t) {
+      MessageHandler.printException(t);     // all Exceptions thrown by UnoRuntime.queryInterface are caught
+      return -2;             // Return negative value as method failed
+    }
+  }
+  
+  /**
+   * Paragraph is Header or Title
+   */
+  private boolean isHeadingOrTitle() {
+    String paraStyleName;
+    try {
+      XPropertySet xParagraphPropertySet = UnoRuntime.queryInterface(XPropertySet.class, xPCursor.getStart());
+      paraStyleName = (String) xParagraphPropertySet.getPropertyValue("ParaStyleName");
+    } catch (Throwable e) {
+      MessageHandler.printException(e);
+      return false;
+    }
+    return (paraStyleName.startsWith("Heading") || paraStyleName.equals("Title") || paraStyleName.equals("Subtitle"));
+  }
+  
+  /**
+   * Returns List of Paragraph numbers which are Headers or Title
+   */
+  List<Integer> getParagraphHeadings() {
+    return headerNumbers;
+  }
+  
+  void printProperties() {
+    if (xPCursor == null) {
+      MessageHandler.printToLogFile("Properties: ParagraphCursor == null");
+      return;
+    }
+    XPropertySet xParagraphPropertySet = UnoRuntime.queryInterface(XPropertySet.class, xPCursor.getStart());
+    Property[] properties = xParagraphPropertySet.getPropertySetInfo().getProperties();
+    for(Property property : properties) {
+      MessageHandler.printToLogFile("Properties: Name: " + property.Name + ", Type: " + property.Type);
+    }
+    try {
+      MessageHandler.printToLogFile("!!! Properties: ParaStyleName: " + xParagraphPropertySet.getPropertyValue("ParaStyleName"));
+    } catch (Throwable e) {
+      MessageHandler.printException(e);
     }
   }
   

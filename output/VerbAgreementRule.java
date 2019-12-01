@@ -37,8 +37,13 @@ import org.languagetool.rules.patterns.PatternToken;
 import org.languagetool.rules.patterns.PatternTokenBuilder;
 import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.languagetool.tools.StringTools;
-
 import java.io.IOException;
+
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.token;
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.tokenRegex;
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.csToken;
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.pos;
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.posRegex;
 
 /**
  * Simple agreement checker for German verbs and subject. Checks agreement in:
@@ -62,98 +67,116 @@ public class VerbAgreementRule extends TextLevelRule {
 
   private static final List<List<PatternToken>> ANTI_PATTERNS = Arrays.asList(
     Arrays.asList(
-      new PatternTokenBuilder().tokenRegex("die|welche").build(),
-      new PatternTokenBuilder().tokenRegex(".*").build(),
-      new PatternTokenBuilder().tokenRegex("mehr|weniger").build(),
-      new PatternTokenBuilder().token("als").build(),
-      new PatternTokenBuilder().tokenRegex("ich|du|e[rs]|sie").build()
+      // "Kannst mich gerne anrufen" (ugs.)
+      pos("VER:MOD:2:SIN:PRÄ"),
+      posRegex("PRO:PER:.*")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().token("wenn").build(),
-      new PatternTokenBuilder().token("du").build(),
-      new PatternTokenBuilder().token("anstelle").build()
+      tokenRegex("die|welche"),
+      tokenRegex(".*"),
+      tokenRegex("mehr|weniger"),
+      token("als"),
+      tokenRegex("ich|du|e[rs]|sie")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().token("das").build(),
-      new PatternTokenBuilder().csToken("Du").build(),
+      token("wenn"),
+      token("du"),
+      token("anstelle")
+    ),
+    Arrays.asList( // "Ok bin ab morgen bei euch." (umgangssprachlich, benötigt eigene Regel)
+      tokenRegex("ok(ay)?|ja|nein|vielleicht|oh"),
+      tokenRegex("bin|sind")
+    ),
+    Arrays.asList(
+      token("das"),
+      csToken("Du"),
       new PatternTokenBuilder().token("anbieten").matchInflectedForms().build()
     ),
     Arrays.asList(
-      new PatternTokenBuilder().token(",").build(),
-      new PatternTokenBuilder().posRegex("VER:MOD:2:.*").build()
+      token(","),
+      posRegex("VER:MOD:2:.*")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().csToken("Soll").build(),
-      new PatternTokenBuilder().token("ich").build()
+      csToken("Soll"),
+      token("ich")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().csToken("Solltest").build(),
-      new PatternTokenBuilder().token("du").build()
+      csToken("Solltest"),
+      token("du")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().csToken("Sollte").build(),
-      new PatternTokenBuilder().tokenRegex("er|sie").build()
+      csToken("Müsstest"), // Müsstest dir das mal genauer anschauen.
+      token("dir")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().pos(JLanguageTool.SENTENCE_START_TAGNAME).build(),  // "Bin gleich wieder da"
-      new PatternTokenBuilder().csToken("Bin").build()
+      csToken("Könntest"), // Könntest dir mal eine Scheibe davon abschneiden!
+      token("dir")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().token(",").build(),  // "..., hast aber keine Ahnung!"
-      new PatternTokenBuilder().tokenRegex("bin|hast").build()
+      csToken("Sollte"),
+      tokenRegex("er|sie")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().token("er").build(),  // "egal, was er sagen wird, ..."
-      new PatternTokenBuilder().posRegex("VER:.*").build(),
-      new PatternTokenBuilder().token("wird").build()
+      pos(JLanguageTool.SENTENCE_START_TAGNAME),  // "Bin gleich wieder da"
+      tokenRegex("Bin|Kannst")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().tokenRegex("wie|als").build(),  // "Ein Mann wie ich braucht einen Hut"
-      new PatternTokenBuilder().token("ich").build()
+      token(","),  // "..., hast aber keine Ahnung!"
+      tokenRegex("bin|hast|kannst")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().tokenRegex("ich").build(),  // "Ich weiß, was ich tun werde, falls etwas geschehen sollte."
-      new PatternTokenBuilder().pos("VER:INF:NON").build(),
-      new PatternTokenBuilder().token("werde").build()
+      token("er"),  // "egal, was er sagen wird, ..."
+      posRegex("VER:.*"),
+      token("wird")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().pos("VER:IMP:SIN:SFT").build(),  // "Kümmere du dich mal nicht darum!"
-      new PatternTokenBuilder().token("du").build(),
-      new PatternTokenBuilder().token("dich").build()
+      tokenRegex("wie|als"),  // "Ein Mann wie ich braucht einen Hut"
+      token("ich"),
+      posRegex("VER:.*")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().token("sei").build(),
-      new PatternTokenBuilder().token("du").build(),
-      new PatternTokenBuilder().token("selbst").build()
+      tokenRegex("ich"),  // "Ich weiß, was ich tun werde, falls etwas geschehen sollte."
+      pos("VER:INF:NON"),
+      token("werde")
     ),
     Arrays.asList(
-      new PatternTokenBuilder().token("als").build(),  // "Du bist in dem Moment angekommen, als ich gegangen bin."
-      new PatternTokenBuilder().token("ich").build(),
-      new PatternTokenBuilder().posRegex("PA2:.*").build(),
-      new PatternTokenBuilder().token("bin").build()
+      pos("VER:IMP:SIN:SFT"),  // "Kümmere du dich mal nicht darum!"
+      token("du"),
+      token("dich")
     ),
     Arrays.asList(
-     new PatternTokenBuilder().token("als").build(),
-     new PatternTokenBuilder().tokenRegex("du|e[rs]|sie|ich").build(),
+      token("sei"),
+      token("du"),
+      token("selbst")
+    ),
+    Arrays.asList(
+      token("als"),  // "Du bist in dem Moment angekommen, als ich gegangen bin."
+      token("ich"),
+      posRegex("PA2:.*"),
+      token("bin")
+    ),
+    Arrays.asList(
+     token("als"),
+     tokenRegex("du|e[rs]|sie|ich"),
      new PatternTokenBuilder().token("sein").matchInflectedForms().build(),
-     new PatternTokenBuilder().tokenRegex("[\\.,]").build()
+     tokenRegex("[\\.,]")
     ),
     Arrays.asList( // Musst du gehen?
-     new PatternTokenBuilder().tokenRegex("D[au]rf.*|Muss.*").build(),
-     new PatternTokenBuilder().posRegex("PRO:PER:NOM:.+").build(),
-     new PatternTokenBuilder().posRegex("VER:INF:.+").build(),
-     new PatternTokenBuilder().pos("PKT").build(),
-     new PatternTokenBuilder().tokenRegex("(?!die).+").build()
+     tokenRegex("D[au]rf.*|Muss.*"),
+     posRegex("PRO:PER:NOM:.+"),
+     posRegex("VER:INF:.+"),
+     pos("PKT"),
+     tokenRegex("(?!die).+")
     ),
     Arrays.asList(
-     new PatternTokenBuilder().csToken("(").build(),
-     new PatternTokenBuilder().posRegex("VER:2:SIN:.+").build(),
-     new PatternTokenBuilder().csToken(")").build()
+     csToken("("),
+     posRegex("VER:2:SIN:.+"),
+     csToken(")")
     ),
     Arrays.asList(
-     new PatternTokenBuilder().posRegex("VER:MOD:1:PLU:.+").build(),
-     new PatternTokenBuilder().csToken("wir").build(),
-     new PatternTokenBuilder().csToken("bitte").build()
+     posRegex("VER:MOD:1:PLU:.+"),
+     csToken("wir"),
+     csToken("bitte")
     )
   );
 
@@ -224,7 +247,7 @@ public class VerbAgreementRule extends TextLevelRule {
   
   @Override
   public String getDescription() {
-    return "Kongruenz von Subjekt und Prädikat (nur 1. u. 2. Pers. od. m. Personalpronomen), z.B. 'Er bist (ist)'";
+    return "Kongruenz von Subjekt und Prädikat (nur 1. u. 2. Person oder m. Personalpronomen), z.B. 'Er bist (ist)'";
   }
   
   @Override
@@ -340,8 +363,8 @@ public class VerbAgreementRule extends TextLevelRule {
     if (posVer1Sin != -1 && posIch == -1 && !isQuotationMark(tokens[posVer1Sin-1])) { // 1st pers sg verb but no "ich"
       ruleMatches.add(ruleMatchWrongVerb(tokens[posVer1Sin], pos, sentence));
     } else if (posIch > 0 && !isNear(posPossibleVer1Sin, posIch) // check whether verb next to "ich" is 1st pers sg
-               && (tokens[posIch].getToken().equals("ich") || tokens[posIch].getStartPos() == 0) // ignore "lyrisches Ich" etc.
-               && !isQuotationMark(tokens[posIch-1])) {
+               && (tokens[posIch].getToken().equals("ich") || tokens[posIch].getStartPos() <= 1) // ignore "lyrisches Ich" etc.
+               && (!isQuotationMark(tokens[posIch-1])  || posIch < 3 || (posIch > 1 && tokens[posIch-2].getToken().equals(":")))) {
       int plus1 = ((posIch + 1) == tokens.length) ? 0 : +1; // prevent posIch+1 segfault
       BooleanAndFiniteVerb check = verbDoesMatchPersonAndNumber(tokens[posIch - 1], tokens[posIch + plus1], "1", "SIN", finiteVerb);
       if (!check.verbDoesMatchPersonAndNumber && !nextButOneIsModal(tokens, posIch) && !"äußerst".equals(check.finiteVerb.getToken())) {
@@ -351,7 +374,8 @@ public class VerbAgreementRule extends TextLevelRule {
     
     if (posVer2Sin != -1 && posDu == -1 && !isQuotationMark(tokens[posVer2Sin-1])) {
       ruleMatches.add(ruleMatchWrongVerb(tokens[posVer2Sin], pos, sentence));
-    } else if (posDu > 0 && !isNear(posPossibleVer2Sin, posDu) && (!isQuotationMark(tokens[posDu-1]) || posDu < 3 || (posDu > 1 && tokens[posDu-2].getToken().equals(":")))) {
+    } else if (posDu > 0 && !isNear(posPossibleVer2Sin, posDu)
+               &&(!isQuotationMark(tokens[posDu-1]) || posDu < 3 || (posDu > 1 && tokens[posDu-2].getToken().equals(":")))) {
       int plus1 = ((posDu + 1) == tokens.length) ? 0 : +1;
       BooleanAndFiniteVerb check = verbDoesMatchPersonAndNumber(tokens[posDu - 1], tokens[posDu + plus1], "2", "SIN", finiteVerb);
       if (!check.verbDoesMatchPersonAndNumber &&
@@ -363,7 +387,8 @@ public class VerbAgreementRule extends TextLevelRule {
       }
     }
     
-    if (posEr > 0 && !isNear(posPossibleVer3Sin, posEr) && !isQuotationMark(tokens[posEr-1])) {
+    if (posEr > 0 && !isNear(posPossibleVer3Sin, posEr)
+        && (!isQuotationMark(tokens[posEr-1])  || posEr < 3 || (posEr > 1 && tokens[posEr-2].getToken().equals(":")))) {
       int plus1 = ((posEr + 1) == tokens.length) ? 0 : +1;
       BooleanAndFiniteVerb check = verbDoesMatchPersonAndNumber(tokens[posEr - 1], tokens[posEr + plus1], "3", "SIN", finiteVerb);
       if (!check.verbDoesMatchPersonAndNumber 
@@ -414,7 +439,7 @@ public class VerbAgreementRule extends TextLevelRule {
   private boolean hasUnambiguouslyPersonAndNumber(AnalyzedTokenReadings tokenReadings, String person, String number) {
     if (tokenReadings.getToken().length() == 0
         || (Character.isUpperCase(tokenReadings.getToken().charAt(0)) && tokenReadings.getStartPos() != 0)
-        || !tokenReadings.hasPartialPosTag("VER")) {
+        || !tokenReadings.hasPosTagStartingWith("VER")) {
       return false;
     }
     for (AnalyzedToken analyzedToken : tokenReadings) {
@@ -435,7 +460,7 @@ public class VerbAgreementRule extends TextLevelRule {
   private boolean isFiniteVerb(AnalyzedTokenReadings token) {
     if (token.getToken().length() == 0
         || (Character.isUpperCase(token.getToken().charAt(0)) && token.getStartPos() != 0)
-        || !token.hasPartialPosTag("VER")
+        || !token.hasPosTagStartingWith("VER")
         || token.hasAnyPartialPosTag("PA2", "PRO:", "ZAL")
         || "einst".equals(token.getToken())) {
       return false;
@@ -591,5 +616,10 @@ public class VerbAgreementRule extends TextLevelRule {
       this.verbDoesMatchPersonAndNumber = verbDoesMatchPersonAndNumber;
       this.finiteVerb = finiteVerb;
     }
+  }
+
+  @Override
+  public int minToCheckParagraph() {
+    return 0;
   }
 }

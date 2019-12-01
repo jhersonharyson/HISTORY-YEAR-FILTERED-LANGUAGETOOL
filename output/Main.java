@@ -19,8 +19,8 @@
 package org.languagetool.openoffice;
 
 import java.io.File;
+import java.text.MessageFormat;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.ResourceBundle;
 import java.util.Set;
@@ -31,6 +31,8 @@ import com.sun.star.lang.*;
 import com.sun.star.linguistic2.LinguServiceEvent;
 import com.sun.star.linguistic2.LinguServiceEventFlags;
 
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.SystemUtils;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.Languages;
@@ -63,11 +65,12 @@ public class Main extends WeakBase implements XJobExecutor,
           "com.sun.star.linguistic2.Proofreader",
           "org.languagetool.openoffice.Main" };
 
-  // use a different name than the stand-alone version to avoid conflicts:
-  private static final String CONFIG_FILE = ".languagetool-ooo.cfg";
-
-  // use a log-file for output of messages and debug information:
-  private static final String LOG_FILE = ".LanguageTool.log";
+  private static final String VENDOR_ID = "languagetool.org";
+  private static final String APPLICATION_ID = "LanguageTool";
+  private static final String OFFICE_EXTENSION_ID = "LibreOffice";
+  private static final String CONFIG_FILE = "Languagetool.cfg";
+  private static final String OLD_CONFIG_FILE = ".languagetool-ooo.cfg";
+  private static final String LOG_FILE = "LanguageTool.log";
 
   private static final ResourceBundle MESSAGES = JLanguageTool.getMessageBundle();
 
@@ -77,11 +80,7 @@ public class Main extends WeakBase implements XJobExecutor,
 
   private final List<XLinguServiceEventListener> xEventListeners;
 
-  // Rules disabled using the config dialog box rather than Spelling dialog box
-  // or the context menu.
-  private Set<String> disabledRules = null;
-  private Set<String> disabledRulesUI;
-  private String lastPara = null;
+  private boolean docReset = false;
 
   private XComponentContext xContext;
   
@@ -92,27 +91,11 @@ public class Main extends WeakBase implements XJobExecutor,
     changeContext(xCompContext);
     xEventListeners = new ArrayList<>();
     File homeDir = getHomeDir();
-    String homeDirName = homeDir == null ? "." : homeDir.toString();
-    MessageHandler.init(homeDirName, LOG_FILE);
-    documents = new MultiDocumentsHandler(xContext, getHomeDir(), CONFIG_FILE, MESSAGES, this);
-  }
-
-  private Configuration prepareConfig() {
-    try {
-      Configuration config = documents.getConfiguration();
-      if (config != null) {
-        disabledRules = config.getDisabledRuleIds();
-      }
-      if (disabledRules == null) {
-        disabledRules = new HashSet<>();
-      }
-      disabledRulesUI = new HashSet<>(disabledRules);
-      return config;
-
-    } catch (Throwable t) {
-      MessageHandler.showError(t);
-    }
-    return null;
+    File configDir = getLOConfigDir();
+    String configDirName = configDir == null ? "." : configDir.toString();
+    File oldConfigFile = homeDir == null ? null : new File(homeDir, OLD_CONFIG_FILE);
+    MessageHandler.init(configDirName, LOG_FILE);
+    documents = new MultiDocumentsHandler(xContext, configDir, CONFIG_FILE, oldConfigFile, MESSAGES, this);
   }
 
   void changeContext(XComponentContext xCompContext) {
@@ -148,18 +131,11 @@ public class Main extends WeakBase implements XJobExecutor,
     paRes.aProperties = propertyValues;
     try {
       int[] footnotePositions = getPropertyValues("FootnotePositions", propertyValues);  // since LO 4.3
-      paRes = documents.getCheckResults(paraText, locale, paRes, footnotePositions);
-      if (disabledRules == null) {
-        prepareConfig();
-      }
+      paRes = documents.getCheckResults(paraText, locale, paRes, footnotePositions, docReset);
+      docReset = false;
       if(documents.doResetCheck()) {
         resetCheck();
         documents.optimizeReset();
-        lastPara = paraText;
-      } else if(lastPara != null && !paraText.equals(lastPara)) {
-        resetCheck();
-        documents.optimizeReset();
-        lastPara = null;
       }
     } catch (Throwable t) {
       MessageHandler.showError(t);
@@ -179,6 +155,10 @@ public class Main extends WeakBase implements XJobExecutor,
     }
     return new int[]{};  // e.g. for LO/OO < 4.3 and the 'FootnotePositions' property
   }
+  
+  public SwJLanguageTool getJLanguageTool() {
+    return documents.getLanguageTool();
+  }
 
   /**
    * We leave spell checking to OpenOffice/LibreOffice.
@@ -188,17 +168,27 @@ public class Main extends WeakBase implements XJobExecutor,
   public final boolean isSpellChecker() {
     return false;
   }
+  
+  /**
+   * Returns xContext
+   */
+  public XComponentContext getContext() {
+    return xContext;
+  }
 
   /**
    * Runs LT options dialog box.
    */
   private void runOptionsDialog() {
-    Language lang = documents.getLanguage();
+    Configuration config = documents.getConfiguration();
+    Language lang = config.getDefaultLanguage();
+    if (lang == null) {
+      lang = documents.getLanguage();
+    }
     if (lang == null) {
       return;
     }
-    Configuration config = prepareConfig();
-    ConfigThread configThread = new ConfigThread(documents.getLanguageTool(), lang, config, this);
+    ConfigThread configThread = new ConfigThread(lang, config, this);
     configThread.start();
   }
 
@@ -299,14 +289,8 @@ public class Main extends WeakBase implements XJobExecutor,
    * the doc should be rechecked.
    */
   void resetDocument() {
-    if (resetCheck()) {
-      Configuration config = documents.getConfiguration();
-      documents.setRecheck();
-      disabledRules = config.getDisabledRuleIds();
-      if (disabledRules == null) {
-        disabledRules = new HashSet<>();
-      }
-    }
+    documents.setRecheck();
+    resetCheck();
   }
 
   @Override
@@ -363,6 +347,20 @@ public class Main extends WeakBase implements XJobExecutor,
         if(documents.toggleSwitchedOff()) {
           resetCheck();
         }
+      } else if ("ignoreOnce".equals(sEvent)) {
+        documents.ignoreOnce();
+        resetCheck();
+        documents.optimizeReset();
+      } else if ("deactivateRule".equals(sEvent)) {
+        documents.deactivateRule();
+        resetDocument();
+      } else if ("remoteHint".equals(sEvent)) {
+        if(documents.getConfiguration().useOtherServer()) {
+          MessageHandler.showMessage(MessageFormat.format(MESSAGES.getString("loRemoteInfoOtherServer"), 
+              documents.getConfiguration().getServerUrl()));
+        } else {
+          MessageHandler.showMessage(MESSAGES.getString("loRemoteInfoDefaultServer"));
+        }
       } else {
         MessageHandler.printToLogFile("Sorry, don't know what to do, sEvent = " + sEvent);
       }
@@ -386,8 +384,13 @@ public class Main extends WeakBase implements XJobExecutor,
       // soffice[2149:2703] Apple AWT Java VM was loaded on first thread -- can't start AWT.
       if (!System.getProperty("os.name").contains("OS X")) {
          // Cross-Platform Look And Feel @since 3.7
+         if (System.getProperty("os.name").contains("Linux")) {
+         UIManager.setLookAndFeel("com.sun.java.swing.plaf.gtk.GTKLookAndFeel");
+         }
+         else {
          UIManager.setLookAndFeel(
             UIManager.getSystemLookAndFeelClassName());
+         }
       }
     } catch (Exception ignored) {
       // Well, what can we do...
@@ -405,6 +408,72 @@ public class Main extends WeakBase implements XJobExecutor,
   }
 
   /**
+   * Returns directory to store every information for LT office extension
+   * @since 4.7
+   */
+  private File getLOConfigDir() {
+      String userHome = null;
+      File directory;
+      try {
+        userHome = System.getProperty("user.home");
+      } catch (SecurityException ex) {
+      }
+      if (userHome == null) {
+        MessageHandler.showError(new RuntimeException("Could not get home directory"));
+        directory = null;
+      } else if (SystemUtils.IS_OS_WINDOWS) {
+        File appDataDir = null;
+        try {
+          String appData = System.getenv("APPDATA");
+          if (!StringUtils.isEmpty(appData)) {
+            appDataDir = new File(appData);
+          }
+        } catch (SecurityException ex) {
+        }
+        if (appDataDir != null && appDataDir.isDirectory()) {
+          String path = VENDOR_ID + "\\" + APPLICATION_ID + "\\" + OFFICE_EXTENSION_ID + "\\";
+          directory = new File(appDataDir, path);
+        } else {
+          String path = "Application Data\\" + VENDOR_ID + "\\" + APPLICATION_ID + "\\" + OFFICE_EXTENSION_ID + "\\";
+          directory = new File(userHome, path);
+        }
+      } else if (SystemUtils.IS_OS_LINUX) {
+        File appDataDir = null;
+        try {
+          String xdgConfigHome = System.getenv("XDG_CONFIG_HOME");
+          if (!StringUtils.isEmpty(xdgConfigHome)) {
+            appDataDir = new File(xdgConfigHome);
+            if (!appDataDir.isAbsolute()) {
+              //https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+              //All paths set in these environment variables must be absolute.
+              //If an implementation encounters a relative path in any of these
+              //variables it should consider the path invalid and ignore it.
+              appDataDir = null;
+            }
+          }
+        } catch (SecurityException ex) {
+        }
+        if (appDataDir != null && appDataDir.isDirectory()) {
+          String path = APPLICATION_ID + "/" + OFFICE_EXTENSION_ID + "/";
+          directory = new File(appDataDir, path);
+        } else {
+          String path = ".config/" + APPLICATION_ID + "/" + OFFICE_EXTENSION_ID + "/";
+          directory = new File(userHome, path);
+        }
+      } else if (SystemUtils.IS_OS_MAC_OSX) {
+        String path = "Library/Application Support/" + APPLICATION_ID + "/" + OFFICE_EXTENSION_ID + "/";
+        directory = new File(userHome, path);
+      } else {
+        String path = "." + APPLICATION_ID + "/" + OFFICE_EXTENSION_ID + "/";
+        directory = new File(userHome, path);
+      }
+      if (directory != null && !directory.exists()) {
+        directory.mkdirs();
+      }
+      return directory;
+  }
+
+  /**
    * Will throw exception instead of showing errors as dialogs - use only for test cases.
    * @since 2.9
    */
@@ -412,6 +481,22 @@ public class Main extends WeakBase implements XJobExecutor,
     documents.setTestMode(mode);
     MessageHandler.setTestMode(mode);
   }
+  
+  /**
+   *  get all disabled rules by context menu or spell dialog
+   */
+  public Set<String> getDisabledRules() {
+    return documents.getDisabledRules();
+  }
+  
+  /**
+   *  set disabled rules by context menu or spell dialog
+   */
+  public void setDisabledRules(Set<String> ruleIds) {
+    documents.setDisabledRules(ruleIds);;
+  }
+  
+
 
   private static class AboutDialogThread extends Thread {
 
@@ -437,16 +522,7 @@ public class Main extends WeakBase implements XJobExecutor,
   @Override
   public void ignoreRule(String ruleId, Locale locale) {
     /* TODO: config should be locale-dependent */
-    Configuration config = documents.getConfiguration();
-    disabledRulesUI.add(ruleId);
-    config.setDisabledRuleIds(disabledRulesUI);
-    try {
-      JLanguageTool langTool = documents.getLanguageTool();
-      documents.initCheck();
-      config.saveConfiguration(langTool.getLanguage());
-    } catch (Throwable t) {
-      MessageHandler.showError(t);
-    }
+    documents.addDisabledRule(ruleId);
     documents.setRecheck();
   }
 
@@ -458,16 +534,10 @@ public class Main extends WeakBase implements XJobExecutor,
    */
   @Override
   public void resetIgnoreRules() {
-    Configuration config = documents.getConfiguration();
-    config.setDisabledRuleIds(disabledRules);
-    try {
-      JLanguageTool langTool = documents.getLanguageTool();
-      documents.initCheck();
-      config.saveConfiguration(langTool.getLanguage());
-    } catch (Throwable t) {
-      MessageHandler.showError(t);
-    }
+    documents.resetDisabledRules();
     documents.setRecheck();
+    documents.resetIgnoreOnce();
+    docReset = true;
   }
 
   @Override

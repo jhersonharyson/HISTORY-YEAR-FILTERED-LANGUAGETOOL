@@ -51,8 +51,8 @@ class V2TextChecker extends TextChecker {
 
   @Override
   protected String getResponse(AnnotatedText text, DetectedLanguage lang, Language motherTongue, List<RuleMatch> matches,
-                               List<RuleMatch> hiddenMatches, String incompleteResultsReason) {
-    RuleMatchesAsJsonSerializer serializer = new RuleMatchesAsJsonSerializer();
+                               List<RuleMatch> hiddenMatches, String incompleteResultsReason, int compactMode) {
+    RuleMatchesAsJsonSerializer serializer = new RuleMatchesAsJsonSerializer(compactMode);
     return serializer.ruleMatchesToJson(matches, hiddenMatches, text, CONTEXT_SIZE, lang, incompleteResultsReason);
   }
 
@@ -101,9 +101,9 @@ class V2TextChecker extends TextChecker {
   @Override
   @NotNull
   protected DetectedLanguage getLanguage(String text, Map<String, String> parameters, List<String> preferredVariants,
-                                         List<String> noopLangs) {
+                                         List<String> noopLangs, List<String> preferredLangs) {
     String langParam = parameters.get("language");
-    DetectedLanguage detectedLang = detectLanguageOfString(text, null, preferredVariants, noopLangs);
+    DetectedLanguage detectedLang = detectLanguageOfString(text, null, preferredVariants, noopLangs, preferredLangs);
     Language givenLang;
     if (getLanguageAutoDetect(parameters)) {
       givenLang = detectedLang.getDetectedLanguage();
