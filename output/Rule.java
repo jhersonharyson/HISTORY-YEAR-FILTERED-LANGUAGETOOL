@@ -18,14 +18,17 @@
  */
 package org.languagetool.rules;
 
-import java.io.IOException;
-import java.net.URL;
-import java.util.*;
-
+import com.google.common.base.Suppliers;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.languagetool.*;
 import org.languagetool.rules.patterns.PatternToken;
 import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
+
+import java.io.IOException;
+import java.net.URL;
+import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * Abstract rule class. A Rule describes a language error and can test whether a
@@ -38,16 +41,25 @@ import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
  * make sure that their initialization works fast. For example, if a rule needs
  * to load data from disk, it should store it in a static variable to make sure
  * the loading happens only once.
- * 
+ *
+ * Rules also need to make sure their {@code match()} code is stateless, i.e. that
+ * its results are not influenced by previous calls to {@code match()} (this is relevant
+ * if pipeline caching is used).
+ *
  * @author Daniel Naber
  */
 public abstract class Rule {
 
+  private static final Category MISC = new Category(CategoryIds.MISC, "Miscellaneous");
+
   protected final ResourceBundle messages;
 
-  private List<CorrectExample> correctExamples = new ArrayList<>();
-  private List<IncorrectExample> incorrectExamples = new ArrayList<>();
-  private List<ErrorTriggeringExample> errorTriggeringExamples = new ArrayList<>();
+  @Nullable
+  private List<Tag> tags;
+
+  private List<CorrectExample> correctExamples;
+  private List<IncorrectExample> incorrectExamples;
+  private List<ErrorTriggeringExample> errorTriggeringExamples;
   private ITSIssueType locQualityIssueType = ITSIssueType.Uncategorized;
   private Category category;
   private URL url;
@@ -68,7 +80,7 @@ public abstract class Rule {
     if (messages != null) {
       setCategory(Categories.MISC.getCategory(messages));  // the default, sub classes may overwrite this
     } else {
-      setCategory(new Category(CategoryIds.MISC, "Miscellaneous"));
+      setCategory(MISC);
     }
   }
 
@@ -81,6 +93,15 @@ public abstract class Rule {
   public abstract String getId();
 
   /**
+   * Same as {@link #getId()} for Java rules. For XML rules, this can contain a numbers
+   * that identifies the subrule of a rule group.
+   * @since 4.9
+   */
+  public String getFullId() {
+    return getId();
+  }
+  
+  /**
    * A short description of the error this rule can detect, usually in the language of the text
    * that is checked.
    */
@@ -90,8 +111,10 @@ public abstract class Rule {
    * Check whether the given sentence matches this error rule, i.e. whether it
    * contains the error detected by this rule. Note that the order in which
    * this method is called is not always guaranteed, i.e. the sentence order in the
-   * text may be different than the order in which you get the sentences (this may be the
+   * text may be different from the order in which you get the sentences (this may be the
    * case when LanguageTool is used as a LibreOffice/OpenOffice add-on, for example).
+   * In other words, implementations must be stateless, so that a previous call to
+   * this method has no influence on later calls.
    *
    * @param sentence a pre-analyzed sentence
    * @return an array of {@link RuleMatch} objects
@@ -107,7 +130,6 @@ public abstract class Rule {
    * Returns {@code -1} when the sentence needs to end to be sure there's a match.
    * @since 4.5
    */
-  @Experimental
   public int estimateContextForSureMatch() {
     return 0;
   }
@@ -185,10 +207,11 @@ public abstract class Rule {
   }
 
   /**
-   * Helper for implementing {@link #getAntiPatterns()}.
+   * Helper for implementing {@link #getAntiPatterns()}. The result of this method should better be cached, please see
+   * {@link #cacheAntiPatterns} which does that.
    * @since 3.1
    */
-  protected List<DisambiguationPatternRule> makeAntiPatterns(List<List<PatternToken>> patternList, Language language) {
+  protected static List<DisambiguationPatternRule> makeAntiPatterns(List<List<PatternToken>> patternList, Language language) {
     List<DisambiguationPatternRule> rules = new ArrayList<>();
     for (List<PatternToken> patternTokens : patternList) {
       rules.add(new DisambiguationPatternRule("INTERNAL_ANTIPATTERN", "(no description)", language,
@@ -196,7 +219,16 @@ public abstract class Rule {
     }
     return rules;
   }
-  
+
+  /**
+   * @return a memoizing supplier that caches the result of {@link #makeAntiPatterns}. It makes sense
+   * to store the returned value, e.g. in a field.
+   * @since 5.2
+   */
+  protected static Supplier<List<DisambiguationPatternRule>> cacheAntiPatterns(Language language, List<List<PatternToken>> antiPatterns) {
+    return Suppliers.memoize(() -> makeAntiPatterns(antiPatterns, language));
+  }
+
   /**
    * Whether this rule can be used for text in the given language.
    * Since LanguageTool 2.6, this also works {@link org.languagetool.rules.patterns.PatternRule}s
@@ -209,7 +241,7 @@ public abstract class Rule {
       List<Rule> relevantRules = new ArrayList<>(language.getRelevantRules(JLanguageTool.getMessageBundle(),
           config, null, Collections.emptyList()));  //  empty UserConfig has to be added to prevent null pointer exception
       relevantRules.addAll(language.getRelevantLanguageModelCapableRules(JLanguageTool.getMessageBundle(), null,
-        config, null, Collections.emptyList()));
+        null, config, null, Collections.emptyList()));
       for (Rule relevantRule : relevantRules) {
         relevantRuleClasses.add(relevantRule.getClass());
       }
@@ -251,7 +283,7 @@ public abstract class Rule {
    * Get example sentences that are correct and thus will not match this rule.
    */
   public final List<CorrectExample> getCorrectExamples() {
-    return Collections.unmodifiableList(correctExamples);
+    return correctExamples == null ? Collections.emptyList() : Collections.unmodifiableList(correctExamples);
   }
 
   /**
@@ -265,7 +297,7 @@ public abstract class Rule {
    * Get example sentences that are incorrect and thus will match this rule.
    */
   public final List<IncorrectExample> getIncorrectExamples() {
-    return Collections.unmodifiableList(incorrectExamples);
+    return incorrectExamples == null ? Collections.emptyList() : Collections.unmodifiableList(incorrectExamples);
   }
 
   /**
@@ -281,13 +313,13 @@ public abstract class Rule {
    * @since 3.5
    */
   public final List<ErrorTriggeringExample> getErrorTriggeringExamples() {
-    return Collections.unmodifiableList(this.errorTriggeringExamples);
+    return errorTriggeringExamples == null ? Collections.emptyList() : Collections.unmodifiableList(this.errorTriggeringExamples);
   }
 
   /**
    * @return a category (never null since LT 3.4)
    */
-  public final Category getCategory() {
+  public Category getCategory() {
     return category;
   }
 
@@ -419,6 +451,12 @@ public abstract class Rule {
    * @since 2.5
    */
   protected void addExamplePair(IncorrectExample incorrectSentence, CorrectExample correctSentence) {
+    if (correctExamples == null) {
+      correctExamples = new ArrayList<>(0);
+    }
+    if (incorrectExamples == null) {
+      incorrectExamples = new ArrayList<>(0);
+    }
     String correctExample = correctSentence.getExample();
     int markerStart= correctExample.indexOf("<marker>");
     int markerEnd = correctExample.indexOf("</marker>");
@@ -429,6 +467,56 @@ public abstract class Rule {
       incorrectExamples.add(incorrectSentence);
     }
     correctExamples.add(correctSentence);
+  }
+
+  /**
+   * Convenience method to set a pair of sentences: an incorrect sentence and the same sentence
+   * with the error corrected.
+   * @since 4.9
+   */
+  protected void setExamplePair(IncorrectExample incorrectSentence, CorrectExample correctSentence) {
+    if (incorrectExamples != null) {
+      incorrectExamples.clear();
+    }
+    if (correctSentence != null) {
+      correctExamples.clear();
+    }
+    addExamplePair(incorrectSentence, correctSentence);
+  }
+
+  /**
+   * @since 5.1
+   */
+  public void addTags(List<String> tags) {
+    if (tags.isEmpty()) return;
+
+    List<Tag> myTags = this.tags;
+    if (myTags == null) {
+      this.tags = myTags = new ArrayList<>();
+    }
+    for (String tag : tags) {
+      if (myTags.stream().noneMatch(k -> k.name().equals(tag))) {
+        myTags.add(Tag.valueOf(tag));
+      }
+    }
+  }
+
+  /**
+   * @since 5.1
+   */
+  public void setTags(List<Tag> tags) {
+    this.tags = tags.isEmpty() ? null : Objects.requireNonNull(tags);
+  }
+
+  /** @since 5.1 */
+  @NotNull
+  public List<Tag> getTags() {
+    return tags == null ? Collections.emptyList() : tags;
+  }
+
+  /** @since 5.1 */
+  public boolean hasTag(Tag tag) {
+    return tags != null && tags.contains(tag);
   }
 
 }

@@ -19,11 +19,18 @@
 
 package org.languagetool.rules.spelling.hunspell;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import com.google.common.io.Resources;
+import com.vdurmont.emoji.EmojiParser;
+import org.apache.commons.lang3.StringUtils;
+import org.jetbrains.annotations.NotNull;
+import org.languagetool.*;
+import org.languagetool.languagemodel.LanguageModel;
+import org.languagetool.rules.Categories;
+import org.languagetool.rules.RuleMatch;
+import org.languagetool.rules.SuggestedReplacement;
+import org.languagetool.rules.spelling.SpellingCheckRule;
+
+import java.io.*;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -34,26 +41,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang3.StringUtils;
-import org.jetbrains.annotations.NotNull;
-import org.languagetool.AnalyzedSentence;
-import org.languagetool.AnalyzedTokenReadings;
-import org.languagetool.Experimental;
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.UserConfig;
-import org.languagetool.languagemodel.LanguageModel;
-import org.languagetool.rules.Categories;
-import org.languagetool.rules.RuleMatch;
-import org.languagetool.rules.spelling.SpellingCheckRule;
-import org.languagetool.rules.spelling.suggestions.SuggestionsChanges;
-import org.languagetool.rules.spelling.suggestions.SuggestionsOrderer;
-import org.languagetool.rules.spelling.suggestions.SuggestionsOrdererFeatureExtractor;
-import org.languagetool.rules.spelling.suggestions.XGBoostSuggestionsOrderer;
-import org.languagetool.tools.Tools;
-
-import com.google.common.io.Resources;
-
 /**
  * A hunspell-based spellchecking-rule.
  * 
@@ -63,20 +50,21 @@ import com.google.common.io.Resources;
  * @author Marcin Miłkowski
  */
 public class HunspellRule extends SpellingCheckRule {
-
   public static final String RULE_ID = "HUNSPELL_RULE";
 
   protected static final String FILE_EXTENSION = ".dic";
 
-  protected final SuggestionsOrderer suggestionsOrderer;
-  protected boolean needsInit = true;
-  protected Hunspell hunspell = null;
+  private volatile boolean needsInit = true;
+  protected volatile Hunspell hunspell = null;
 
   private static final ConcurrentLinkedQueue<String> activeChecks = new ConcurrentLinkedQueue<>();
   private static final String NON_ALPHABETIC = "[^\\p{L}]";
 
-  private final boolean monitorRules;
-  private final boolean runningExperiment;
+  private static final boolean monitorRules = System.getProperty("monitorActiveRules") != null;
+
+  //300 most common Portuguese words. They are used to avoid wrong split suggestions
+  private final List<String> commonPortuguesehWords = Arrays.asList(new String[]{"de", "e", "a", "o", "da", "do", "em", "que", "uma", "um", "com", "no", "se", "na", "para", "por", "os", "foi", "como", "dos", "as", "ao", "mais", "sua", "das", "não", "ou", "km", "seu", "pela", "ser", "pelo", "são", "também", "anos", "cidade", "entre", "era", "tem", "mas", "habitantes", "nos", "seus", "área", "até", "ele", "onde", "foram", "população", "região", "sobre", "nas", "nome", "parte", "quando", "ano", "aos", "grande", "mesmo", "pode", "primeiro", "segundo", "sendo", "suas", "ainda", "dois", "estado", "está", "família", "já", "muito", "outros", "americano", "depois", "durante", "maior", "primeira", "forma", "apenas", "banda", "densidade", "dia", "então", "município", "norte", "tempo", "após", "duas", "num", "pelos", "qual", "século", "ter", "todos", "três", "vez", "água", "acordo", "cobertos", "comuna", "contra", "ela", "grupo", "principal", "quais", "sem", "tendo", "às", "álbum", "alguns", "assim", "asteróide", "bem", "brasileiro", "cerca", "desde", "este", "localizada", "mundo", "outras", "período", "seguinte", "sido", "vida", "através", "cada", "conhecido", "final", "história", "partir", "país", "pessoas", "sistema", "terra", "teve", "tinha", "época", "administrativa", "censo", "departamento", "dias", "esta", "filme", "francesa", "música", "província", "série", "vezes", "além", "antes", "eles", "eram", "espécie", "governo", "podem", "vários", "censos", "distrito", "estão", "exemplo", "hoje", "início", "jogo", "lhe", "lugar", "muitos", "média", "novo", "numa", "número", "pois", "possui", "sob", "só", "todo", "tornou", "trabalho", "algumas", "devido", "estava", "fez", "filho", "fim", "grandes", "há", "isso", "lado", "local", "morte", "orbital", "outro", "passou", "países", "quatro", "representa", "seja", "sempre", "sul", "várias", "capital", "chamado", "começou", " enquanto", "fazer", "lançado", "meio", "nova", "nível", "pelas", "poder", "presidente", "redor", "rio", "tarde", "todas", "carreira", "casa", "década", "estimada", "guerra", "havia", "livro", "localidades", "maioria", "muitas", "obra", "origem", "pai", "pouco", "principais", "produção", "programa", "qualquer", "raio", "seguintes", "sucesso", "título", "aproximadamente", "caso", "centro", "conhecida", "construção", "desta", "diagrama", "faz", "ilha", "importante", "mar", "melhor", "menos", "mesma", "metros", "mil", "nacional", "populacional", "quase", "rei", "sede", "segunda", "tipo", "toda", "uso", "velocidade", "vizinhança", "volta", "base", "brasileira", "clube", "desenvolvimento", "deste", "diferentes", "diversos", "empresa", "entanto", "futebol", "geral", "junto", "longo", "obras", "outra", "pertencente", "política", "português", "principalmente", "processo", "quem", "seria", "têm", "versão", "TV", "acima", "atual", "bairro", "chamada", "cinco", "conta", "corpo", "dentro", "deve"});
+
 
   public static Queue<String> getActiveChecks() {
     return activeChecks;
@@ -99,22 +87,15 @@ public class HunspellRule extends SpellingCheckRule {
   /**
    * @since 4.3
    */
-   public HunspellRule(ResourceBundle messages, Language language, UserConfig userConfig, List<Language> altLanguages) {
-     this(messages, language, userConfig, altLanguages, null);
-   }
-   public HunspellRule(ResourceBundle messages, Language language, UserConfig userConfig, List<Language> altLanguages,
-                       LanguageModel languageModel) {
-     super(messages, language, userConfig, altLanguages, languageModel);
-     super.setCategory(Categories.TYPOS.getCategory(messages));
-     this.userConfig = userConfig;
-     this.monitorRules = System.getProperty("monitorActiveRules") != null;
-     if (SuggestionsChanges.isRunningExperiment("NewSuggestionsOrderer")) {
-       suggestionsOrderer = new SuggestionsOrdererFeatureExtractor(language, this.languageModel);
-       runningExperiment = true;
-     } else {
-       suggestionsOrderer = new XGBoostSuggestionsOrderer(language, languageModel);
-       runningExperiment = false;
-     }
+  public HunspellRule(ResourceBundle messages, Language language, UserConfig userConfig, List<Language> altLanguages) {
+    this(messages, language, userConfig, altLanguages, null);
+  }
+
+  public HunspellRule(ResourceBundle messages, Language language, UserConfig userConfig, List<Language> altLanguages,
+                      LanguageModel languageModel) {
+    super(messages, language, userConfig, altLanguages, languageModel);
+    super.setCategory(Categories.TYPOS.getCategory(messages));
+    this.userConfig = userConfig;
   }
 
   @Override
@@ -138,15 +119,13 @@ public class HunspellRule extends SpellingCheckRule {
   @Override
   public RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
     List<RuleMatch> ruleMatches = new ArrayList<>();
-    if (needsInit) {
-      init();
-    }
+    ensureInitialized();
     if (hunspell == null) {
       // some languages might not have a dictionary, be silent about it
       return toRuleMatchArray(ruleMatches);
     }
 
-    String monitoringText = this.getClass().getName() + ":" + this.getId() + ":" + sentence.getText();
+    String monitoringText = getClass().getName() + ":" + getId() + ":" + sentence.getText();
     try {
       if (monitorRules) {
         activeChecks.add(monitoringText);
@@ -169,25 +148,31 @@ public class HunspellRule extends SpellingCheckRule {
           continue;
         }
         if (isMisspelled(word)) {
-          String cleanWord = word;
-          if (word.endsWith(".")) {
-            cleanWord = word.substring(0, word.length()-1);
-          }
-          
+          String cleanWord = word.endsWith(".") ? word.substring(0, word.length() - 1) : word;
           if (i > 0 && prevStartPos != -1) {
             String prevWord = tokens[i-1];
-            if (prevWord.length() > 0) {
+            boolean ignoreSplitting = false;
+            if (this.language.getShortCode().equals("pt") && commonPortuguesehWords.contains(prevWord.toLowerCase())) {
+              ignoreSplitting = true;
+            }
+            if (!ignoreSplitting && prevWord.length() > 0) {
               // "thanky ou" -> "thank you"
               String sugg1a = prevWord.substring(0, prevWord.length()-1);
               String sugg1b = cutOffDot(prevWord.substring(prevWord.length()-1) + word);
               if (!isMisspelled(sugg1a) && !isMisspelled(sugg1b)) {
-                ruleMatches.add(createWrongSplitMatch(sentence, ruleMatches, len, cleanWord, sugg1a, sugg1b, prevStartPos));
+                RuleMatch rm = createWrongSplitMatch(sentence, ruleMatches, len, cleanWord, sugg1a, sugg1b, prevStartPos);
+                if (rm != null) {
+                  ruleMatches.add(rm);
+                }
               }
               // "than kyou" -> "thank you"
-              String sugg2a = prevWord + word.substring(0, 1);
+              String sugg2a = prevWord + word.charAt(0);
               String sugg2b = cutOffDot(word.substring(1));
               if (!isMisspelled(sugg2a) && !isMisspelled(sugg2b)) {
-                ruleMatches.add(createWrongSplitMatch(sentence, ruleMatches, len, cleanWord, sugg2a, sugg2b, prevStartPos));
+                RuleMatch rm = createWrongSplitMatch(sentence, ruleMatches, len, cleanWord, sugg2a, sugg2b, prevStartPos);
+                if (rm != null) {
+                  ruleMatches.add(rm);
+                }
               }
             }
           }
@@ -198,68 +183,13 @@ public class HunspellRule extends SpellingCheckRule {
             messages.getString("desc_spelling_short"));
           ruleMatch.setType(RuleMatch.Type.UnknownWord);
           if (userConfig == null || userConfig.getMaxSpellingSuggestions() == 0 || ruleMatches.size() <= userConfig.getMaxSpellingSuggestions()) {
-            List<String> suggestions = getSuggestions(cleanWord);
-            if (word.endsWith(".")) {
-              int pos = 1;
-              for (String suggestion : getSuggestions(word)) {
-                if (!suggestions.contains(suggestion)) {
-                  suggestions.add(Math.min(pos, suggestions.size()), suggestion.substring(0, suggestion.length()-1));
-                  pos += 2;  // we mix the lists, as we don't know which one is the better one
-                }
+            ruleMatch.setLazySuggestedReplacements(() -> {
+              try {
+                return calcSuggestions(word, cleanWord);
+              } catch (IOException e) {
+                throw new RuntimeException(e);
               }
-            }
-            List<String> additionalTopSuggestions = getAdditionalTopSuggestions(suggestions, cleanWord);
-            if (additionalTopSuggestions.isEmpty() && word.endsWith(".")) {
-              additionalTopSuggestions = getAdditionalTopSuggestions(suggestions, word).
-                stream().map(k -> k.endsWith(".") ? k : k + ".").collect(Collectors.toList());
-            }
-            Collections.reverse(additionalTopSuggestions);
-            for (String additionalTopSuggestion : additionalTopSuggestions) {
-              if (!cleanWord.equals(additionalTopSuggestion)) {
-                suggestions.add(0, additionalTopSuggestion);
-              }
-            }
-            List<String> additionalSuggestions = getAdditionalSuggestions(suggestions, cleanWord);
-            for (String additionalSuggestion : additionalSuggestions) {
-              if (!cleanWord.equals(additionalSuggestion)) {
-                suggestions.addAll(additionalSuggestions);
-              }
-            }
-            Language acceptingLanguage = acceptedInAlternativeLanguage(cleanWord);
-            boolean isSpecialCase = cleanWord.matches(".+-[A-ZÖÄÜ].*");
-            if (acceptingLanguage != null && !isSpecialCase) {
-              if (isAcceptedWordFromLanguage(acceptingLanguage, cleanWord)) {
-                break;
-              }
-              // e.g. "Der Typ ist in UK echt famous" -> could be German 'famos'
-              ruleMatch = new RuleMatch(this, sentence,
-                len, len + cleanWord.length(),
-                Tools.i18n(messages, "accepted_in_alt_language", cleanWord, messages.getString(acceptingLanguage.getShortCode())));
-              ruleMatch.setType(RuleMatch.Type.Hint);
-            }
-            suggestions = filterSuggestions(suggestions, sentence, i);
-            filterDupes(suggestions);
-
-            // TODO user suggestions
-            // use suggestionsOrderer only w/ A/B - Testing or manually enabled experiments
-            if (runningExperiment) {
-              addSuggestionsToRuleMatch(cleanWord, Collections.emptyList(), suggestions,
-                suggestionsOrderer, ruleMatch);
-            } else if (userConfig != null && userConfig.getAbTest() != null &&
-              userConfig.getAbTest().equals("SuggestionsRanker") &&
-              suggestionsOrderer.isMlAvailable() && userConfig.getTextSessionId() != null) {
-              boolean testingA = userConfig.getTextSessionId() % 2 == 0;
-              if (testingA) {
-                addSuggestionsToRuleMatch(cleanWord, Collections.emptyList(), suggestions,
-                  null, ruleMatch);
-              } else {
-                addSuggestionsToRuleMatch(cleanWord, Collections.emptyList(), suggestions,
-                  suggestionsOrderer, ruleMatch);
-              }
-            } else {
-              addSuggestionsToRuleMatch(cleanWord, Collections.emptyList(), suggestions,
-                null, ruleMatch);
-            }
+            });
           } else {
             // limited to save CPU
             ruleMatch.setSuggestedReplacement(messages.getString("too_many_errors"));
@@ -277,20 +207,73 @@ public class HunspellRule extends SpellingCheckRule {
     return toRuleMatchArray(ruleMatches);
   }
 
-  private String cutOffDot(String s) {
+  private List<SuggestedReplacement> calcSuggestions(String word, String cleanWord) throws IOException {
+    List<SuggestedReplacement> suggestions = SuggestedReplacement.convert(getSuggestions(cleanWord));
+    if (word.endsWith(".")) {
+      int pos = 1;
+      for (String suggestion : getSuggestions(word)) {
+        if (suggestions.stream().noneMatch(sr -> suggestion.equals(sr.getReplacement()))) {
+          suggestions.add(Math.min(pos, suggestions.size()), new SuggestedReplacement(suggestion.substring(0, suggestion.length()-1)));
+          pos += 2;  // we mix the lists, as we don't know which one is the better one
+        }
+      }
+    }
+    List<SuggestedReplacement> additionalTopSuggestions = getAdditionalTopSuggestions(suggestions, cleanWord);
+    if (additionalTopSuggestions.isEmpty() && word.endsWith(".")) {
+      additionalTopSuggestions = getAdditionalTopSuggestions(suggestions, word).
+        stream()
+        .map(sugg -> {
+          if (sugg.getReplacement().endsWith(".")) {
+            return sugg;
+          } else {
+            SuggestedReplacement newSugg = new SuggestedReplacement(sugg);
+            newSugg.setReplacement(sugg.getReplacement() + ".");
+            return newSugg;
+          }
+        }).collect(Collectors.toList());
+    }
+    Collections.reverse(additionalTopSuggestions);
+    for (SuggestedReplacement additionalTopSuggestion : additionalTopSuggestions) {
+      if (!cleanWord.equals(additionalTopSuggestion.getReplacement())) {
+        suggestions.add(0, additionalTopSuggestion);
+      }
+    }
+    List<SuggestedReplacement> additionalSuggestions = getAdditionalSuggestions(suggestions, cleanWord);
+    for (SuggestedReplacement additionalSuggestion : additionalSuggestions) {
+      if (!cleanWord.equals(additionalSuggestion.getReplacement())) {
+        suggestions.addAll(additionalSuggestions);
+      }
+    }
+    suggestions = filterDupes(filterSuggestions(suggestions));
+    // Find potentially missing compounds with privacy-friendly logging: we only log a single unknown word with no
+    // meta data and only if it's made up of two valid words, similar to the "UNKNOWN" logging in
+    // GermanSpellerRule:
+    /*if (language.getShortCode().equals("de")) {
+      String covered = sentence.getText().substring(len, len + cleanWord.length());
+      if (suggestions.stream().anyMatch(
+            k -> k.getReplacement().contains(" ") &&
+            StringTools.uppercaseFirstChar(k.getReplacement().replaceAll(" ", "").toLowerCase()).equals(covered) &&
+            k.getReplacement().length() > 6 && k.getReplacement().length() < 25 &&
+            k.getReplacement().matches("[a-zA-ZÖÄÜöäüß -]+")
+          )) {
+        logger.info("COMPOUND: " + covered);
+      }
+    }*/
+    // TODO user suggestions
+    return suggestions;
+  }
+
+  private static String cutOffDot(String s) {
     return s.endsWith(".") ? s.substring(0, s.length()-1) : s;
   }
 
   /**
    * @since public since 4.1
    */
-  @Experimental
   @Override
   public boolean isMisspelled(String word) {
     try {
-      if (needsInit) {
-        init();
-      }
+      ensureInitialized();
       boolean isAlphabetic = true;
       if (word.length() == 1) { // hunspell dictionaries usually do not contain punctuation
         isAlphabetic = Character.isAlphabetic(word.charAt(0));
@@ -307,9 +290,7 @@ public class HunspellRule extends SpellingCheckRule {
   }
 
   public List<String> getSuggestions(String word) throws IOException {
-    if (needsInit) {
-      init();
-    }
+    ensureInitialized();
     return hunspell.suggest(word);
   }
 
@@ -329,7 +310,7 @@ public class HunspellRule extends SpellingCheckRule {
       String token = sentenceTokens[i].getToken();
       if (sentenceTokens[i].isImmunized() || sentenceTokens[i].isIgnoredBySpeller() || isUrl(token) || isEMail(token) || isQuotedCompound(sentence, i, token)) {
         if (isQuotedCompound(sentence, i, token)) {
-          sb.append(" ").append(token.substring(1));
+          sb.append(' ').append(token.substring(1));
         }
         // replace URLs and immunized tokens with whitespace to ignore them for spell checking:
         else if (token.length() < 20) {
@@ -340,17 +321,12 @@ public class HunspellRule extends SpellingCheckRule {
           }
         }
       } else if (token.length() > 1 && token.codePointCount(0, token.length()) != token.length()) {
-        // some symbols such as emojis (😂) have a string length that equals 2 
-        for (int charIndex = 0; charIndex < token.length();) {
-          int unicodeCodePoint = token.codePointAt(charIndex);
-          int increment = Character.charCount(unicodeCodePoint);
-          if (increment == 1) {
-            sb.append(token.charAt(charIndex));
-          } else {
-            sb.append("  ");
-          }
-          charIndex += increment;
+        // some symbols such as emojis (😂) have a string length larger than 1 
+        List<String> emojis = EmojiParser.extractEmojis(token);
+        for (String emoji : emojis) {
+          token = StringUtils.replace(token, emoji, WHITESPACE_ARRAY[emoji.length()]);
         }
+        sb.append(token);
       } else {
         sb.append(token);
       }
@@ -358,8 +334,22 @@ public class HunspellRule extends SpellingCheckRule {
     return sb.toString();
   }
 
+  protected final void ensureInitialized() throws IOException {
+    if (needsInit) {
+      synchronized (this) {
+        if (needsInit) {
+          try {
+            init();
+          } finally {
+            needsInit = false;
+          }
+        }
+      }
+    }
+  }
+
   @Override
-  protected void init() throws IOException {
+  protected synchronized void init() throws IOException {
     super.init();
     String langCountry = language.getShortCode();
     if (language.getCountries().length > 0) {
@@ -384,20 +374,20 @@ public class HunspellRule extends SpellingCheckRule {
       hunspell = Hunspell.getInstance(Paths.get(shortDicPath + ".dic"), affPath);
     }
     if (affPath != null) {
-      Scanner sc = new Scanner(affPath);
-      while (sc.hasNextLine()) {
-        String line = sc.nextLine();
-        if (line.startsWith("WORDCHARS ")) {
-          String wordCharsFromAff = line.substring("WORDCHARS ".length());
-          //System.out.println("#" + wordCharsFromAff+ "#");
-          wordChars = "(?![" + wordCharsFromAff.replace("-", "\\-") + "])";
-          break;
+      try(Scanner sc = new Scanner(affPath)){
+        while (sc.hasNextLine()) {
+          String line = sc.nextLine();
+          if (line.startsWith("WORDCHARS ")) {
+            String wordCharsFromAff = line.substring("WORDCHARS ".length());
+            //System.out.println("#" + wordCharsFromAff+ "#");
+            wordChars = "(?![" + wordCharsFromAff.replace("-", "\\-") + "])";
+            break;
+          }
         }
       }
       
     }
     nonWordPattern = Pattern.compile(wordChars + NON_ALPHABETIC);
-    needsInit = false;
   }
 
   @NotNull
@@ -417,8 +407,8 @@ public class HunspellRule extends SpellingCheckRule {
     }
   }
 
-  private String getDictionaryPath(String dicName,
-      String originalPath) throws IOException {
+  private static String getDictionaryPath(String dicName,
+                                          String originalPath) throws IOException {
 
     URL dictURL = JLanguageTool.getDataBroker().getFromResourceDirAsUrl(originalPath);
     String dictionaryPath;
@@ -452,7 +442,7 @@ public class HunspellRule extends SpellingCheckRule {
     return dictionaryPath;
   }
 
-  private void fileCopy(InputStream in, File targetFile) throws IOException {
+  private static void fileCopy(InputStream in, File targetFile) throws IOException {
     try (OutputStream out = new FileOutputStream(targetFile)) {
       byte[] buf = new byte[1024];
       int len;
@@ -463,15 +453,4 @@ public class HunspellRule extends SpellingCheckRule {
     }
   }
 
-  /**
-   * Used in combination with <code>acceptedInAlternativeLanguage</code> to surpress spelling
-   * errors for words from a foreign language
-   * @param language
-   * @param word
-   * @return true if the {@code word} from {@code language} can be considered as correctly spelled
-   * @since 4.6
-   */
-  protected boolean isAcceptedWordFromLanguage(Language language, String word) {
-    return false;
-  }
 }

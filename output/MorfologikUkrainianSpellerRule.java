@@ -19,15 +19,17 @@
 
 package org.languagetool.rules.uk;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.ResourceBundle;
-import java.util.regex.Pattern;
-
 import org.languagetool.*;
+import org.languagetool.rules.SuggestedReplacement;
 import org.languagetool.rules.spelling.morfologik.MorfologikMultiSpeller;
 import org.languagetool.rules.spelling.morfologik.MorfologikSpellerRule;
-import org.languagetool.tagging.uk.IPOSTag;
+import org.languagetool.tools.StringTools;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.ResourceBundle;
+import java.util.regex.Pattern;
 
 public final class MorfologikUkrainianSpellerRule extends MorfologikSpellerRule {
 
@@ -37,8 +39,13 @@ public final class MorfologikUkrainianSpellerRule extends MorfologikSpellerRule 
   private static final Pattern DO_NOT_SUGGEST_SPACED_PATTERN = Pattern.compile(
         "(авіа|авто|анти|аудіо|відео|водо|гідро|екстра|квазі|кіно|лже|мета|моно|мото|псевдо|пост|радіо|стерео|супер|ультра|фото) .*");
   private static final Pattern INFIX_PATTERN = Pattern.compile("-[а-яіїєґ]{1,5}-");
+  private static final Map<String, String> dashPrefixes2019;
 
-  
+  static {
+    dashPrefixes2019 = ExtraDictionaryLoader.loadMap("/uk/dash_prefixes.txt");
+    dashPrefixes2019.entrySet().removeIf(entry -> entry.getValue().matches(":(ua_1992|bad|alt|slang)") || ! entry.getKey().matches("[а-яіїєґ]{3,}") );
+  }
+
   public MorfologikUkrainianSpellerRule(ResourceBundle messages,
                                         Language language, UserConfig userConfig, List<Language> altLanguages) throws IOException {
     super(messages, language, userConfig, altLanguages);
@@ -58,10 +65,7 @@ public final class MorfologikUkrainianSpellerRule extends MorfologikSpellerRule 
   @Override
   protected boolean isMisspelled(MorfologikMultiSpeller speller, String word) {
     if( word.endsWith("-") ) {
-      if( word.startsWith("-") && INFIX_PATTERN.matcher(word).matches() )
-        return false;
-
-      return true;
+      return !word.startsWith("-") || !INFIX_PATTERN.matcher(word).matches();
     }
   
     if( word.endsWith("²") || word.endsWith("³") ) {
@@ -79,6 +83,23 @@ public final class MorfologikUkrainianSpellerRule extends MorfologikSpellerRule 
     return super.isMisspelled(speller, word);
   }
 
+  @Override
+  protected List<SuggestedReplacement> getAdditionalSuggestions(List<SuggestedReplacement> suggestions, String word) {
+    boolean isCapitalized = StringTools.isCapitalizedWord(word);
+    if( isCapitalized ) {
+      word = word.toLowerCase();
+    }
+    for(String key: dashPrefixes2019.keySet()) {
+      if( word.startsWith(key) 
+          && word.length() > key.length() + 2 
+          && word.charAt(key.length()) != '-' ) {
+        String second = word.substring(key.length());
+        suggestions.add(new SuggestedReplacement(key + "-" + second));
+      }
+    }
+    return suggestions;
+  }
+  
   @Override
   protected boolean ignoreToken(AnalyzedTokenReadings[] tokens, int idx) throws IOException {
     String word = tokens[idx].getToken();
@@ -99,21 +120,21 @@ public final class MorfologikUkrainianSpellerRule extends MorfologikSpellerRule 
       }
     }
     
-    if( word.contains("-") || word.contains("\u2011") || word.endsWith(".") 
-            || word.equalsIgnoreCase("раза") ) {
-      return hasGoodTag(tokens[idx]);
-    }
-
-    return false;
+//    if( word.contains("-") || word.contains("\u2011") || word.endsWith(".") 
+//            || word.equalsIgnoreCase("раза") ) {
+      return hasGoodTag(tokens[idx]); // && ! PosTagHelper.hasPosTagPart(tokens[idx], ":bad");
+//    }
+//
+//    return false;
   }
 
-  private boolean hasGoodTag(AnalyzedTokenReadings tokens) {
+  private static boolean hasGoodTag(AnalyzedTokenReadings tokens) {
     for (AnalyzedToken analyzedToken : tokens) {
       String posTag = analyzedToken.getPOSTag();
       if( posTag != null 
             && ! posTag.equals(JLanguageTool.SENTENCE_END_TAGNAME) 
             && ! posTag.equals(JLanguageTool.PARAGRAPH_END_TAGNAME) 
-            && ! posTag.contains(IPOSTag.bad.getText()) 
+//            && (! posTag.contains(IPOSTag.bad.getText()) || posTag.contains(":latin"))  
             && ! (posTag.contains(":inanim") && posTag.contains(":v_kly")) )
         return true;
     }
@@ -121,11 +142,26 @@ public final class MorfologikUkrainianSpellerRule extends MorfologikSpellerRule 
   }
 
   @Override
-  protected List<String> filterSuggestions(List<String> suggestions, AnalyzedSentence sentence, int i) {
-    suggestions = super.filterSuggestions(suggestions, sentence, i);
+  protected List<SuggestedReplacement> filterSuggestions(List<SuggestedReplacement> suggestions) {
+    suggestions = super.filterSuggestions(suggestions);
     // do not suggest "кіно прокат, вело- прогулянка...":
-    suggestions.removeIf(item -> item.contains(" ") && DO_NOT_SUGGEST_SPACED_PATTERN.matcher(item).matches() || item.contains("- "));
+    suggestions.removeIf(item -> item.getReplacement().contains(" ") &&
+        DO_NOT_SUGGEST_SPACED_PATTERN.matcher(item.getReplacement()).matches() ||
+        item.getReplacement().contains("- "));
     return suggestions;
+  }
+
+  // workaround to allow other rules generate spelling suggestions without invoking match()
+  MorfologikMultiSpeller getSpeller1() {
+    if( speller1 == null ) {
+      try {
+        // we can't call initSpellers() as it's private so we're calling method we can
+        isMisspelled("1");
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    }
+    return speller1;
   }
 
 }

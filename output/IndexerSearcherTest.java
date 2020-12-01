@@ -18,8 +18,8 @@
  */
 package org.languagetool.dev.index;
 
-import static org.languagetool.dev.index.PatternRuleQueryBuilder.FIELD_NAME;
-import static org.languagetool.dev.index.PatternRuleQueryBuilder.FIELD_NAME_LOWERCASE;
+import static org.languagetool.dev.index.Lucene.FIELD_NAME;
+import static org.languagetool.dev.index.Lucene.FIELD_NAME_LOWERCASE;
 
 import java.io.File;
 import java.io.IOException;
@@ -200,7 +200,7 @@ public class IndexerSearcherTest extends LuceneTestCase {
     assertEquals(false, searcherResult.isResultIsTimeLimited());
     assertEquals(1, searcherResult.getMatchingSentences().size());
 
-    searcherResult = errorSearcher.findRuleMatchesOnIndex(getFirstRule("EYE_BROW", language), language);
+    searcherResult = errorSearcher.findRuleMatchesOnIndex(getFirstRule("EYE_COMPOUNDS", language), language);
     assertEquals(1, searcherResult.getCheckedSentences());
     assertEquals(false, searcherResult.isResultIsTimeLimited());
     assertEquals(1, searcherResult.getMatchingSentences().size());

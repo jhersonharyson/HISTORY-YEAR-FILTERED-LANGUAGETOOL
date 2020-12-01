@@ -21,20 +21,17 @@ package org.languagetool.rules.fr;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jetbrains.annotations.NotNull;
 import org.languagetool.AnalyzedSentence;
-import org.languagetool.Experimental;
 import org.languagetool.GlobalConfig;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.net.ssl.SSLHandshakeException;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
-import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -44,10 +41,9 @@ import java.util.*;
  * Queries a local Grammalecte server.
  * @since 4.6
  */
-@Experimental
 public class GrammalecteRule extends Rule {
 
-  private static Logger logger = LoggerFactory.getLogger(GrammalecteRule.class);
+  private static final Logger logger = LoggerFactory.getLogger(GrammalecteRule.class);
   private static final int TIMEOUT_MILLIS = 500;
   private static final long DOWN_INTERVAL_MILLISECONDS = 5000;
 
@@ -67,10 +63,11 @@ public class GrammalecteRule extends Rule {
     "nbsp_avant_deux_points",  // Useful only if we decide to have the rest of the non-breakable space rules.
     "nbsp_ajout_avant_double_ponctuation",  // Useful only if we decide to have the rest of the non-breakable space rules.
     "apostrophe_typographique_après_t",  // Not useful. While being the technically correct character, it does not matter much.
-    "unit_nbsp_avant_unités1",
     "typo_tiret_début_ligne",  // Arguably the same as 50671 and 17342 ; the french special character for lists is a 'tiret cadratin' ; so it should be that instead of a dash. Having it count as a mistake is giving access to the otherwise unaccessible special character. However, lists are a common occurrence, and the special character does not make a real difference. Not really useful but debatable
     "typo_guillemets_typographiques_simples_fermants",
     "typo_apostrophe_incorrecte",
+    "unit_nbsp_avant_unités1",
+    "unit_nbsp_avant_unités2",
     "unit_nbsp_avant_unités3",
     "nbsp_après_double_ponctuation",
     "typo_guillemets_typographiques_simples_ouvrants",
@@ -84,7 +81,22 @@ public class GrammalecteRule extends Rule {
     "typo_points_suspension1",
     "typo_points_suspension2",
     "typo_points_suspension3",
-    "tab_début_ligne"
+    "typo_tiret_incise", // picky
+    "esp_avant_après_tiret", // picky
+    "nbsp_après_tiret1", // picky
+    "nbsp_après_tiret2", // picky
+    "esp_mélangés1", // picky
+    "esp_mélangés2", // picky
+    "tab_début_ligne",
+    "esp_milieu_ligne", // we already have WHITESPACE_RULE
+    "typo_ponctuation_superflue1", // false alarm (1, 2, ...)
+    "esp_insécables_multiples", // temp disabled, unsure how this works with the browser add-ons
+    "typo_espace_manquant_après1", // false alarm in urls (e.g. '&rk=...')
+    "typo_espace_manquant_après2", // false alarm in urls (e.g. '&rk=...')
+    "typo_espace_manquant_après3", // false alarm in file names (e.g. 'La teaser.zip')
+    "typo_tiret_incise2",  // picky
+    "eepi_écriture_épicène_singulier",
+    "g1__eleu_élisions_manquantes__b1_a1_1" // picky
   ));
 
   public GrammalecteRule(ResourceBundle messages, GlobalConfig globalConfig) {
@@ -134,13 +146,6 @@ public class GrammalecteRule extends Rule {
       InputStream input = huc.getInputStream();
       List<RuleMatch> ruleMatches = parseJson(input);
       return toRuleMatchArray(ruleMatches);
-    } catch (SSLHandshakeException | SocketTimeoutException e) {
-      // "hard" errors that will probably not resolve themselves easily:
-      lastRequestError = System.currentTimeMillis();
-      // still fail silently, better to return partial results than an error
-      //throw e;
-      logger.warn("Warn: Failed to query Grammalecte server at " + serverUrl + ": " + e.getClass() + ": " + e.getMessage());
-      e.printStackTrace();
     } catch (Exception e) {
       lastRequestError = System.currentTimeMillis();
       // These are issue that can be request-specific, like wrong parameters. We don't throw an
@@ -157,6 +162,9 @@ public class GrammalecteRule extends Rule {
   private List<RuleMatch> parseJson(InputStream inputStream) throws IOException {
     Map map = mapper.readValue(inputStream, Map.class);
     List matches = (ArrayList) map.get("data");
+    if (matches == null) {
+      throw new RuntimeException("No 'data' found in grammalecte JSON: " + map);  // handled in match()
+    }
     List<RuleMatch> result = new ArrayList<>();
     for (Object match : matches) {
       List<RuleMatch> remoteMatches = getMatches((Map<String, Object>)match);
@@ -193,9 +201,9 @@ public class GrammalecteRule extends Rule {
     return remoteMatches;
   }
 
-  class GrammalecteInternalRule extends Rule {
-    private String id;
-    private String desc;
+  static class GrammalecteInternalRule extends Rule {
+    private final String id;
+    private final String desc;
 
     GrammalecteInternalRule(String id, String desc) {
       this.id = id;

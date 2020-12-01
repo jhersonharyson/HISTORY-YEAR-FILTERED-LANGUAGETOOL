@@ -43,7 +43,7 @@ final class AllConfusionRulesEvaluator {
 
   public static void main(String[] args) throws IOException {
     if (args.length < 3 || args.length > 4) {
-      System.err.println("Usage: " + ConfusionRuleEvaluator.class.getSimpleName()
+      System.err.println("Usage: " + AllConfusionRulesEvaluator.class.getSimpleName()
               + " <langCode> <languageModelTopDir> <wikipediaXml|tatoebaFile|dir>...");
       System.err.println("   <languageModelTopDir> is a directory with sub-directories '1grams', '2grams', and '3grams' with Lucene indexes");
       System.err.println("   <wikipediaXml|tatoebaFile|dir> either a Wikipedia XML dump, or a Tatoeba file or");
@@ -65,8 +65,8 @@ final class AllConfusionRulesEvaluator {
     }
     ConfusionRuleEvaluator eval = new ConfusionRuleEvaluator(lang, languageModel, false, true); // TODO: consider bidirectional
     eval.setVerboseMode(false);
-    ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader();
-    InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream("/en/confusion_sets.txt");
+    ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader(lang);
+    InputStream inputStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream("/" + lang.getShortCode() +"/confusion_sets.txt");
     Map<String,List<ConfusionPair>> confusionSetMap = confusionSetLoader.loadConfusionPairs(inputStream);
     Set<String> done = new HashSet<>();
     int fMeasureCount = 0;
@@ -84,7 +84,8 @@ final class AllConfusionRulesEvaluator {
           String word2 = set2.getString();
           String key = word1 + " " + word2;
           if (!done.contains(key)) {
-            Map<Long, RuleEvalResult> evalResults = eval.run(inputsFiles, word1, word2, MAX_SENTENCES, Arrays.asList(confusionPair.getFactor()));
+            Map<Long, RuleEvalResult> evalResults = eval.run(inputsFiles, word1, word2, MAX_SENTENCES,
+                    Arrays.asList(confusionPair.getFactor()), Collections.emptyMap(), Collections.emptyMap());
             RuleEvalResult evalResult = evalResults.values().iterator().next();
             String summary1 = set1.getDescription() != null ? word1 + "|" + set1.getDescription() : word1;
             String summary2 = set2.getDescription() != null ? word2 + "|" + set2.getDescription() : word2;

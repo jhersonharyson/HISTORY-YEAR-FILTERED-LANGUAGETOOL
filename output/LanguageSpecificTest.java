@@ -18,30 +18,42 @@
  */
 package org.languagetool;
 
+import org.languagetool.language.Demo;
 import org.languagetool.rules.*;
+import org.languagetool.rules.ngrams.FakeLanguageModel;
 import org.languagetool.rules.patterns.AbstractPatternRule;
 import org.languagetool.rules.patterns.PatternRuleLoader;
+import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.tagging.disambiguation.rules.DisambiguationRuleTest;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
+import java.util.stream.Collectors;
 
+import static junit.framework.Assert.fail;
 import static org.junit.Assert.*;
 import static org.junit.Assert.assertEquals;
 
 public class LanguageSpecificTest {
 
   protected void runTests(Language lang) throws IOException {
-    runTests(lang, null);
+    runTests(lang, null, "");
   }
 
   protected void runTests(Language lang, String onlyRunCode) throws IOException {
-    new WordListValidatorTest().testWordListValidity(lang);
+    runTests(lang, onlyRunCode, "");
+  }
+
+  protected void runTests(Language lang, String onlyRunCode, String additionalValidationChars) throws IOException {
+    new WordListValidatorTest(additionalValidationChars).testWordListValidity(lang);
+    testNoLineBreaksEtcInMessage(lang);
     testNoQuotesAroundSuggestion(lang);
     testJavaRules(onlyRunCode);
     //testExampleAvailable(onlyRunCode);
+    testConfusionSetLoading();
     countTempOffRules(lang);
+    testCoherencyBaseformIsOtherForm(lang);
     try {
       new DisambiguationRuleTest().testDisambiguationRulesFromXML();
     } catch (Exception e) {
@@ -49,9 +61,76 @@ public class LanguageSpecificTest {
     }
   }
 
+  private void testNoLineBreaksEtcInMessage(Language lang) {
+    if (lang.getMaintainedState() == LanguageMaintainedState.LookingForNewMaintainer) {
+      // avoid printing too many warnings that nobody takes care of
+      System.err.println("Skipping message tests for unmaintained language " + lang);
+      return;
+    }
+    JLanguageTool lt = new JLanguageTool(lang);
+    for (Rule rule : lt.getAllRules()) {
+      if (lang.getShortCode().equals("en") && rule.getId().startsWith("EUPUB_")) {  // ignore, turned off anyway
+        continue;
+      }
+      if (rule instanceof AbstractPatternRule) {
+        AbstractPatternRule pRule = (AbstractPatternRule) rule;
+        String message = pRule.getMessage();
+        String prefix = "*** WARNING: " + lang.getShortCode() + ": " + rule.getFullId() + " from " + pRule.getSourceFile();
+        if (message.contains("\n") || message.contains("\r")) {
+          System.err.println(prefix + " contains line break (\\n or \\r): " + message.replace("\n", "\\n").replace("\r", "\\r"));
+        }
+        if (message.contains("\t")) {
+          System.err.println(prefix + " contains tab (\\t): " + message.replace("\t", "\\t"));
+        }
+        if (message.contains("  ")) {
+          System.err.println(prefix + " contains two consecutive spaces in message: " + message);
+        }
+        if (rule.getDescription().contains("  ")) {
+          System.err.println(prefix + " contains two consecutive spaces in description: " + rule.getDescription());
+        }
+      }
+    }
+  }
+
+  protected void testCoherencyBaseformIsOtherForm(Language lang) throws IOException {
+    if (lang.getShortCode().equals("km")) {
+      // "coherency.txt" is for a different rule for Khmer
+      return;
+    }
+    JLanguageTool lt = new JLanguageTool(lang);
+    TestTools.disableAllRulesExcept(lt, "EN_WORD_COHERENCY");
+    WordCoherencyDataLoader loader = new WordCoherencyDataLoader();
+    String path = "/" + lang.getShortCode() + "/coherency.txt";
+    if (!JLanguageTool.getDataBroker().ruleFileExists(path)) {
+      System.out.println("File not found (okay for many languages): "+ path);
+      return;
+    }
+    System.out.println("Checking " + path + "...");
+    Map<String, Set<String>> map = loader.loadWords(path);
+    Set<String> invalid = new HashSet<>();
+    Synthesizer synthesizer = lang.getSynthesizer();
+    for (String key : map.keySet()) {
+      if (synthesizer != null) {
+        String[] forms = synthesizer.synthesize(new AnalyzedToken(key, "fake", key), ".*", true);
+        for (String form : forms) {
+          List<RuleMatch> matches = lt.check(form);
+          if (matches.size() > 0) {
+            invalid.add(form + " (a form of " + key + ")");
+          }
+        }
+      }
+    }
+    if (invalid.size() > 0) {
+      fail(lang + ": These words trigger the rule because their base form is one of the forms in coherency.txt, " +
+        "giving false alarms:\n  " + String.join("\n  ", invalid));
+    }
+  }
+  
   private final static Map<String, Integer> idToExpectedMatches = new HashMap<>();
   static {
     idToExpectedMatches.put("STYLE_REPEATED_WORD_RULE_DE", 2);
+    idToExpectedMatches.put("STYLE_REPEATED_SHORT_SENTENCES", 3);
+    idToExpectedMatches.put("STYLE_REPEATED_SENTENCE_BEGINNING", 3);
   }
   private void testJavaRules(String onlyRunCode) throws IOException {
     Map<String,String> idsToClassName = new HashMap<>();
@@ -68,8 +147,26 @@ public class LanguageSpecificTest {
           assertIdUniqueness(idsToClassName, ruleClasses, language, rule);
           assertIdValidity(language, rule);
           assertTrue(rule.supportsLanguage(language));
+          rule.setTags(rule.getTags().stream().filter(k -> !k.equals(Tag.picky)).collect(Collectors.toList()));  // make sure "picky" rules also run
           testExamples(rule, lt);
         }
+      }
+    }
+  }
+
+  private void testConfusionSetLoading() {
+    for (Language language : Languages.get()) {
+      try {
+        List<Rule> rules = language.getRelevantLanguageModelRules(JLanguageTool.getMessageBundle(), new FakeLanguageModel(), null);
+        if (rules.size() > 0) {
+          String path = "/" + language.getShortCode() + "/confusion_sets.txt";
+          try (InputStream confusionSetStream = JLanguageTool.getDataBroker().getFromResourceDirAsStream(path)) {
+            ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader(new Demo());
+            confusionSetLoader.loadConfusionPairs(confusionSetStream);  // would throw Exception if there's a problem
+          }
+        }
+      } catch (Exception e) {
+        throw new RuntimeException("Could not load confusion pairs for " + language.getName(), e);
       }
     }
   }
@@ -83,7 +180,7 @@ public class LanguageSpecificTest {
       JLanguageTool lt = new JLanguageTool(language);
       List<Rule> allRules = lt.getAllRules();
       for (Rule rule : allRules) {
-        if (rule.getIncorrectExamples().size() == 0) {
+        if (rule.getIncorrectExamples().isEmpty()) {
           System.err.println("*** WARNING: " + language.getShortCodeWithCountryAndVariant() + " rule " + rule.getId() + " has no incorrect examples");
         }
       }
@@ -163,7 +260,7 @@ public class LanguageSpecificTest {
   private void testCorrectExamples(Rule rule, JLanguageTool lt) throws IOException {
     List<CorrectExample> correctExamples = rule.getCorrectExamples();
     for (CorrectExample correctExample : correctExamples) {
-      String input = cleanMarkers(correctExample.getExample());
+      String input = ExampleSentence.cleanMarkersInExample(correctExample.getExample());
       enableOnlyOneRule(lt, rule);
       List<RuleMatch> ruleMatches = lt.check(input);
       assertEquals("Got unexpected rule match for correct example sentence:\n"
@@ -176,7 +273,7 @@ public class LanguageSpecificTest {
   private void testIncorrectExamples(Rule rule, JLanguageTool lt) throws IOException {
     List<IncorrectExample> incorrectExamples = rule.getIncorrectExamples();
     for (IncorrectExample incorrectExample : incorrectExamples) {
-      String input = cleanMarkers(incorrectExample.getExample());
+      String input = ExampleSentence.cleanMarkersInExample(incorrectExample.getExample());
       enableOnlyOneRule(lt, rule);
       List<RuleMatch> ruleMatches = lt.check(input);
       assertEquals("Did not get the expected rule match for the incorrect example sentence:\n"
@@ -193,16 +290,17 @@ public class LanguageSpecificTest {
     lt.enableRule(ruleToActivate.getId());
   }
 
-  private String cleanMarkers(String example) {
-    return example.replace("<marker>", "").replace("</marker>", "");
-  }
-
   private void countTempOffRules(Language lang) {
     JLanguageTool lt = new JLanguageTool(lang);
     int count = 0;
+    Map<String,Integer> fileToCount = new TreeMap<>();
     for (Rule rule : lt.getAllRules()) {
       if (rule.isDefaultTempOff()) {
         count++;
+        if (rule instanceof AbstractPatternRule) {
+          String sourceFile = ((AbstractPatternRule) rule).getSourceFile();
+          fileToCount.put(sourceFile, fileToCount.getOrDefault(sourceFile, 0) + 1);
+        }
       }
     }
     System.out.println("Number of default='temp_off' rules for " + lang + ": " + count);
@@ -212,6 +310,10 @@ public class LanguageSpecificTest {
       System.err.println("WARNING: " + count + " default='temp_off' rules for " + lang + ", please make sure to turn on these");
       System.err.println("WARNING: rules after they have been tested (or use default='off' to turn them off permanently)");
       System.err.println("WARNING: (this warning appears if there are more than " + limit + " default='temp_off' rules)");
+      System.err.println("WARNING: temp_off rules by file:");
+      for (Map.Entry<String, Integer> entry : fileToCount.entrySet()) {
+        System.err.println("WARNING: " + entry.getValue() + " in " + entry.getKey());
+      }
       System.err.println("################################################################################################");
     }
   }

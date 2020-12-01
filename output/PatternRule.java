@@ -18,17 +18,17 @@
  */
 package org.languagetool.rules.patterns;
 
-import java.io.IOException;
-import java.util.*;
-import java.util.stream.Collectors;
-
 import org.languagetool.AnalyzedSentence;
-import org.languagetool.Experimental;
+import org.languagetool.AnalyzedTokenReadings;
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.languagetool.tools.StringTools;
+
+import java.io.IOException;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * A Rule that describes a language error as a simple pattern of words or of
@@ -36,17 +36,12 @@ import org.languagetool.tools.StringTools;
  * 
  * @author Daniel Naber
  */
-public class PatternRule extends AbstractPatternRule {
+public class PatternRule extends AbstractTokenBasedRule {
 
   private final String shortMessage;
 
   // A list of elements as they appear in XML file (phrases count as single tokens in case of matches or skipping).
   private final List<Integer> elementNo;
-
-  // Tokens used for fast checking whether a rule can ever match.
-  private final Set<String> simpleRuleTokens;
-
-  private final Set<String> inflectedRuleTokens;
 
   // This property is used for short-circuiting evaluation of the elementNo list order:
   private final boolean useList;
@@ -70,14 +65,16 @@ public class PatternRule extends AbstractPatternRule {
     super(id, description, language, patternTokens, false);
     this.message = Objects.requireNonNull(message);
     this.shortMessage = Objects.requireNonNull(shortMessage);
-    this.elementNo = new ArrayList<>();
-    this.suggestionsOutMsg = Objects.requireNonNull(suggestionsOutMsg);
+    this.elementNo = new ArrayList<>(0);
+    Objects.requireNonNull(suggestionsOutMsg);
+    this.suggestionsOutMsg = suggestionsOutMsg.isEmpty() ? "" : suggestionsOutMsg;
     String prevName = "";
     String curName;
     int cnt = 0;
     int loopCnt = 0;
     boolean tempUseList = false;
-    for (PatternToken pToken : this.patternTokens) {
+
+    for (PatternToken pToken : patternTokens) {
       if (pToken.isPartOfPhrase()) {
         curName = pToken.getPhraseName();
         if (StringTools.isEmpty(prevName) || prevName.equals(curName)) {
@@ -102,8 +99,6 @@ public class PatternRule extends AbstractPatternRule {
       }
     }
     useList = tempUseList;
-    simpleRuleTokens = getSet(false);
-    inflectedRuleTokens = getSet(true);
   }
   
   public PatternRule(String id, Language language,
@@ -122,7 +117,6 @@ public class PatternRule extends AbstractPatternRule {
   /**
    * @since 4.5
    */
-  @Experimental
   public PatternRule(String id, Language language,
       List<PatternToken> patternTokens, String description,
       String message, String shortMessage, String suggestionsOutMsg,
@@ -132,12 +126,10 @@ public class PatternRule extends AbstractPatternRule {
     this.interpretPosTagsPreDisambiguation = interpretPosTagsPreDisambiguation;
   }
 
-  @Experimental
   @Override
   public int estimateContextForSureMatch() {
     int extendAfterMarker = 0;
     boolean markerSeen = false;
-    boolean infinity = false;
     for (PatternToken pToken : this.patternTokens) {
       if (markerSeen && !pToken.isInsideMarker()) {
         extendAfterMarker++;
@@ -150,31 +142,25 @@ public class PatternRule extends AbstractPatternRule {
         markerSeen = true;
       }
       if (pToken.getSkipNext() == -1) {
-        infinity = true;
-        break;
+        return -1;
       } else {
         extendAfterMarker += pToken.getSkipNext();
       }
     }
-    List<Integer> antiPatternLengths = antiPatterns.stream().map(p -> p.patternTokens.size()).collect(Collectors.toList());
+    List<Integer> antiPatternLengths = getAntiPatterns().stream().map(p -> p.patternTokens.size()).collect(Collectors.toList());
     int longestAntiPattern = antiPatternLengths.stream().max(Comparator.comparing(i -> i)).orElse(0);
     int longestSkip = 0;
-    for (DisambiguationPatternRule antiPattern : antiPatterns) {
+    for (DisambiguationPatternRule antiPattern : getAntiPatterns()) {
       for (PatternToken token : antiPattern.getPatternTokens()) {
         if (token.getSkipNext() == -1) {
-          infinity = true;
-          break;
+          return -1;
         } else if (token.getSkipNext() > longestSkip) {
           longestSkip = token.getSkipNext();
         }
       }
     }
     //System.out.println("extendAfterMarker: " + extendAfterMarker + ", antiPatternLengths: " + antiPatternLengths + ", longestSkip: " + longestSkip);
-    if (infinity) {
-      return -1;
-    } else {
-      return extendAfterMarker + Math.max(longestAntiPattern, longestAntiPattern + longestSkip);
-    }
+    return extendAfterMarker + Math.max(longestAntiPattern, longestAntiPattern + longestSkip);
   }
 
   /**
@@ -182,7 +168,6 @@ public class PatternRule extends AbstractPatternRule {
    * sentence *before* disambiguation.
    * @since 4.5
    */
-  @Experimental
   boolean isInterpretPosTagsPreDisambiguation() {
     return interpretPosTagsPreDisambiguation;
   }
@@ -223,47 +208,26 @@ public class PatternRule extends AbstractPatternRule {
 
   @Override
   public final RuleMatch[] match(AnalyzedSentence sentence) throws IOException {
+    if (canBeIgnoredFor(sentence)) return RuleMatch.EMPTY_ARRAY;
+
     try {
-      RuleMatcher matcher;
-      if (patternTokens != null) {
-        matcher = new PatternRuleMatcher(this, useList);
-      } else if (regex != null) {
-        matcher = new RegexPatternRule(this.getId(), getDescription(), getMessage(), getShortMessage(), getSuggestionsOutMsg(), language, regex, regexMark);
-      } else {
-        throw new IllegalStateException("Neither pattern tokens nor regex set for rule " + getId());
-      }
-      return matcher.match(getSentenceWithImmunization(sentence));
+      RuleMatcher matcher = new PatternRuleMatcher(this, useList);
+      return checkForAntiPatterns(sentence, matcher, matcher.match(sentence));
     } catch (IOException e) {
       throw new IOException("Error analyzing sentence: '" + sentence + "'", e);
     } catch (Exception e) {
-      throw new RuntimeException("Error analyzing sentence: '" + sentence + "'", e);
+      throw new RuntimeException("Error analyzing sentence: '" + sentence + "' with rule " + getFullId(), e);
     }
   }
 
-  /**
-   * A fast check whether this rule can be ignored for the given sentence
-   * because it can never match. Used internally for performance optimization.
-   * @since 2.4
-   */
-  public boolean canBeIgnoredFor(AnalyzedSentence sentence) {
-    return (!simpleRuleTokens.isEmpty() && !sentence.getTokenSet().containsAll(simpleRuleTokens))
-            || (!inflectedRuleTokens.isEmpty() && !sentence.getLemmaSet().containsAll(inflectedRuleTokens));
-  }
-
-  // tokens that just refer to a word - no regex and optionally no inflection etc.
-  private Set<String> getSet(boolean isInflected) {
-    Set<String> set = new HashSet<>();
-    for (PatternToken patternToken : patternTokens) {
-      boolean acceptInflectionValue = isInflected ? patternToken.isInflected() : !patternToken.isInflected();
-      if (acceptInflectionValue && !patternToken.getNegation() && !patternToken.isRegularExpression()
-              && !patternToken.isReferenceElement() && patternToken.getMinOccurrence() > 0) {
-        String str = patternToken.getString();
-        if (!StringTools.isEmpty(str)) {
-          set.add(str.toLowerCase());
-        }
+  private RuleMatch[] checkForAntiPatterns(AnalyzedSentence sentence, RuleMatcher matcher, RuleMatch[] matches) throws IOException {
+    if (matches != null && matches.length > 0 && !getAntiPatterns().isEmpty()) {
+      AnalyzedSentence immunized = getSentenceWithImmunization(sentence);
+      if (Arrays.stream(immunized.getTokens()).anyMatch(AnalyzedTokenReadings::isImmunized)) {
+        return matcher.match(immunized);
       }
     }
-    return Collections.unmodifiableSet(set);
+    return matches;
   }
 
   List<Integer> getElementNo() {
@@ -274,7 +238,7 @@ public class PatternRule extends AbstractPatternRule {
    * @see org.languagetool.rules.patterns.AbstractPatternRule#getShortMessage()
    */
   @Override
-  String getShortMessage() {
+  public String getShortMessage() {
     return shortMessage;
   }
   

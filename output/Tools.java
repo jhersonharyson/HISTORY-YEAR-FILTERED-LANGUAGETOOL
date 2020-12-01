@@ -235,7 +235,7 @@ public final class Tools {
    * @param url the URL to be displayed
    * @since 4.1
    */
-  static void openURL(String url) {
+  public static void openURL(String url) {
     try {
       openURL(new URL(url));
     } catch (MalformedURLException ex) {
@@ -324,7 +324,7 @@ public final class Tools {
     } else if (incorrectExamples.size() > 0) {
       IncorrectExample incorrectExample = incorrectExamples.iterator().next();
       List<String> corrections = incorrectExample.getCorrections();
-      if (!corrections.isEmpty()) {
+      if (!corrections.isEmpty() && !corrections.get(0).isEmpty()) {
         String incorrectSentence = incorrectExamples.iterator().next().getExample();
         String correctedSentence = incorrectSentence.replaceAll("<marker>.*?</marker>",
                 "<span style='background-color:#80ff80'>" + corrections.get(0) + "</span>");

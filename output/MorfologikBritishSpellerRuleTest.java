@@ -56,6 +56,9 @@ public class MorfologikBritishSpellerRuleTest extends AbstractEnglishSpellerRule
     RuleMatch[] matches = rule.match(lt.getAnalyzedSentence("This is a nice color."));
     assertEquals(1, matches.length);
     assertTrue(matches[0].getMessage().contains("is American English"));
+    RuleMatch[] matches2 = rule.match(lt.getAnalyzedSentence("Color is the American English word."));
+    assertEquals(1, matches2.length);
+    assertTrue(matches2[0].getMessage().contains("is American English"));
   }
 
   @Test
@@ -79,6 +82,10 @@ public class MorfologikBritishSpellerRuleTest extends AbstractEnglishSpellerRule
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("123454")).length);
     // Greek letters
     assertEquals(0, rule.match(langTool.getAnalyzedSentence("μ")).length);
+    // With multiwords
+    assertEquals(0, rule.match(langTool.getAnalyzedSentence("Ménage à trois")).length);
+    assertEquals(0, rule.match(langTool.getAnalyzedSentence("ménage à trois")).length);
+    assertEquals(0, rule.match(langTool.getAnalyzedSentence("The quid pro quo")).length);
 
     //incorrect sentences:
 

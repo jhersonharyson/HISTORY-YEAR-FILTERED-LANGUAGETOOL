@@ -44,6 +44,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeoutException;
 
 import static java.net.HttpURLConnection.HTTP_UNAVAILABLE;
+import static org.languagetool.server.ServerTools.getHttpReferrer;
 import static org.languagetool.server.ServerTools.print;
 
 class LanguageToolHttpHandler implements HttpHandler {
@@ -75,6 +76,7 @@ class LanguageToolHttpHandler implements HttpHandler {
 
   /** @since 2.6 */
   void shutdown() {
+    textCheckerV2.shutdownNow();
   }
 
   @Override
@@ -145,12 +147,13 @@ class LanguageToolHttpHandler implements HttpHandler {
       parameters = getRequestQuery(httpExchange, requestedUri);
       if (requestLimiter != null) {
         try {
-          requestLimiter.checkAccess(remoteAddress, parameters, httpExchange.getRequestHeaders());
+          UserLimits userLimits = ServerTools.getUserLimits(parameters, config);
+          requestLimiter.checkAccess(remoteAddress, parameters, httpExchange.getRequestHeaders(), userLimits);
         } catch (TooManyRequestsException e) {
           String errorMessage = "Error: Access from " + remoteAddress + " denied: " + e.getMessage();
           int code = HttpURLConnection.HTTP_FORBIDDEN;
           sendError(httpExchange, code, errorMessage);
-          // already logged vai DatabaseAccessLimitLogEntry
+          // already logged via DatabaseAccessLimitLogEntry
           logError(errorMessage, code, parameters, httpExchange, false);
           return;
         }
@@ -207,7 +210,7 @@ class LanguageToolHttpHandler implements HttpHandler {
         logStacktrace = false;
       } else if (hasCause(e, AuthException.class)) {
         errorCode = HttpURLConnection.HTTP_FORBIDDEN;
-        response = e.getMessage();
+        response = AuthException.class.getName() + ": " + e.getMessage();
         logStacktrace = false;
       } else if (e instanceof IllegalArgumentException || rootCause instanceof IllegalArgumentException) {
         errorCode = HttpURLConnection.HTTP_BAD_REQUEST;
@@ -282,10 +285,6 @@ class LanguageToolHttpHandler implements HttpHandler {
   private void logError(String errorMessage, int code, Map<String, String> params, HttpExchange httpExchange, boolean logToDb) {
     String message = errorMessage + ", sending code " + code + " - useragent: " + params.get("useragent") +
             " - HTTP UserAgent: " + ServerTools.getHttpUserAgent(httpExchange) + ", r:" + reqCounter.getRequestCount();
-    // TODO: might need more than 512 chars:
-    //message += ", referrer: " + getHttpReferrer(httpExchange);
-    //message += ", language: " + params.get("language");
-    //message += ", " + getTextOrDataSizeMessage(params);
     if (params.get("username") != null) {
       message += ", user: " + params.get("username");
     }
@@ -295,6 +294,10 @@ class LanguageToolHttpHandler implements HttpHandler {
     if (logToDb) {
       logToDatabase(params, message);
     }
+    // TODO: might need more than 512 chars, thus not logged to DB:
+    message += ", referrer: " + getHttpReferrer(httpExchange);
+    message += ", language: " + params.get("language");
+    message += ", " + getTextOrDataSizeMessage(params);
     logger.error(message);
   }
 
@@ -305,13 +308,23 @@ class LanguageToolHttpHandler implements HttpHandler {
     if (text != null) {
       message += "text length: " + text.length() + ", ";
     }
-    message += "m: " + ServerTools.getMode(params) + ", ";
+    try {
+      message += "m: " + ServerTools.getMode(params) + ", ";
+    } catch (IllegalArgumentException ex) {
+      message += "m: invalid, ";
+    }
+    try {
+      message += "l: " + ServerTools.getLevel(params) + ", ";
+    } catch (IllegalArgumentException ex) {
+      message += "l: invalid, ";
+    }
     if (params.containsKey("instanceId")) {
       message += "iID: " + params.get("instanceId") + ", ";
     }
     if (logStacktrace) {
       message += "Stacktrace follows:";
-      message += ExceptionUtils.getStackTrace(e);
+      String stackTrace = ExceptionUtils.getStackTrace(e);
+      message += ServerTools.cleanUserTextFromMessage(stackTrace, params);
       logger.error(message);
     } else {
       message += "(no stacktrace logged)";
@@ -391,14 +404,14 @@ class LanguageToolHttpHandler implements HttpHandler {
       if (readBytes <= 0) {
         break;
       }
-      int generousMaxLength = maxTextLength * 3 + 1000;  // one character can be encoded as e.g. "%D8", plus space for other parameters
+      int generousMaxLength = maxTextLength * 10;  // one character can be encoded as e.g. "%D8", plus estimated space for sending data (JSON)
       if (generousMaxLength < 0) {  // might happen as it can overflow
         generousMaxLength = Integer.MAX_VALUE;
       }
       if (sb.length() > 0 && sb.length() > generousMaxLength) {
         // don't stop at maxTextLength as that's the text length, but here also other parameters
         // are included (still we need this check here so we don't OOM if someone posts a few hundred MB)...
-        throw new TextTooLongException("Your text's length exceeds this server's hard limit of " + maxTextLength + " characters.");
+        throw new TextTooLongException("Your text's length exceeds this server's hard limit of " + generousMaxLength + " characters.");
       }
       sb.append(new String(chars, 0, readBytes));
     }

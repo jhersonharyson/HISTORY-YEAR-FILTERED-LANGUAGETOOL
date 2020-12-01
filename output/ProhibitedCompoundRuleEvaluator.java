@@ -65,7 +65,7 @@ class ProhibitedCompoundRuleEvaluator {
   ProhibitedCompoundRuleEvaluator(Language language, LanguageModel languageModel) {
     this.language = language;
     try {
-      List<Rule> rules = language.getRelevantLanguageModelRules(JLanguageTool.getMessageBundle(), languageModel);
+      List<Rule> rules = language.getRelevantLanguageModelRules(JLanguageTool.getMessageBundle(), languageModel, null);
       if (rules == null) {
         throw new RuntimeException("Language " + language + " doesn't seem to support a language model");
       }
@@ -258,7 +258,7 @@ class ProhibitedCompoundRuleEvaluator {
       System.err.println("   <tokens> is confusion set file with token/homophone pairs");
       System.err.println("   <languageModelTopDir> is a directory with sub-directories like 'en' which then again contain '1grams',");
       System.err.println("                      '2grams', and '3grams' sub directories with Lucene indexes");
-      System.err.println("                      See http://wiki.languagetool.org/finding-errors-using-n-gram-data");
+      System.err.println("                      See https://dev.languagetool.org/finding-errors-using-n-gram-data");
       System.err.println("   <wikipediaXml|tatoebaFile|plainTextFile|dir> either a Wikipedia XML dump, or a Tatoeba file, or");
       System.err.println("                      a plain text file with one sentence per line, or a directory with");
       System.err.println("                      example sentences (where <word>.txt contains only the sentences for <word>).");
@@ -267,10 +267,10 @@ class ProhibitedCompoundRuleEvaluator {
     }
     long startTime = System.currentTimeMillis();
     String confusionSetFile = args[0];
-    ConfusionSetLoader loader = new ConfusionSetLoader();
-    Map<String, List<ConfusionPair>> confusionSet = loader.loadConfusionPairs(new FileInputStream(confusionSetFile));
     String langCode = args[1];
     Language lang = Languages.getLanguageForShortCode(langCode);
+    ConfusionSetLoader loader = new ConfusionSetLoader(lang);
+    Map<String, List<ConfusionPair>> confusionSet = loader.loadConfusionPairs(new FileInputStream(confusionSetFile));
     LanguageModel languageModel = new LuceneLanguageModel(new File(args[2], lang.getShortCode()));
     //LanguageModel languageModel = new BerkeleyRawLanguageModel(new File("/media/Data/berkeleylm/google_books_binaries/ger.blm.gz"));
     //LanguageModel languageModel = new BerkeleyLanguageModel(new File("/media/Data/berkeleylm/google_books_binaries/ger.blm.gz"));

@@ -23,9 +23,7 @@ import org.languagetool.noop.NoopLanguage;
 import org.languagetool.tools.MultiKeyProperties;
 import org.languagetool.tools.StringTools;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.lang.reflect.Constructor;
 import java.net.URL;
 import java.util.*;
@@ -54,7 +52,7 @@ public final class Languages {
    */
   public static Language addLanguage(String name, String code, File dictPath) {
     Language lang;
-    if (dictPath.getName().endsWith(".dict")) {
+    if (dictPath.getName().endsWith(JLanguageTool.DICTIONARY_FILENAME_EXTENSION)) {
       lang = new DynamicMorfologikLanguage(name, code, dictPath);
     } else if (dictPath.getName().endsWith(".dic")) {
       lang = new DynamicHunspellLanguage(name, code, dictPath);
@@ -134,13 +132,40 @@ public final class Languages {
 
   private static Language createLanguageObjects(URL url, String className) {
     try {
-      Class<?> aClass = Class.forName(className);
+      Class<?> aClass = JLanguageTool.getClassBroker().forName(className);
       Constructor<?> constructor = aClass.getConstructor();
       return (Language) constructor.newInstance();
     } catch (ClassNotFoundException e) {
       throw new RuntimeException("Class '" + className + "' specified in " + url + " could not be found in classpath", e);
     } catch (Exception e) {
       throw new RuntimeException("Object for class '" + className + "' specified in " + url + " could not be created", e);
+    }
+  }
+
+  /**
+   * Get the Language object for the given language class name or try to create it and add to dynamic languages.
+   *
+   * @param className e.g. <code>org.languagetool.language.English</code>
+   * @return a Language object
+   * @throws RuntimeException if language not found in classpath
+   * @since 5.0
+   */
+  public static Language getOrAddLanguageByClassName(String className) {
+    for (Language element : getStaticAndDynamicLanguages()) {
+      if (className.equals(element.getClass().getName())) {
+        return element;
+      }
+    }
+    try {
+      Class<?> aClass = JLanguageTool.getClassBroker().forName(className);
+      Constructor<?> constructor = aClass.getConstructor();
+      Language language = (Language) constructor.newInstance();
+      dynLanguages.add(language);
+      return language;
+    } catch (ClassNotFoundException e) {
+      throw new RuntimeException("Class '" + className + " could not be found in classpath", e);
+    } catch (Exception e) {
+      throw new RuntimeException("Object for class '" + className + " could not be created", e);
     }
   }
 
@@ -191,7 +216,7 @@ public final class Languages {
         Collections.sort(codes);
         throw new IllegalArgumentException("'" + langCode + "' is not a language code known to LanguageTool." +
                 " Supported language codes are: " + String.join(", ", codes) + ". The list of languages is read from " + PROPERTIES_PATH +
-                " in the Java classpath. See http://wiki.languagetool.org/java-api for details.");
+                " in the Java classpath. See https://dev.languagetool.org/java-api for details.");
       }
     }
     return language;

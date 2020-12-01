@@ -21,9 +21,8 @@ package org.languagetool.dev.index;
 import static org.languagetool.dev.dumpcheck.SentenceSourceIndexer.MAX_DOC_COUNT_FIELD;
 import static org.languagetool.dev.dumpcheck.SentenceSourceIndexer.MAX_DOC_COUNT_FIELD_VAL;
 import static org.languagetool.dev.dumpcheck.SentenceSourceIndexer.MAX_DOC_COUNT_VALUE;
-import static org.languagetool.dev.index.PatternRuleQueryBuilder.FIELD_NAME;
-import static org.languagetool.dev.index.PatternRuleQueryBuilder.FIELD_NAME_LOWERCASE;
-import static org.languagetool.dev.index.PatternRuleQueryBuilder.SOURCE_FIELD_NAME;
+import static org.languagetool.dev.index.Lucene.FIELD_NAME_LOWERCASE;
+import static org.languagetool.dev.index.Lucene.SOURCE_FIELD_NAME;
 
 import java.io.File;
 import java.io.IOException;
@@ -62,6 +61,7 @@ public class Searcher {
   private static final boolean WIKITEXT_OUTPUT = false;
   
   private final Directory directory;
+  private final String fieldName;
 
   private int skipHits = 0;
   private int maxHits = 1000;
@@ -69,7 +69,6 @@ public class Searcher {
   private IndexSearcher indexSearcher;
   private DirectoryReader reader;
   private boolean limitSearch = true;
-  private String fieldName;
 
   public Searcher(Directory directory) {
     this(directory, FIELD_NAME_LOWERCASE);
@@ -152,7 +151,7 @@ public class Searcher {
         throw new NullPointerException("Cannot search on null query for rule: " + rule.getId());
       }
 
-      System.out.println("Running query: " + query.toString());
+      System.out.println("Running query: " + query);
       SearchRunnable runnable = new SearchRunnable(indexSearcher, query, language, rule);
       Thread searchThread = new Thread(runnable);
       searchThread.start();
@@ -400,8 +399,7 @@ public class Searcher {
     ContextTools contextTools = new ContextTools();
     contextTools.setEscapeHtml(false);
     contextTools.setContextSize(contextSize);
-    contextTools.setErrorMarkerStart("**");
-    contextTools.setErrorMarkerEnd("**");
+    contextTools.setErrorMarker("**", "**");
     return contextTools;
   }
 

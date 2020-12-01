@@ -176,12 +176,27 @@ public abstract class AbstractStyleRepeatedWordRule  extends TextLevelRule {
   }
 
   /* 
-   *  set an URL to an synonym dictionary for a token
+   * Set a URL to a synonym dictionary for a token
    */
   protected URL setURL(AnalyzedTokenReadings token ) throws MalformedURLException {
     return null;
   }
   
+  /**
+   * get synonyms for a word
+   */
+  public List<String> getSynonymsForWord(String word) {
+    List<String> synonyms = new ArrayList<String>();
+    List<String> rawSynonyms = linguServices.getSynonyms(word, lang);
+    for (String synonym : rawSynonyms) {
+      synonym = synonym.replaceAll("\\(.*\\)", "").trim();
+      if (!synonym.isEmpty() && !synonyms.contains(synonym)) {
+        synonyms.add(synonym);
+      }
+    }
+    return synonyms;
+  }
+
   /**
    * get synonyms for a repeated word
    */
@@ -194,23 +209,11 @@ public abstract class AbstractStyleRepeatedWordRule  extends TextLevelRule {
     for (AnalyzedToken reading : readings) {
       String lemma = reading.getLemma();
       if (lemma != null) {
-        List<String> rawSynonyms = linguServices.getSynonyms(lemma, lang);
-        for (String synonym : rawSynonyms) {
-          synonym = synonym.replaceAll("\\(.*\\)", "").trim();
-          if (!synonym.isEmpty() && !synonyms.contains(synonym)) {
-            synonyms.add(synonym);
-          }
-        }
+        synonyms = getSynonymsForWord(lemma);
       }
     }
     if(synonyms.isEmpty()) {
-      List<String> rawSynonyms = linguServices.getSynonyms(token.getToken(), lang);
-      for (String synonym : rawSynonyms) {
-        synonym = synonym.replaceAll("\\(.*\\)", "").trim();
-        if (!synonym.isEmpty() && !synonyms.contains(synonym)) {
-          synonyms.add(synonym);
-        }
-      }
+      synonyms = getSynonymsForWord(token.getToken());
     }
     return synonyms;
   }
@@ -314,7 +317,7 @@ public abstract class AbstractStyleRepeatedWordRule  extends TextLevelRule {
           } 
         }
       }
-      pos += sentences.get(n).getText().length();
+      pos += sentences.get(n).getCorrectedTextLength();
     }
     return toRuleMatchArray(ruleMatches);
   }

@@ -18,19 +18,23 @@
  */
 package org.languagetool.rules;
 
+import com.google.common.base.Suppliers;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.ApiCleanupNeeded;
-import org.languagetool.Experimental;
 import org.languagetool.rules.patterns.PatternRule;
 import org.languagetool.rules.patterns.PatternRuleMatcher;
 import org.languagetool.tools.StringTools;
 
 import java.net.URL;
 import java.util.*;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Information about an error rule that matches text and the position of the match.
@@ -39,16 +43,18 @@ import java.util.regex.Pattern;
  * @author Daniel Naber
  */
 public class RuleMatch implements Comparable<RuleMatch> {
+  public static final RuleMatch[] EMPTY_ARRAY = new RuleMatch[0];
 
   private static final Pattern SUGGESTION_PATTERN = Pattern.compile("<suggestion>(.*?)</suggestion>");
   private final Rule rule;
   private final String message;
   private final String shortMessage;   // used e.g. for OOo/LO context menu
   private final AnalyzedSentence sentence;
+  private PatternPosition patternPosition;
   private OffsetPosition offsetPosition;
   private LinePosition linePosition = new LinePosition(-1, -1);
   private ColumnPosition columnPosition = new ColumnPosition(-1, -1);
-  private List<SuggestedReplacement> suggestedReplacements = new ArrayList<>();
+  private Supplier<List<SuggestedReplacement>> suggestedReplacements;
   private URL url;
   private Type type = Type.Other;
   private SortedMap<String, Float> features = Collections.emptySortedMap();
@@ -73,7 +79,7 @@ public class RuleMatch implements Comparable<RuleMatch> {
    * @since 4.0
    */
   public RuleMatch(Rule rule, AnalyzedSentence sentence, int fromPos, int toPos, String message) {
-    this(rule, sentence, fromPos, toPos, message, null, false, null);
+    this(rule, sentence, fromPos, toPos, fromPos, toPos, message, null, false, null);
   }
   
   /**
@@ -86,15 +92,36 @@ public class RuleMatch implements Comparable<RuleMatch> {
    * @since 4.0
    */
   public RuleMatch(Rule rule, AnalyzedSentence sentence, int fromPos, int toPos, String message, String shortMessage) {
-    this(rule, sentence, fromPos, toPos, message, shortMessage, false, null);
+    this(rule, sentence, fromPos, toPos, fromPos, toPos, message, shortMessage, false, null);
   }
 
+  /**
+   * Creates a RuleMatch object, taking the rule that triggered
+   * this match, position of the match and an explanation message.
+   * This message is scanned for &lt;suggestion&gt;...&lt;/suggestion&gt;
+   * to get suggested fixes for the problem detected by this rule.
+   *
+   * @param shortMessage used for example in OpenOffice/LibreOffice's context menu
+   * @since 4.9
+   */
+  public RuleMatch(Rule rule, AnalyzedSentence sentence, int fromPos, int toPos, int patternStartPos, int patternEndPos, String message, String shortMessage) {
+    this(rule, sentence, fromPos, toPos, patternStartPos, patternEndPos, message, shortMessage, false, null);
+  }
+
+  /**
+   * Create a rule match with any suggestions in the message overridden by the given suggestions
+   * @since 4.7
+   */
+  public RuleMatch(Rule rule, AnalyzedSentence sentence, int fromPos, int toPos, String message, String shortMessage, List<String> suggestions) {
+    this(rule, sentence, fromPos, toPos, fromPos, toPos, message, shortMessage, false, null);
+    setSuggestedReplacements(suggestions);
+  }
   /**
    * @deprecated use a constructor that also takes an {@code AnalyzedSentence} parameter (deprecated since 4.0)
    */
   public RuleMatch(Rule rule, int fromPos, int toPos, String message, String shortMessage,
                    boolean startWithUppercase, String suggestionsOutMsg) {
-    this(rule, null, fromPos, toPos, message, shortMessage, startWithUppercase, suggestionsOutMsg);
+    this(rule, null, fromPos, toPos, fromPos, toPos, message, shortMessage, startWithUppercase, suggestionsOutMsg);
   }
   
   /**
@@ -110,18 +137,20 @@ public class RuleMatch implements Comparable<RuleMatch> {
    *    of the match starts with an uppercase character
    * @since 4.0
    */
-  public RuleMatch(Rule rule, AnalyzedSentence sentence, int fromPos, int toPos, String message, String shortMessage,
-      boolean startWithUppercase, String suggestionsOutMsg) {
+  public RuleMatch(Rule rule, AnalyzedSentence sentence, int fromPos, int toPos, int patternFromPos, int patternToPos,
+                   String message, String shortMessage, boolean startWithUppercase, String suggestionsOutMsg) {
     this.rule = Objects.requireNonNull(rule);
     if (toPos <= fromPos) {
       throw new IllegalArgumentException("fromPos (" + fromPos + ") must be less than toPos (" + toPos + ")");
     }
+    this.patternPosition = new PatternPosition(patternFromPos, patternToPos);
     this.offsetPosition = new OffsetPosition(fromPos, toPos);
     this.message = Objects.requireNonNull(message);
     this.shortMessage = shortMessage;
     // extract suggestion from <suggestion>...</suggestion> in message:
     Matcher matcher = SUGGESTION_PATTERN.matcher(message + suggestionsOutMsg);
     int pos = 0;
+    LinkedHashSet<SuggestedReplacement> replacements = new LinkedHashSet<>();
     while (matcher.find(pos)) {
       pos = matcher.end();
       String replacement = matcher.group(1);
@@ -131,17 +160,26 @@ public class RuleMatch implements Comparable<RuleMatch> {
       if (startWithUppercase) {
         replacement = StringTools.uppercaseFirstChar(replacement);
       }
-      SuggestedReplacement repl = new SuggestedReplacement(replacement);
-      if (!suggestedReplacements.contains(repl)) {
-        suggestedReplacements.add(repl);
-      }
+      replacements.add(new SuggestedReplacement(replacement));
+      /*if (getRule() instanceof AbstractPatternRule) {
+        String covered = sentence.getText().substring(fromPos, toPos);
+        if (covered.equals(repl.getReplacement()) && ((AbstractPatternRule) getRule()).getFilter() == null) {
+          // only for development:
+          //System.out.println("WARN: suggestion == covered text for rule " + getRule().getFullId() + ", covered: " + covered + ", " + sentence.getText());
+          System.out.println("WARN: suggestion == covered text for rule " + getRule().getFullId());
+        }
+      }*/
     }
     this.sentence = sentence;
+
+    suggestedReplacements = Suppliers.ofInstance(new ArrayList<>(replacements));
   }
 
+  @SuppressWarnings("CopyConstructorMissesField")
   public RuleMatch(RuleMatch clone) {
     this(clone.getRule(), clone.getSentence(), clone.getFromPos(), clone.getToPos(), clone.getMessage(), clone.getShortMessage());
-    this.setSuggestedReplacementObjects(clone.getSuggestedReplacementObjects());
+    this.setPatternPosition(clone.getPatternFromPos(), clone.getPatternToPos());
+    suggestedReplacements = clone.suggestedReplacements;
     this.setAutoCorrect(clone.isAutoCorrect());
     this.setFeatures(clone.getFeatures());
     this.setUrl(clone.getUrl());
@@ -155,6 +193,7 @@ public class RuleMatch implements Comparable<RuleMatch> {
   //clone with new replacements
   public RuleMatch(RuleMatch clone, List<String> replacements) {
     this(clone.getRule(), clone.getSentence(), clone.getFromPos(), clone.getToPos(), clone.getMessage(), clone.getShortMessage());
+    this.setPatternPosition(clone.getPatternFromPos(), clone.getPatternToPos());
     this.setSuggestedReplacements(replacements);
     this.setAutoCorrect(clone.isAutoCorrect());
     this.setFeatures(clone.getFeatures());
@@ -250,6 +289,23 @@ public class RuleMatch implements Comparable<RuleMatch> {
   }
 
   /**
+   * Position of the start of the pattern (in characters, zero-based, relative to the original input text).
+   */
+  public int getPatternFromPos() { return patternPosition.getStart(); }
+
+  /**
+   * Position of the end of the mistake pattern (in characters, zero-based, relative to the original input text).
+   */
+  public int getPatternToPos() { return patternPosition.getEnd(); }
+
+  public void setPatternPosition(int fromPos, int toPos) {
+    if (toPos <= fromPos) {
+      throw new RuntimeException("fromPos (" + fromPos + ") must be less than toPos (" + toPos + ")");
+    }
+    patternPosition = new PatternPosition(fromPos, toPos);
+  }
+
+  /**
    * Position of the start of the error (in characters, zero-based, relative to the original input text).
    */
   public int getFromPos() {
@@ -263,9 +319,9 @@ public class RuleMatch implements Comparable<RuleMatch> {
     return offsetPosition.getEnd();
   }
 
-  public void setOffsetPosition(int fromPos, int toPos, RuleMatch ruleMatch) {
+  public void setOffsetPosition(int fromPos, int toPos) {
     if (toPos <= fromPos) {
-      throw new RuntimeException("fromPos (" + fromPos + ") must be less than toPos (" + toPos + ") for match: " + ruleMatch);
+      throw new RuntimeException("fromPos (" + fromPos + ") must be less than toPos (" + toPos + ") for match: <sentcontent>" + this + "</sentcontent>");
     }
     offsetPosition = new OffsetPosition(fromPos, toPos);
   }
@@ -305,19 +361,14 @@ public class RuleMatch implements Comparable<RuleMatch> {
   
   public void addSuggestedReplacement(String replacement) {
     Objects.requireNonNull(replacement, "replacement may be empty but not null");
-    List<String> l = new ArrayList<>();
-    for (SuggestedReplacement repl : suggestedReplacements) {
-      l.add(repl.getReplacement());
-    }
-    l.add(replacement);
-    setSuggestedReplacements(l);
+    addSuggestedReplacements(Collections.singletonList(replacement));
   }
 
   public void addSuggestedReplacements(List<String> replacements) {
     Objects.requireNonNull(replacements, "replacements may be empty but not null");
-    for (String replacement : replacements) {
-      this.suggestedReplacements.add(new SuggestedReplacement(replacement));
-    }
+    Supplier<List<SuggestedReplacement>> prev = suggestedReplacements;
+    setLazySuggestedReplacements(() ->
+      Lists.newArrayList(Iterables.concat(prev.get(), Iterables.transform(replacements, SuggestedReplacement::new))));
   }
   /**
    * The text fragments which might be an appropriate fix for the problem. One
@@ -326,11 +377,9 @@ public class RuleMatch implements Comparable<RuleMatch> {
    * @return unmodifiable list of String objects or an empty List
    */
   public List<String> getSuggestedReplacements() {
-    List<String> l = new ArrayList<>();
-    for (SuggestedReplacement repl : suggestedReplacements) {
-      l.add(repl.getReplacement());
-    }
-    return Collections.unmodifiableList(l);
+    return Collections.unmodifiableList(
+      suggestedReplacements.get().stream().map(SuggestedReplacement::getReplacement).collect(Collectors.toList())
+    );
   }
 
   /**
@@ -338,21 +387,33 @@ public class RuleMatch implements Comparable<RuleMatch> {
    */
   public void setSuggestedReplacements(List<String> replacements) {
     Objects.requireNonNull(replacements, "replacements may be empty but not null");
-    this.suggestedReplacements.clear();
-    for (String replacement : replacements) {
-      this.suggestedReplacements.add(new SuggestedReplacement(replacement));
-    }
+    suggestedReplacements = Suppliers.ofInstance(
+      replacements.stream().map(SuggestedReplacement::new).collect(Collectors.toList())
+    );
   }
 
   public List<SuggestedReplacement> getSuggestedReplacementObjects() {
-    return Collections.unmodifiableList(suggestedReplacements);
+    return Collections.unmodifiableList(suggestedReplacements.get());
   }
 
   /**
    * @see #getSuggestedReplacements()
    */
   public void setSuggestedReplacementObjects(List<SuggestedReplacement> replacements) {
-    this.suggestedReplacements = Objects.requireNonNull(replacements, "replacements may be empty but not null");
+    Objects.requireNonNull(replacements, "replacements may be empty but not null");
+    suggestedReplacements = Suppliers.ofInstance(replacements);
+  }
+
+  /**
+   * Set a lazy supplier that will compute suggested replacements
+   * when {@link #getSuggestedReplacements()} or {@link #getSuggestedReplacementObjects()} is called.
+   * This can be used to speed up sentence analysis
+   * in cases when computationally expensive replacements won't necessarily be needed
+   * (e.g. for an IDE in the same process).
+   */
+  public void setLazySuggestedReplacements(@NotNull Supplier<List<SuggestedReplacement>> replacements) {
+    Objects.requireNonNull(replacements, "replacements may not be null");
+    suggestedReplacements = Suppliers.memoize(replacements::get);
   }
 
   /**
@@ -380,7 +441,6 @@ public class RuleMatch implements Comparable<RuleMatch> {
   /**
    * @since 4.3
    */
-  @Experimental
   public Type getType() {
     return this.type;
   }
@@ -388,7 +448,6 @@ public class RuleMatch implements Comparable<RuleMatch> {
   /**
    * @since 4.3
    */
-  @Experimental
   public void setType(Type type) {
     this.type = Objects.requireNonNull(type);
   }
@@ -398,7 +457,7 @@ public class RuleMatch implements Comparable<RuleMatch> {
     if (rule instanceof PatternRule) {
       //String covered = getSentence().getText().substring(getFromPos(), getToPos());
       //return ((PatternRule) rule).getFullId() + ":" + offsetPosition + ":" + message + ":" + covered + " -> " + getSuggestedReplacements();
-      return ((PatternRule) rule).getFullId() + ":" + offsetPosition + ":" + message;
+      return rule.getFullId() + ":" + offsetPosition + ":" + message;
     } else {
       //String covered = getSentence().getText().substring(getFromPos(), getToPos());
       //return rule.getId() + ":" + offsetPosition + ":" + message + ":" + covered + " -> " + getSuggestedReplacements();
@@ -419,16 +478,16 @@ public class RuleMatch implements Comparable<RuleMatch> {
     if (o == null || getClass() != o.getClass()) return false;
     RuleMatch other = (RuleMatch) o;
     return Objects.equals(rule.getId(), other.rule.getId())
+        && Objects.equals(patternPosition, other.patternPosition)
         && Objects.equals(offsetPosition, other.offsetPosition)
         && Objects.equals(message, other.message)
-        && Objects.equals(suggestedReplacements, other.suggestedReplacements)
         && Objects.equals(sentence, other.sentence)
         && Objects.equals(type, other.type);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(rule.getId(), offsetPosition, message, suggestedReplacements, sentence, type);
+    return Objects.hash(rule.getId(), offsetPosition, patternPosition, message, sentence, type);
   }
 
   /**
@@ -438,7 +497,6 @@ public class RuleMatch implements Comparable<RuleMatch> {
    * without deprecating them first)
    * @since 4.3
    */
-  @Experimental
   public enum Type {
     /** Spelling errors, typically red. */
     UnknownWord,
@@ -446,6 +504,12 @@ public class RuleMatch implements Comparable<RuleMatch> {
     Hint,
     /** Other errors (including grammar), typically yellow/orange. */
     Other
+  }
+
+  static class PatternPosition extends MatchPosition {
+    PatternPosition(int start, int end) {
+      super(start, end);
+    }
   }
 
   static class OffsetPosition extends MatchPosition {

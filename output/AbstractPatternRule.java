@@ -19,13 +19,6 @@
 
 package org.languagetool.rules.patterns;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.regex.Pattern;
-
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -34,6 +27,12 @@ import org.languagetool.Language;
 import org.languagetool.rules.Rule;
 import org.languagetool.rules.RuleMatch;
 import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * An Abstract Pattern Rule that describes a pattern of words or part-of-speech tags 
@@ -47,13 +46,11 @@ public abstract class AbstractPatternRule extends Rule {
 
   protected final Language language;
   protected final List<PatternToken> patternTokens;
-  protected final Pattern regex;
-  protected final int regexMark;
   protected final boolean testUnification;
   protected final boolean sentStart;
-  protected final List<Match> suggestionMatches = new ArrayList<>();
-  protected final List<Match> suggestionMatchesOutMsg = new ArrayList<>();
-  protected final List<DisambiguationPatternRule> antiPatterns = new ArrayList<>();
+  protected List<Match> suggestionMatches;
+  protected List<Match> suggestionMatchesOutMsg;
+  protected List<DisambiguationPatternRule> antiPatterns;
 
   protected String subId; // because there can be more than one rule in a rule group
   protected int startPositionCorrection;
@@ -69,30 +66,20 @@ public abstract class AbstractPatternRule extends Rule {
   private final boolean getUnified;
   private final boolean groupsOrUnification;
 
-  /**
-   * @since 3.2
-   */
-  public AbstractPatternRule(String id, String description, Language language, Pattern regex, int regexMark) {
-    this(id, description, language, null, regex, regexMark, false);
+  protected AbstractPatternRule(String id, String description, Language language) {
+    this(id, description, language, null, false);
   }
 
   public AbstractPatternRule(String id, String description, Language language, List<PatternToken> patternTokens, boolean getUnified, String message) {
-    this(id, description, language, patternTokens, null, 0, getUnified);
+    this(id, description, language, patternTokens, getUnified);
     this.message = message;
   }
 
   public AbstractPatternRule(String id, String description, Language language, List<PatternToken> patternTokens, boolean getUnified) {
-    this(id, description, language, patternTokens, null, 0, getUnified);
-  }
-
-  private AbstractPatternRule(String id, String description, Language language, List<PatternToken> patternTokens, Pattern regex, int regexMark, boolean getUnified) {
     this.id = Objects.requireNonNull(id, "id cannot be null");
     this.description = Objects.requireNonNull(description, "description ('name' in XML) cannot be null");
     this.language = Objects.requireNonNull(language, "language cannot be null");
     this.getUnified = getUnified;
-    if (patternTokens == null && regex == null) {
-      throw new IllegalArgumentException("patternTokens and regex cannot both be null");
-    }
     if (patternTokens != null) {
       this.patternTokens = new ArrayList<>(patternTokens);
       testUnification = initUnifier();
@@ -109,14 +96,7 @@ public abstract class AbstractPatternRule extends Rule {
       } else {
         groupsOrUnification = true;
       }
-      this.regex = null;
-      this.regexMark = 0;
     } else {
-      this.regex = regex;
-      if (regexMark < 0) {
-        throw new IllegalArgumentException("mark must be >= 0: " + regexMark);
-      }
-      this.regexMark = regexMark;
       this.patternTokens = null;
       groupsOrUnification = false;
       sentStart = false;
@@ -264,20 +244,26 @@ public abstract class AbstractPatternRule extends Rule {
 
   /** Add formatted suggestion elements. */
   public final void addSuggestionMatch(Match m) {
+    if (suggestionMatches == null) {
+      suggestionMatches = new ArrayList<>(0);
+    }
     suggestionMatches.add(m);
   }
 
   /** Add formatted suggestion elements outside message. */
   public final void addSuggestionMatchOutMsg(Match m) {
+    if (suggestionMatchesOutMsg == null) {
+      suggestionMatchesOutMsg = new ArrayList<>(0);
+    }
     suggestionMatchesOutMsg.add(m);
   }
   
   List<Match> getSuggestionMatches() {
-    return suggestionMatches;
+    return suggestionMatches == null ? Collections.emptyList() : suggestionMatches;
   }
 
   List<Match> getSuggestionMatchesOutMsg() {
-    return suggestionMatchesOutMsg;
+    return suggestionMatchesOutMsg == null ? Collections.emptyList() : suggestionMatchesOutMsg;
   }
 
   @NotNull
@@ -329,6 +315,9 @@ public abstract class AbstractPatternRule extends Rule {
    * @since 2.5
    */
   public void setAntiPatterns(List<DisambiguationPatternRule> antiPatterns) {
+    if (this.antiPatterns == null) {
+      this.antiPatterns = new ArrayList<>(0);
+    }
     this.antiPatterns.addAll(antiPatterns);
   }
 
@@ -337,7 +326,7 @@ public abstract class AbstractPatternRule extends Rule {
    */
   @Override
   public final List<DisambiguationPatternRule> getAntiPatterns() {
-    return Collections.unmodifiableList(antiPatterns);
+    return antiPatterns == null ? Collections.emptyList() : Collections.unmodifiableList(antiPatterns);
   }
 
   /**
@@ -347,4 +336,5 @@ public abstract class AbstractPatternRule extends Rule {
   String getShortMessage() {
   	return StringUtils.EMPTY;
   }
+
 }

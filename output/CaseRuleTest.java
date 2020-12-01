@@ -147,6 +147,7 @@ public class CaseRuleTest {
     assertGood("Das schaffen moderne und effizientere E-Autos schneller.");
     assertGood("Das verwalten User.");
     assertGood("Man kann das generalisieren");
+    assertGood("Aber wie wir das machen und sicher gestalten, darauf konzentriert sich unsere Arbeit.");
     assertGood("Vielleicht kann man das erweitern");
     assertGood("Vielleicht soll er das generalisieren");
     assertGood("Wahrscheinlich müssten sie das überarbeiten");
@@ -160,6 +161,24 @@ public class CaseRuleTest {
     assertGood("Ist das eine Frage ? Müsste das nicht anders sein?");
     assertGood("Das ist ein Satz !!! Das auch.");
     assertGood("Der russische Erdölmagnat Emanuel Nobel, der Erbauer des ersten Dieselmotorschiffes.");
+    assertGood("Zur Versöhnung: Jüdische Gläubige sollen beten.");
+    assertGood("Fast im Stundentakt wurden neue Infizierte gemeldet.");
+    assertGood("Bert Van Den Brink");
+    assertGood("“In den meisten Bundesländern werden solche Studien per se nicht durchgeführt.”");
+    assertGood("Aber “in den meisten Bundesländern werden solche Studien per se nicht durchgeführt.”");
+    assertGood("A) Das Haus");
+    assertGood("Rabi und Polykarp Kusch an der Columbia-Universität");
+    assertGood("Man geht davon aus, dass es sich dabei nicht um Reinigungsverhalten handelt.");
+    assertGood("Wenn dort oft Gefahren lauern.");
+    assertGood("3b) Den Bereich absichern");
+    assertGood("@booba Da der Holger keine Zeit hat ...");
+    assertGood("Es gibt infizierte Ärzt*innen.");
+    assertGood("WUrzeln");  // to be found by spell checker
+    assertGood("🙂 Übrigens finde ich dein neues Ordnungssystem richtig genial!");
+    assertGood("Ein 10,4 Ah Lithium-Akku");
+    assertGood("14:15 Uhr SpVgg Westheim");
+    assertGood("Autohaus Dornig GmbH");
+    assertGood("Hans Pries GmbH");
 
     // https://github.com/languagetool-org/languagetool/issues/1515:
     assertGood("▶︎ Dies ist ein Test");
@@ -171,12 +190,16 @@ public class CaseRuleTest {
     assertGood(";-) Dies ist ein Test");
     assertGood(":) Dies ist ein Test");
     assertGood(";) Dies ist ein Test");
+    assertGood("..., die ins Nichts griff.");
+    assertGood("Er fragte, was sie über das denken und zwinkerte ihnen zu.");
+    assertGood("dem Ägyptischen, Berberischen, Semitischen, Kuschitischen, Omotischen und dem Tschadischen");
 
     //assertBad("Sie sind nicht Verständlich");
     assertBad("Das machen der Töne ist schwierig.");
     assertBad("Sie Vertraute niemandem.");
     assertBad("Beten Lernt man in Nöten.");
-    assertBad("Ich gehe gerne Joggen.");
+    assertBad("Ä Was?");
+    //assertBad("Ich gehe gerne Joggen.");
     assertBad("Er ist Groß.");
     assertBad("Die Zahl ging auf Über 1.000 zurück.");
     assertBad("Er sammelt Große und kleine Tassen.");
@@ -194,6 +217,7 @@ public class CaseRuleTest {
     assertBad("Damit sollen sie die Versorgung in der Region Übernehmen.");
     assertBad("Die Unfallursache scheint geklärt, ein Lichtsignal wurde Überfahren.");
     assertBad("Der Lenker hatte die Höchstgeschwindigkeit um 76 km/h Überschritten.");
+    assertBad("Das sind 10 Millionen Euro, Gleichzeitig und zusätzlich.");
     //assertBad("Das Extreme Sportfest");
     //assertBad("Das Extreme Sportfest findet morgen statt.");
     assertGood("Stets suchte er das Extreme.");
@@ -329,13 +353,32 @@ public class CaseRuleTest {
     assertGood("Etwas Grünes, Schleimiges klebte an dem Stein.");
     assertGood("Er befürchtet Schlimmeres.");
     assertBad("Bis Bald!");
-    
+    assertGood("#4 Aktuelle Situation");
+    assertGood("Er trinkt ein kühles Blondes.");
+    assertGood("* [ ] Ein GitHub Markdown Listenpunkt");
+    assertGood("Tom ist ein engagierter, gutaussehender Vierzigjähriger, der...");
+    assertGood("a.) Im Zusammenhang mit ...");
+    assertGood("✔︎ Weckt Aufmerksamkeit.");
+    assertGood("Hallo Eckhart,");
+    assertGood("Er kann Polnisch und Urdu.");
+    assertGood("---> Der USB 3.0 Stecker");
+    assertGood("Black Lives Matter");
+    assertGood("== Schrittweise Erklärung");
+    assertGood("Audi A5 Sportback 2.0 TDI");
+    assertGood("§ 1 Allgemeine Bedingungen");
+    assertGood("§1 Allgemeine Bedingungen");
+    assertGood(" Das ist das Aus des Airbus A380.");
+
     // uppercased adjective compounds
     assertGood("Er isst UV-bestrahltes Obst.");
     assertGood("Er isst Na-haltiges Obst.");
     assertGood("Er vertraut auf CO2-arme Wasserkraft");
     assertGood("Das Entweder-oder ist kein Problem.");
     assertGood("Er liebt ihre Makeup-freie Haut.");
+    assertGood("Das ist eine Schreibweise.");
+    assertBad("Das ist Eine Schreibweise.");
+    assertGood("Das ist ein Mann.");
+    assertBad("Das ist Ein Mann.");
   }
 
   private void assertGood(String input) throws IOException {
@@ -364,8 +407,9 @@ public class CaseRuleTest {
     assertGood("Das lesen sie doch sicher in einer Minute durch.");
     assertGood("Das lesen Sie doch sicher in einer Minute durch!");
     assertGood("Formationswasser, das oxidiert war.");
+    assertGood("Um das herauszubekommen diskutieren zwei Experten.");
 
-    // Source of the following examples: http://www.canoonet.eu/services/GermanSpelling/Amtlich/GrossKlein/pgf57-58.html
+    // Source of the following examples: https://dict.leo.org/grammatik/deutsch/Rechtschreibung/Amtlich/GrossKlein/pgf57-58.html
     assertGood("Das Lesen fällt mir schwer.");
     assertGood("Sie hörten ein starkes Klopfen.");
     assertGood("Wer erledigt das Fensterputzen?");

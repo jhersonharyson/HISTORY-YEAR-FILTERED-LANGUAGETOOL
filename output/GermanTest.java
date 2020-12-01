@@ -46,7 +46,7 @@ public class GermanTest extends LanguageSpecificTest {
     testDemoText(lang, s,
       Arrays.asList("UPPERCASE_SENTENCE_START", "EIN_PAAR", "COMMA_PARENTHESIS_WHITESPACE", "ANGST_UND_BANGE", "KOMP_WIE", "GERMAN_SPELLER_RULE", "SAGT_RUFT", "DATUM_WOCHENTAG", "DE_AGREEMENT")
     );
-    runTests(lang);
+    runTests(lang, null, "_");
   }
 
   @Test
@@ -78,6 +78,38 @@ public class GermanTest extends LanguageSpecificTest {
         if (message.contains("Genetiv")) {
           origWord = "Genetiv";
           suggWord = "Genitiv";
+        }
+        if (message.contains("Partizip 1")) {
+          origWord = "Partizip 1";
+          suggWord = "Partizip I";
+        }
+        if (message.contains("Partizip 2")) {
+          origWord = "Partizip 2";
+          suggWord = "Partizip II";
+        }
+        if (message.contains(" fordert ")) {
+          origWord = "fordert";
+          suggWord = "erfordert";
+        }
+        if (message.contains("auseinandergeschrieben")) {
+          origWord = "auseinandergeschrieben";
+          suggWord = "getrennt geschrieben";
+        }
+        if (message.contains("getrenntgeschrieben")) {
+          origWord = "getrenntgeschrieben";
+          suggWord = "getrennt geschrieben";
+        }
+        if (message.contains("Meinten sie")) {
+          origWord = "Meinten sie";
+          suggWord = "Meinten Sie";
+        }
+        if (message.contains("meinten sie")) {
+          origWord = "meinten sie";
+          suggWord = "meinten Sie";
+        }
+        if (message.toLowerCase().contains("wollen sie")) {
+          origWord = "Wollen Sie";
+          suggWord = "Möchten Sie";
         }
         if (origWord != null) {
           System.err.println("WARNING: Aus Gründen der Einheitlichkeit bitte '" + suggWord + "' nutzen statt '" + origWord + "' in der Regel " + patternRule.getFullId() + ", message: '" + message + "'");
@@ -141,13 +173,14 @@ public class GermanTest extends LanguageSpecificTest {
   private boolean lacksSwitzerlandSpelling(String pattern) {
     return pattern != null && pattern.contains("ß") 
       && !pattern.contains("(ß|ss)") 
-      && !containsSwitzerlandSpelling(pattern) 
+      && !pattern.contains("(ss|ß)")
+      && !containsSwitzerlandSpelling(pattern)
       && !allInBrackets('ß', pattern);
   }
 
   // only works for e.g.: foo|baß|bla
   private boolean containsSwitzerlandSpelling(String pattern) {
-    String[] parts = pattern.split("\\|");
+    String[] parts = pattern.split("[|()]");
     for (String part : parts) {
       if (part.contains("ß")) {
         if (!cleanSyntax(pattern).contains(cleanSyntax(part).replace("ß", "ss"))) {

@@ -19,15 +19,14 @@
 package org.languagetool.language;
 
 import org.jetbrains.annotations.NotNull;
-import org.languagetool.Language;
-import org.languagetool.LanguageMaintainedState;
-import org.languagetool.UserConfig;
+import org.jetbrains.annotations.Nullable;
+import org.languagetool.*;
 import org.languagetool.chunking.Chunker;
 import org.languagetool.chunking.GermanChunker;
 import org.languagetool.languagemodel.LanguageModel;
+import org.languagetool.rules.*;
 import org.languagetool.rules.de.LongSentenceRule;
 import org.languagetool.rules.de.SentenceWhitespaceRule;
-import org.languagetool.rules.*;
 import org.languagetool.rules.de.*;
 import org.languagetool.rules.neuralnetwork.NeuralNetworkRuleCreator;
 import org.languagetool.rules.neuralnetwork.Word2VecModel;
@@ -37,17 +36,12 @@ import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.de.GermanTagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tagging.disambiguation.rules.de.GermanRuleDisambiguator;
-import org.languagetool.tokenizers.CompoundWordTokenizer;
-import org.languagetool.tokenizers.SRXSentenceTokenizer;
-import org.languagetool.tokenizers.SentenceTokenizer;
+import org.languagetool.tokenizers.*;
 import org.languagetool.tokenizers.de.GermanCompoundTokenizer;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.ResourceBundle;
+import java.util.*;
 
 /**
  * Support for German - use the sub classes {@link GermanyGerman}, {@link SwissGerman}, or {@link AustrianGerman}
@@ -56,12 +50,7 @@ import java.util.ResourceBundle;
 public class German extends Language implements AutoCloseable {
 
   private static final Language GERMANY_GERMAN = new GermanyGerman();
-  
-  protected Tagger tagger;
-  private Synthesizer synthesizer;
-  private SentenceTokenizer sentenceTokenizer;
-  private Disambiguator disambiguator;
-  private GermanChunker chunker;
+
   private CompoundWordTokenizer compoundTokenizer;
   private GermanCompoundTokenizer strictCompoundTokenizer;
   private LanguageModel languageModel;
@@ -80,24 +69,16 @@ public class German extends Language implements AutoCloseable {
   public Language getDefaultLanguageVariant() {
     return GERMANY_GERMAN;
   }
-  
+
   @Override
-  public Disambiguator getDisambiguator() {
-    if (disambiguator == null) {
-      disambiguator = new GermanRuleDisambiguator();
-    }
-    return disambiguator;
+  public Disambiguator createDefaultDisambiguator() {
+    return new GermanRuleDisambiguator();
   }
 
-  /**
-   * @since 2.9
-   */
+  @Nullable
   @Override
-  public Chunker getPostDisambiguationChunker() {
-    if (chunker == null) {
-      chunker = new GermanChunker();
-    }
-    return chunker;
+  public Chunker createDefaultPostDisambiguationChunker() {
+    return new GermanChunker();
   }
 
   @Override
@@ -115,35 +96,21 @@ public class German extends Language implements AutoCloseable {
     return new String[]{"LU", "LI", "BE"};
   }
 
-  @Override
-  public Tagger getTagger() {
-    Tagger t = tagger;
-    if (t == null) {
-      synchronized (this) {
-        t = tagger;
-        if (t == null) {
-          tagger = t = new GermanTagger();
-        }
-      }
-    }
-    return t;
-  }
-
-  @Override
   @NotNull
-  public Synthesizer getSynthesizer() {
-    if (synthesizer == null) {
-      synthesizer = new GermanSynthesizer(this);
-    }
-    return synthesizer;
+  @Override
+  public Tagger createDefaultTagger() {
+    return new GermanTagger();
+  }
+
+  @Nullable
+  @Override
+  public Synthesizer createDefaultSynthesizer() {
+    return new GermanSynthesizer(this);
   }
 
   @Override
-  public SentenceTokenizer getSentenceTokenizer() {
-    if (sentenceTokenizer == null) {
-      sentenceTokenizer = new SRXSentenceTokenizer(this);
-    }
-    return sentenceTokenizer;
+  public SentenceTokenizer createDefaultSentenceTokenizer() {
+    return new SRXSentenceTokenizer(this);
   }
 
   @Override
@@ -168,6 +135,7 @@ public class German extends Language implements AutoCloseable {
                     Example.fixed("Das Haus ist alt. <marker>Es</marker> wurde 1950 gebaut.")),
             new MultipleWhitespaceRule(messages, this),
             // specific to German:
+            new SimpleReplaceRule(messages),
             new OldSpellingRule(messages),
             new SentenceWhitespaceRule(messages),
             new GermanDoublePunctuationRule(messages),
@@ -178,7 +146,6 @@ public class German extends Language implements AutoCloseable {
             new AgreementRule(messages, this),
             new AgreementRule2(messages, this),
             new CaseRule(messages, this),
-            new CompoundRule(messages),
             new DashRule(messages),
             new VerbAgreementRule(messages, this),
             new SubjectVerbAgreementRule(messages, this),
@@ -190,7 +157,7 @@ public class German extends Language implements AutoCloseable {
             new EmptyLineRule(messages, this),
             new GermanStyleRepeatedWordRule(messages, this, userConfig),
             new CompoundCoherencyRule(messages),
-            new LongSentenceRule(messages, userConfig),
+            new LongSentenceRule(messages, userConfig, 35, true, true),
             new LongParagraphRule(messages, this, userConfig),
             new GermanFillerWordsRule(messages, this, userConfig),
             new GermanParagraphRepeatBeginningRule(messages, this),
@@ -201,16 +168,19 @@ public class German extends Language implements AutoCloseable {
             new MissingCommaRelativeClauseRule(messages, true),
             new GermanReadabilityRule(messages, this, userConfig, true),
             new GermanReadabilityRule(messages, this, userConfig, false),
-            new CompoundInfinitivRule(messages, this, userConfig)
+            new CompoundInfinitivRule(messages, this, userConfig),
+            new StyleRepeatedVeryShortSentences(messages),
+            new StyleRepeatedSentenceBeginning(messages)
     );
   }
 
   /** @since 3.1 */
   @Override
-  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel, UserConfig userConfig) throws IOException {
     return Arrays.asList(
+            new UpperCaseNgramRule(messages, languageModel, this),
             new GermanConfusionProbabilityRule(messages, languageModel, this),
-            new ProhibitedCompoundRule(messages, languageModel)
+            new ProhibitedCompoundRule(messages, languageModel, userConfig)
     );
   }
 
@@ -277,40 +247,117 @@ public class German extends Language implements AutoCloseable {
       languageModel.close();
     }
   }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningDoubleQuote() {
+    return "„";
+  }
 
+  /** @since 5.1 */
+  @Override
+  public String getClosingDoubleQuote() {
+    return "“";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningSingleQuote() {
+    return "‚";
+  }
+
+  /** @since 5.1 */
+  @Override
+  public String getClosingSingleQuote() {
+    return "‘";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public boolean isAdvancedTypographyEnabled() {
+    return true;
+  }
+  
+  @Override
+  public String toAdvancedTypography (String input) {
+    String output = super.toAdvancedTypography(input);
+    
+    //non-breaking space
+    output = output.replaceAll("\\b([a-zA-Z]\\.)([a-zA-Z]\\.)", "$1\u00a0$2");
+    return output;
+  }
+  
+
+
+  
   @Override
   public LanguageMaintainedState getMaintainedState() {
     return LanguageMaintainedState.ActivelyMaintained;
   }
 
   @Override
-  public int getPriorityForId(String id) {
+  protected int getPriorityForId(String id) {
     switch (id) {
       // Rule ids:
       case "OLD_SPELLING_INTERNAL": return 10;
+      case "ROCK_N_ROLL": return 1;  // better error than DE_CASE
+      case "RESOURCE_RESSOURCE": return 1;  // better error than DE_CASE
       case "DE_PROHIBITED_COMPOUNDS": return 1;  // a more detailed error message than from spell checker
       case "ANS_OHNE_APOSTROPH": return 1;
       case "DIESEN_JAHRES": return 1;
       case "EBEN_FALLS": return 1;
+      case "UST_ID": return 1;
+      case "FUER_INBESONDERE": return 1; // prefer over KOMMA_VOR_ERLAEUTERUNG
+      case "COVID_19": return 1; // prefer over PRAEP_GEN and DE_AGREEMENT
+      case "IM_ALTER": return 1; // prefer over ART_ADJ_SOL
+      case "DAS_ALTER": return 1; // prefer over ART_ADJ_SOL
+      case "VER_INF_PKT_VER_INF": return 1; // prefer over DE_CASE
       case "DASS_MIT_VERB": return 1; // prefer over SUBJUNKTION_KOMMA ("Dass wird Konsequenzen haben.")
-      case "GERMAN_SPELLER_RULE": return -1;  // assume most other rules are more specific and helpful than the spelling rule
-      case "AUSTRIAN_GERMAN_SPELLER_RULE": return -1;  // assume most other rules are more specific and helpful than the spelling rule
-      case "SWISS_GERMAN_SPELLER_RULE": return -1;  // assume most other rules are more specific and helpful than the spelling rule
-      case "DE_AGREEMENT": return -1;  // prefer RECHT_MACHEN, MONTAGS and other
-      case "CONFUSION_RULE": return -1;  // probably less specific than the rules from grammar.xml
+      case "AB_TEST": return 1; // prefer over spell checker and agreement
+      case "BZGL_ABK": return 1; // prefer over spell checker
+      case "DURCH_WACHSEN": return 1; // prefer over SUBSTANTIVIERUNG_NACH_DURCHs
+      case "RUNDUM_SORGLOS_PAKET": return 1; // higher prio than DE_CASE
+      case "MIT_FREUNDLICHEN_GRUESSE": return 1; // higher prio than MEIN_KLEIN_HAUS
+      case "EINE_ORIGINAL_RECHNUNG": return 1; // higher prio than DE_CASE, DE_AGREEMENT and MEIN_KLEIN_HAUS
+      // default is 0
+      case "DE_AGREEMENT": return -1;  // prefer RECHT_MACHEN, MONTAGS, KONJUNKTION_DASS_DAS, DESWEITEREN, DIES_BEZUEGLICH and other
+      case "MEIN_KLEIN_HAUS": return -1; // prefer more specific rules that offer a suggestion (e.g. DIES_BEZÜGLICH)
+      case "COMMA_IN_FRONT_RELATIVE_CLAUSE": return -1; // prefer other rules (KONJUNKTION_DASS_DAS)
       case "MODALVERB_FLEKT_VERB": return -1;
       case "AKZENT_STATT_APOSTROPH": return -1;  // lower prio than PLURAL_APOSTROPH
+      case "DOPPELTER_NOMINATIV": return -2;  // give precedence to wie-wir-wird confusion rules
+      case "GERMAN_WORD_REPEAT_RULE": return -3; // prefer other more specific rules
+      case "GERMAN_SPELLER_RULE": return -3;  // assume most other rules are more specific and helpful than the spelling rule
+      case "AUSTRIAN_GERMAN_SPELLER_RULE": return -3;  // assume most other rules are more specific and helpful than the spelling rule
+      case "SWISS_GERMAN_SPELLER_RULE": return -3;  // assume most other rules are more specific and helpful than the spelling rule
+      case "PUNCTUATION_PARAGRAPH_END": return -4;  // don't hide spelling mistakes
       case "PUNKT_ENDE_ABSATZ": return -10;  // should never hide other errors, as chance for a false alarm is quite high
       case "KOMMA_ZWISCHEN_HAUPT_UND_NEBENSATZ": return -10;
       case "KOMMA_VOR_RELATIVSATZ": return -10;
+      case "COMMA_BEHIND_RELATIVE_CLAUSE": return -10;
+      case "TOO_LONG_PARAGRAPH": return -15;
       // Category ids - make sure style issues don't hide overlapping "real" errors:
-      case "COLLOQUIALISMS": return -15; 
-      case "STYLE": return -15; 
-      case "REDUNDANCY": return -15; 
-      case "GENDER_NEUTRALITY": return -15; 
-      case "TYPOGRAPHY": return -15; 
+      case "COLLOQUIALISMS": return -15;
+      case "REDUNDANCY": return -15;
+      case "GENDER_NEUTRALITY": return -15;
+      case "TYPOGRAPHY": return -15;
+    }
+    if (id.startsWith("CONFUSION_RULE_")) {
+      return -1;
     }
     return super.getPriorityForId(id);
+  }
+
+  @Override
+  public List<Rule> getRelevantRemoteRules(ResourceBundle messageBundle, List<RemoteRuleConfig> configs, GlobalConfig globalConfig, UserConfig userConfig, Language motherTongue, List<Language> altLanguages, boolean inputLogging) throws IOException {
+    List<Rule> rules = new ArrayList<>(super.getRelevantRemoteRules(
+      messageBundle, configs, globalConfig, userConfig, motherTongue, altLanguages, inputLogging));
+
+    // no description needed - matches based on automatically created rules with descriptions provided by remote server
+    rules.addAll(GRPCRule.createAll(configs, inputLogging, "AI_DE_",
+      "INTERNAL - dynamically loaded rule supported by remote server"));
+
+    return rules;
   }
 
 }

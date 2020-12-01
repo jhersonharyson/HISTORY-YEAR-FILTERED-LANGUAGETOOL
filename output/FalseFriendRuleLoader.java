@@ -20,25 +20,19 @@ package org.languagetool.rules.patterns;
 
 import org.languagetool.JLanguageTool;
 import org.languagetool.Language;
+import org.languagetool.ShortDescriptionProvider;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import javax.xml.parsers.*;
+import java.io.*;
 import java.text.MessageFormat;
-import java.util.List;
-import java.util.Objects;
-import java.util.ResourceBundle;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Loads {@link PatternRule}s from a false friends XML file.
- * 
+ *
  * @author Daniel Naber
  */
 public class FalseFriendRuleLoader extends DefaultHandler {
@@ -47,7 +41,7 @@ public class FalseFriendRuleLoader extends DefaultHandler {
   private final String falseFriendSugg;
 
   public FalseFriendRuleLoader(Language motherTongue) {
-    ResourceBundle messages = ResourceBundle.getBundle(JLanguageTool.MESSAGE_BUNDLE, motherTongue.getLocale());
+    ResourceBundle messages = JLanguageTool.getDataBroker().getResourceBundle(JLanguageTool.MESSAGE_BUNDLE, motherTongue.getLocale());
     this.falseFriendHint =  messages.getString("false_friend_hint");
     this.falseFriendSugg =  messages.getString("false_friend_suggestion");
   }
@@ -81,20 +75,34 @@ public class FalseFriendRuleLoader extends DefaultHandler {
             false);
     saxParser.parse(stream, handler);
     List<AbstractPatternRule> rules = handler.getRules();
+    List<AbstractPatternRule> filteredRules = new ArrayList<>();
     // Add suggestions to each rule:
     MessageFormat msgFormat = new MessageFormat(falseFriendSugg);
+    ShortDescriptionProvider descProvider = new ShortDescriptionProvider();
     for (AbstractPatternRule rule : rules) {
+      String patternStr = rule.getPatternTokens().stream().map(k -> k.getString()).collect(Collectors.joining(" "));
       List<String> suggestions = handler.getSuggestionMap().get(rule.getId());
       if (suggestions != null) {
-        String[] msg = { formatSuggestions(suggestions) };
-        rule.setMessage(rule.getMessage() + " " + msgFormat.format(msg));
+        List<String> formattedSuggestions = new ArrayList<>();
+        for (String suggestion : suggestions) {
+          if (patternStr.equalsIgnoreCase(suggestion)) {
+            continue;
+          }
+          String desc = descProvider.getShortDescription(suggestion, textLanguage);
+          if (desc != null) {
+            formattedSuggestions.add("<suggestion>" + suggestion + "</suggestion> (" + desc + ")");
+          } else {
+            formattedSuggestions.add("<suggestion>" + suggestion + "</suggestion>");
+          }
+        }
+        if (formattedSuggestions.size() > 0) {
+          String joined = String.join(", ", formattedSuggestions);
+          rule.setMessage(rule.getMessage() + " " + msgFormat.format(new String[]{joined}));
+          filteredRules.add(rule);
+        }
       }
     }
-    return rules;
-  }
-
-  private String formatSuggestions(List<String> l) {
-    return l.stream().map(o -> "<suggestion>" + o + "</suggestion>").collect(Collectors.joining(", "));
+    return filteredRules;
   }
 
 }

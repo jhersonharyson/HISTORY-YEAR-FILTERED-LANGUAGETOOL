@@ -84,7 +84,7 @@ public abstract class AbstractUnitConversionRule extends Rule {
   private static final int MAX_SUGGESTIONS = 5;
   private static final int WHITESPACE_LIMIT = 5;
 
-  protected Map<Pattern, Unit> unitPatterns = new HashMap<>();
+  protected Map<Pattern, Unit> unitPatterns = new LinkedHashMap<>();  // use LinkedHashMap for stable iteration order
 
   // for patterns that require a custom number parsing function
   protected Map<Pattern, Map.Entry<Unit, Function<MatchResult, Double>>> specialPatterns = new HashMap<>();
@@ -100,6 +100,13 @@ public abstract class AbstractUnitConversionRule extends Rule {
     CHECK_UNKNOWN_UNIT,
     UNIT_MISMATCH
   }
+
+  private final static List<Pattern> antiPatterns = Arrays.asList(
+          Pattern.compile("\\d+[-‐–]\\d+"),   // "3-5 pounds"
+          Pattern.compile("\\d+/\\d+"),   // "1/4 mile"
+          Pattern.compile("\\d+:\\d+"),   // "A 2:1 cup"
+          Pattern.compile("\\d+⁄\\d+")    // "1⁄4 cup" (it's not the standard slash)
+  );
 
   private URL buildURLForExplanation(String original) {
     try {
@@ -193,7 +200,8 @@ public abstract class AbstractUnitConversionRule extends Rule {
   }
 
   protected AbstractUnitConversionRule(ResourceBundle messages) {
-    setCategory(Categories.SEMANTICS.getCategory(messages));
+    setCategory(Categories.STYLE.getCategory(messages));
+    setLocQualityIssueType(ITSIssueType.Style);
 
     addUnit("kg", KILOGRAM, "kg", 1e0, true);
     addUnit("g", KILOGRAM, "g", 1e-3, true);
@@ -204,9 +212,10 @@ public abstract class AbstractUnitConversionRule extends Rule {
 
     addUnit("mi", MILE, "mi", 1, false);
     addUnit("yd", YARD, "yd", 1, false);
-    addUnit("(?:ft|′|')", FEET, "ft", 1, false);
+    // negative lookahead here to avoid matching "'s" and so on
+    addUnit("(?:ft|′|')(?!(\\w|\\d))", FEET, "ft", 1, false);
     // removed 'in', " because of many false positives
-    addUnit("(?:inch|″)", INCH, "inch", 1, false);
+    addUnit("(?:inch|″)(?!(\\w|\\d))", INCH, "inch", 1, false);
 
     addUnit("(?:km/h|kmh)", KILOMETRE_PER_HOUR, "km/h", 1, true);
     addUnit("(?:mph)", MILE.divide(HOUR), "mph", 1, false);
@@ -457,7 +466,7 @@ public abstract class AbstractUnitConversionRule extends Rule {
       matches.add(match);
     } else { // check given conversion for accuracy
       Map.Entry<Integer, Integer> convertedRange = new AbstractMap.SimpleImmutableEntry<>(
-        convertedMatcher.start(1) + convertedOffset, convertedMatcher.end(2) + convertedOffset);
+        convertedMatcher.start(0) + convertedOffset, convertedMatcher.end(0) + convertedOffset);
       ignoreRanges.add(convertedRange);
 
       // already using one of our conversions?
@@ -474,6 +483,10 @@ public abstract class AbstractUnitConversionRule extends Rule {
         Double convertedValueInText;
         try {
           convertedValueInText = getNumberFormat().parse(convertedMatcher.group(1)).doubleValue();
+          if (convertedMatcher.group().trim().matches("\\(\\d+ (feet|ft) \\d+ inch\\)")) {
+            // e.g. "(2 ft 6 inch)" would be interpreted as just "2 ft", given a wrong suggestion
+            return;
+          }
         } catch (ParseException e) {
           return;
         }
@@ -513,11 +526,14 @@ public abstract class AbstractUnitConversionRule extends Rule {
           Map.Entry<Unit, Double> metricEquivalent = metricEquivalents.get(0);
           Unit metricUnit = metricEquivalent.getKey();
           Double convertedValueComputed = metricEquivalent.getValue();
+          String original = unitMatcher.group(0);
+          List<String> corrected = converted.stream()
+            .map(suggestion -> getSuggestion(original, suggestion)).collect(Collectors.toList());
           if (!(convertedUnit.equals(metricUnit) && Math.abs(convertedValueInText - convertedValueComputed) < DELTA)) {
             RuleMatch match = new RuleMatch(this, sentence,
-              convertedMatcher.start(1) + convertedOffset, convertedMatcher.end(2) + convertedOffset,
+              unitMatcher.start(), convertedMatcher.end(0) + convertedOffset,
               getMessage(Message.CHECK), getShortMessage(Message.CHECK));
-            match.setSuggestedReplacements(converted);
+            match.setSuggestedReplacements(corrected);
             match.setUrl(buildURLForExplanation(unitMatcher.group(0)));
             matches.add(match);
           }
@@ -575,7 +591,24 @@ public abstract class AbstractUnitConversionRule extends Rule {
         other == null ? match :
         match.getToPos() > other.getToPos() ? match : other);
     }
+    if (matches.size() > 0) {
+      removeAntiPatternMatches(sentence, matchesByStart);
+    }
     return matchesByStart.values().toArray(new RuleMatch[0]);
   }
-  
+
+  private void removeAntiPatternMatches(AnalyzedSentence sentence, Map<Integer, RuleMatch> matchesByStart) {
+    for (Pattern antiPattern : antiPatterns) {
+      Matcher matcher = antiPattern.matcher(sentence.getText());
+      int pos = 0;
+      while (matcher.find(pos)) {
+        matchesByStart.entrySet().removeIf(entry ->
+                matcher.start() <= entry.getValue().getFromPos() && matcher.end() >= entry.getValue().getFromPos() ||
+                matcher.start() <= entry.getValue().getToPos() && matcher.end() >= entry.getValue().getToPos()
+        );
+        pos = matcher.end() + 1;
+      }
+    }
+  }
+
 }

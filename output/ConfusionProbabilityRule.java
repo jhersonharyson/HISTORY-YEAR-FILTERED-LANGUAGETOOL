@@ -18,17 +18,15 @@
  */
 package org.languagetool.rules.ngrams;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
+import com.google.common.cache.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.languagetool.AnalyzedSentence;
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.databroker.ResourceDataBroker;
+import org.languagetool.*;
+import org.languagetool.broker.ResourceDataBroker;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.rules.*;
+import org.languagetool.rules.patterns.PatternToken;
+import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 import org.languagetool.tools.StringTools;
 import org.languagetool.tools.Tools;
 
@@ -42,12 +40,15 @@ import java.util.regex.Pattern;
 /**
  * LanguageTool's homophone confusion check that uses ngram lookups
  * to decide which word in a confusion set (from {@code confusion_sets.txt}) suits best.
- * Also see <a href="http://wiki.languagetool.org/finding-errors-using-n-gram-data">http://wiki.languagetool.org/finding-errors-using-n-gram-data</a>.
+ * Also see <a href="https://dev.languagetool.org/finding-errors-using-n-gram-data">https://dev.languagetool.org/finding-errors-using-n-gram-data</a>.
  * @since 2.7
  */
 public abstract class ConfusionProbabilityRule extends Rule {
 
-  /** @since 3.1 */
+  /**
+   * @since 3.1
+   * @deprecated not used anymore, the id is now more specific (like {@code CONFUSION_RULE_TERM1_TERM2})
+   */
   public static final String RULE_ID = "CONFUSION_RULE";
   // probability is only used then at least these many of the occurrence lookups succeeded, 
   // i.e. returned a value > 0:
@@ -58,14 +59,14 @@ public abstract class ConfusionProbabilityRule extends Rule {
   private static final boolean DEBUG = false;  // also see DEBUG in BaseLanguageModel.java
 
   // Speed up the server use case, where rules get initialized for every call:
-  private static final LoadingCache<String, Map<String, List<ConfusionPair>>> confSetCache = CacheBuilder.newBuilder()
+  private static final LoadingCache<PathAndLanguage, Map<String, List<ConfusionPair>>> confSetCache = CacheBuilder.newBuilder()
       .expireAfterWrite(10, TimeUnit.MINUTES)
-      .build(new CacheLoader<String, Map<String, List<ConfusionPair>>>() {
+      .build(new CacheLoader<PathAndLanguage, Map<String, List<ConfusionPair>>>() {
         @Override
-        public Map<String, List<ConfusionPair>> load(@NotNull String fileInClassPath) throws IOException {
-          ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader();
+        public Map<String, List<ConfusionPair>> load(@NotNull PathAndLanguage pathAndLanguage) throws IOException {
+          ConfusionSetLoader confusionSetLoader = new ConfusionSetLoader(pathAndLanguage.lang);
           ResourceDataBroker dataBroker = JLanguageTool.getDataBroker();
-          try (InputStream confusionSetStream = dataBroker.getFromResourceDirAsStream(fileInClassPath)) {
+          try (InputStream confusionSetStream = dataBroker.getFromResourceDirAsStream(pathAndLanguage.path)) {
             return confusionSetLoader.loadConfusionPairs(confusionSetStream);
           }
         }
@@ -76,6 +77,7 @@ public abstract class ConfusionProbabilityRule extends Rule {
   private final int grams;
   private final Language language;
   private final List<String> exceptions;
+  private final List<DisambiguationPatternRule> antiPatterns;
 
   public ConfusionProbabilityRule(ResourceBundle messages, LanguageModel languageModel, Language language) {
     this(messages, languageModel, language, 3);
@@ -89,12 +91,17 @@ public abstract class ConfusionProbabilityRule extends Rule {
    * @since 4.7
    */
   public ConfusionProbabilityRule(ResourceBundle messages, LanguageModel languageModel, Language language, int grams, List<String> exceptions) {
+    this(messages, languageModel, language, grams, exceptions, Collections.emptyList());
+  }
+
+  public ConfusionProbabilityRule(ResourceBundle messages, LanguageModel languageModel, Language language, int grams,
+                                  List<String> exceptions, List<List<PatternToken>> antiPatterns) {
     super(messages);
     setCategory(Categories.TYPOS.getCategory(messages));
     setLocQualityIssueType(ITSIssueType.NonConformance);
     for (String filename : getFilenames()) {
       String path = "/" + language.getShortCode() + "/" + filename;
-      this.wordToPairs.putAll(confSetCache.getUnchecked(path));
+      this.wordToPairs.putAll(confSetCache.getUnchecked(new PathAndLanguage(path, language)));
     }
     this.lm = Objects.requireNonNull(languageModel);
     this.language = Objects.requireNonNull(language);
@@ -103,6 +110,7 @@ public abstract class ConfusionProbabilityRule extends Rule {
     }
     this.grams = grams;
     this.exceptions = exceptions;
+    this.antiPatterns = makeAntiPatterns(antiPatterns, language);
   }
 
   @NotNull
@@ -125,14 +133,23 @@ public abstract class ConfusionProbabilityRule extends Rule {
     String text = sentence.getText();
     List<GoogleToken> tokens = GoogleToken.getGoogleTokens(text, true, LanguageModelUtils.getGoogleStyleWordTokenizer(language));
     List<RuleMatch> matches = new ArrayList<>();
+    if (tokens.size() == 2) {
+      // 2 tokens: first is always _START_ so there's no "real" context. Ignore these cases.
+      return matches.toArray(new RuleMatch[0]);
+    }
     int pos = 0;
+    boolean realWordBefore = false;  // more advanced than simple checking for sentence start, as it skips quotes etc.
     for (GoogleToken googleToken : tokens) {
       String token = googleToken.token;
       List<ConfusionPair> confusionPairs = wordToPairs.get(token);
       boolean uppercase = false;
-      if (confusionPairs == null && token.length() > 0 && Character.isUpperCase(token.charAt(0))) {
+      if (confusionPairs == null && token.length() > 0 && Character.isUpperCase(token.charAt(0)) && !realWordBefore && isRealWord(token)) {
+        // do a lowercase lookup only at sentence start
         confusionPairs = wordToPairs.get(StringTools.lowercaseFirstChar(token));
         uppercase = true;
+      }
+      if (isRealWord(token)) {
+        realWordBefore = true;
       }
       if (confusionPairs != null) {
         for (ConfusionPair confusionPair : confusionPairs) {
@@ -140,7 +157,7 @@ public abstract class ConfusionProbabilityRule extends Rule {
           if (isEasilyConfused) {
             List<ConfusionString> pairs = uppercase ? confusionPair.getUppercaseFirstCharTerms() : confusionPair.getTerms();
             ConfusionString betterAlternative = getBetterAlternativeOrNull(tokens.get(pos), tokens, pairs, confusionPair.getFactor());
-            if (betterAlternative != null && !isException(text)) {
+            if (betterAlternative != null && !isException(text, googleToken.startPos, googleToken.endPos)) {
               if (!confusionPair.isBidirectional() && betterAlternative.getString().equals(pairs.get(0).getString())) {
                 // only direction A -> B is possible, i.e. if A is used incorrectly, B is suggested - not vice versa
                 continue;
@@ -156,9 +173,16 @@ public abstract class ConfusionProbabilityRule extends Rule {
                 // "Resolves:" (-> "Resolved:")
                 continue;
               }
-              boolean skip = isLocalException(sentence, googleToken);
-              if (!skip) {
-                RuleMatch match = new RuleMatch(this, sentence, googleToken.startPos, googleToken.endPos, message);
+              if (isCoveredByAntiPattern(sentence, googleToken)) {
+                continue;
+              }
+              if (!isLocalException(sentence, googleToken)) {
+                String term1 = confusionPair.getTerms().get(0).getString();
+                String term2 = confusionPair.getTerms().get(1).getString();
+                String id = getId() + "_" + cleanId(term1) +  "_" + cleanId(term2);
+                String desc = getDescription(term1, term2);
+                String shortDesc = Tools.i18n(messages, "statistics_suggest_short_desc");
+                RuleMatch match = new RuleMatch(new SpecificIdRule(id, desc, messages, lm, language), sentence, googleToken.startPos, googleToken.endPos, message, shortDesc);
                 match.setSuggestedReplacements(suggestions);
                 matches.add(match);
               }
@@ -169,6 +193,24 @@ public abstract class ConfusionProbabilityRule extends Rule {
       pos++;
     }
     return matches.toArray(new RuleMatch[0]);
+  }
+
+  private boolean isCoveredByAntiPattern(AnalyzedSentence sentence, GoogleToken googleToken) {
+    AnalyzedTokenReadings[] tmpTokens = getSentenceWithImmunization(sentence).getTokensWithoutWhitespace();
+    for (AnalyzedTokenReadings tmpToken : tmpTokens) {
+      if (tmpToken.isImmunized() && covers(tmpToken.getStartPos(), tmpToken.getEndPos(), googleToken.startPos, googleToken.endPos)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private String cleanId(String id) {
+    return id.toUpperCase().replace("Ä", "AE").replace("Ü", "UE").replace("Ö", "OE");
+  }
+
+  private boolean isRealWord(String token) {
+    return token.matches("[\\p{L}]+");
   }
 
   private boolean isLocalException(AnalyzedSentence sentence, GoogleToken googleToken) {
@@ -204,24 +246,28 @@ public abstract class ConfusionProbabilityRule extends Rule {
   /**
    * Return true to prevent a match.
    */
-  protected boolean isException(String sentenceText) {
+  protected boolean isException(String sentenceText, int startPos, int endPos) {
     return false;
   }
 
   @Override
   public String getDescription() {
-    return Tools.i18n(messages, "statistics_rule_description");
+    return Tools.i18n(messages, "statistics_rule_description");  // the one from SpecificIdRule is used
+  }
+
+  private String getDescription(String word1, String word2) {
+    return Tools.i18n(messages, "statistics_rule_description", word1, word2);
   }
   
   protected String getMessage(ConfusionString textString, ConfusionString suggestion) {
     if (textString.getDescription() != null && suggestion.getDescription() != null) {
-      return Tools.i18n(messages, "statistics_suggest1", suggestion.getString(), suggestion.getDescription(), textString.getString(), textString.getDescription());
+      return Tools.i18n(messages, "statistics_suggest1_new", suggestion.getString(), suggestion.getDescription(), textString.getString(), textString.getDescription());
     } else if (textString.getDescription() != null) {
-      return Tools.i18n(messages, "statistics_suggest4", suggestion.getString(), textString, textString.getDescription());
+      return Tools.i18n(messages, "statistics_suggest4_new", suggestion.getString(), textString, textString.getDescription());
     } else if (suggestion.getDescription() != null) {
-      return Tools.i18n(messages, "statistics_suggest2", suggestion.getString(), suggestion.getDescription());
+      return Tools.i18n(messages, "statistics_suggest2_new", suggestion.getString(), suggestion.getDescription(), textString.getString());
     } else {
-      return Tools.i18n(messages, "statistics_suggest3", suggestion.getString());
+      return Tools.i18n(messages, "statistics_suggest3_new", suggestion.getString(), textString.getString());
     }
   }
   
@@ -286,14 +332,54 @@ public abstract class ConfusionProbabilityRule extends Rule {
     return p2 >= MIN_PROB && p2 > p1 * factor ? otherWord : null;
   }
 
-  List<String> getContext(GoogleToken token, List<GoogleToken> tokens, String newToken, int toLeft, int toRight) {
-    return LanguageModelUtils.getContext(token, tokens, newToken, toLeft, toRight);
-  }
-  
   private void debug(String message, Object... vars) {
     if (DEBUG) {
       System.out.printf(Locale.ENGLISH, message, vars);
     }
   }
-  
+
+  @Override
+  public List<DisambiguationPatternRule> getAntiPatterns() {
+    return antiPatterns;
+  }
+
+  private static class PathAndLanguage {
+    private final String path;
+    private final Language lang;
+    PathAndLanguage(String path, Language lang) {
+      this.path = Objects.requireNonNull(path);
+      this.lang = Objects.requireNonNull(lang);
+    }
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      PathAndLanguage that = (PathAndLanguage) o;
+      return path.equals(that.path) &&
+        lang.equals(that.lang);
+    }
+    @Override
+    public int hashCode() {
+      return Objects.hash(path, lang);
+    }
+  }
+
+  static class SpecificIdRule extends ConfusionProbabilityRule {
+    private final String id;
+    private final String desc;
+    SpecificIdRule(String id, String desc, ResourceBundle messages, LanguageModel lm, Language lang) {
+      super(messages, lm, lang);
+      this.id = Objects.requireNonNull(id);
+      this.desc = desc;
+    }
+    @Override
+    public String getId() {
+      return id;
+    }
+    @Override
+    public String getDescription() {
+      return desc;
+    }
+  }
+
 }

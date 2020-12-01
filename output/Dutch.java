@@ -18,16 +18,9 @@
  */
 package org.languagetool.language;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.ResourceBundle;
-
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.LanguageMaintainedState;
-import org.languagetool.UserConfig;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.languagetool.*;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.rules.*;
 import org.languagetool.rules.nl.*;
@@ -37,19 +30,23 @@ import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tagging.disambiguation.rules.XmlRuleDisambiguator;
 import org.languagetool.tagging.nl.DutchTagger;
-import org.languagetool.tokenizers.SRXSentenceTokenizer;
-import org.languagetool.tokenizers.SentenceTokenizer;
-import org.languagetool.tokenizers.Tokenizer;
+import org.languagetool.tokenizers.*;
 import org.languagetool.tokenizers.nl.DutchWordTokenizer;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
 
 public class Dutch extends Language {
 
-  private Tagger tagger;
-  private SentenceTokenizer sentenceTokenizer;
-  private Synthesizer synthesizer;
-  private Disambiguator disambiguator;
-  private Tokenizer wordTokenizer;
+  private static final Language NETHERLANDS_DUTCH = new Dutch();
+
   private LanguageModel languageModel;
+
+  @Override
+  public Language getDefaultLanguageVariant() {
+    return NETHERLANDS_DUTCH;
+  }
 
   @Override
   public String getName() {
@@ -66,44 +63,31 @@ public class Dutch extends Language {
     return new String[]{"NL", "BE"};
   }
 
+  @NotNull
   @Override
-  public Tagger getTagger() {
-    if (tagger == null) {
-      tagger = new DutchTagger();
-    }
-    return tagger;
+  public Tagger createDefaultTagger() {
+    return new DutchTagger();
+  }
+
+  @Nullable
+  @Override
+  public Synthesizer createDefaultSynthesizer() {
+    return new DutchSynthesizer(this);
   }
 
   @Override
-  public Synthesizer getSynthesizer() {
-    if (synthesizer == null) {
-      synthesizer = new DutchSynthesizer(this);
-    }
-    return synthesizer;
+  public SentenceTokenizer createDefaultSentenceTokenizer() {
+    return new SRXSentenceTokenizer(this);
   }
 
   @Override
-  public SentenceTokenizer getSentenceTokenizer() {
-    if (sentenceTokenizer == null) {
-      sentenceTokenizer = new SRXSentenceTokenizer(this);
-    }
-    return sentenceTokenizer;
+  public Tokenizer createDefaultWordTokenizer() {
+    return new DutchWordTokenizer();
   }
 
   @Override
-  public Tokenizer getWordTokenizer() {
-    if (wordTokenizer == null) {
-      wordTokenizer = new DutchWordTokenizer();
-    }
-    return wordTokenizer;
-  }
-
-  @Override
-  public Disambiguator getDisambiguator() {
-    if (disambiguator == null) {
-      disambiguator = new XmlRuleDisambiguator(new Dutch());
-    }
-    return disambiguator;
+  public Disambiguator createDefaultDisambiguator() {
+    return new XmlRuleDisambiguator(this);
   }
 
   @Override
@@ -134,15 +118,17 @@ public class Dutch extends Language {
             new DutchWrongWordInContextRule(messages),
             new WordCoherencyRule(messages),
             new SimpleReplaceRule(messages),
-            new LongSentenceRule(messages, userConfig, -1, true),
+            new LongSentenceRule(messages, userConfig, 35, true, true),
+            new LongParagraphRule(messages, this, userConfig),
             new PreferredWordRule(messages),
+            new SpaceInCompoundRule(messages),
             new SentenceWhitespaceRule(messages)
     );
   }
 
   /** @since 4.5 */
   @Override
-  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel, UserConfig userConfig) throws IOException {
     return Arrays.asList(
             new DutchConfusionProbabilityRule(messages, languageModel, this)
     );
@@ -154,12 +140,49 @@ public class Dutch extends Language {
     languageModel = initLanguageModel(indexDir, languageModel);
     return languageModel;
   }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningDoubleQuote() {
+    return "“";
+  }
+
+  /** @since 5.1 */
+  @Override
+  public String getClosingDoubleQuote() {
+    return "”";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningSingleQuote() {
+    return "‘";
+  }
+
+  /** @since 5.1 */
+  @Override
+  public String getClosingSingleQuote() {
+    return "’";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public boolean isAdvancedTypographyEnabled() {
+    return true;
+  }
 
   @Override
-  public int getPriorityForId(String id) {
+  protected int getPriorityForId(String id) {
+    if (id.startsWith(SimpleReplaceRule.DUTCH_SIMPLE_REPLACE_RULE)) {
+      return 1;
+    }
     switch (id) {
-      case SimpleReplaceRule.DUTCH_SIMPLE_REPLACE_RULE: return 1;
       case LongSentenceRule.RULE_ID: return -1;
+      case "KORT_1": return -5;
+      case "KORT_2": return -5;  //so that spelling errors are recognized first
+      case "EINDE_ZIN_ONVERWACHT": return -5;  //so that spelling errors are recognized first
+      case "TOO_LONG_PARAGRAPH": return -15;
+      case "DE_ONVERWACHT": return -20;  // below spell checker and simple replace rule
     }
     return super.getPriorityForId(id);
   }
@@ -168,6 +191,7 @@ public class Dutch extends Language {
   public List<String> getRuleFileNames() {
     List<String> ruleFileNames = super.getRuleFileNames();
     String dirBase = JLanguageTool.getDataBroker().getRulesDir() + "/" + getShortCode() + "/";
+    ruleFileNames.add(dirBase + "nl-NL/grammar.xml");
     ruleFileNames.add(dirBase + "grammar-test-1.xml");
     return ruleFileNames;
   }

@@ -18,15 +18,11 @@
  */
 package org.languagetool.rules.en;
 
-import org.languagetool.AnalyzedSentence;
-import org.languagetool.AnalyzedToken;
-import org.languagetool.AnalyzedTokenReadings;
+import org.languagetool.*;
 import org.languagetool.rules.*;
 import org.languagetool.tools.StringTools;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.ResourceBundle;
+import java.util.*;
 import java.util.regex.Pattern;
 
 import static org.languagetool.rules.en.AvsAnData.getWordsRequiringA;
@@ -49,7 +45,7 @@ public class AvsAnRule extends Rule {
     A, AN, A_OR_AN, UNKNOWN
   }
 
-  private static final Pattern cleanupPattern = Pattern.compile("[^αa-zA-Z0-9\\.;,:']");
+  private static final Pattern cleanupPattern = Pattern.compile("[^αa-zA-Z0-9.;,:']");
 
   public AvsAnRule(ResourceBundle messages) {
     super.setCategory(Categories.MISC.getCategory(messages));
@@ -101,15 +97,16 @@ public class AvsAnRule extends Rule {
         if (equalsA && determiner == Determiner.AN) {
           String replacement = StringTools.startsWithUppercase(prevTokenStr) ? "An" : "an";
           msg = "Use <suggestion>" + replacement + "</suggestion> instead of '" + prevTokenStr + "' if the following "+
-                  "word starts with a vowel sound, e.g. 'an article', 'an hour'";
+                  "word starts with a vowel sound, e.g. 'an article', 'an hour'.";
         } else if (equalsAn && determiner == Determiner.A) {
           String replacement = StringTools.startsWithUppercase(prevTokenStr) ? "A" : "a";
           msg = "Use <suggestion>" + replacement + "</suggestion> instead of '" + prevTokenStr + "' if the following "+
-                  "word doesn't start with a vowel sound, e.g. 'a sentence', 'a university'";
+                  "word doesn't start with a vowel sound, e.g. 'a sentence', 'a university'.";
         }
         if (msg != null) {
           RuleMatch match = new RuleMatch(
-              this, sentence, tokens[prevTokenIndex].getStartPos(), tokens[prevTokenIndex].getEndPos(), msg, "Wrong article");
+              this, sentence, tokens[prevTokenIndex].getStartPos(), tokens[prevTokenIndex].getEndPos(),
+                  tokens[prevTokenIndex].getStartPos(), token.getEndPos(), msg, "Wrong article");
           ruleMatches.add(match);
         }
       }
@@ -134,15 +131,15 @@ public class AvsAnRule extends Rule {
     AnalyzedTokenReadings token = new AnalyzedTokenReadings(new AnalyzedToken(origWord, null, null), 0);
     Determiner determiner = getCorrectDeterminerFor(token);
     if (determiner == Determiner.A || determiner == Determiner.A_OR_AN) {
-      return "a " + origWord;
+      return "a " + StringTools.lowercaseFirstCharIfCapitalized(origWord);
     } else if (determiner == Determiner.AN) {
-      return "an " + origWord;
+      return "an " + StringTools.lowercaseFirstCharIfCapitalized(origWord);
     } else {
       return origWord;
     }
   }
 
-  Determiner getCorrectDeterminerFor(AnalyzedTokenReadings token) {
+  static Determiner getCorrectDeterminerFor(AnalyzedTokenReadings token) {
     String word = token.getToken();
     Determiner determiner = Determiner.UNKNOWN;
     String[] parts = word.split("[-']");  // for example, in "one-way" only "one" is relevant
@@ -180,7 +177,7 @@ public class AvsAnRule extends Rule {
     return determiner;
   }
 
-  private boolean isVowel(char c) {
+  private static boolean isVowel(char c) {
     char lc = Character.toLowerCase(c);
     return lc == 'a' || lc == 'e' || lc == 'i' || lc == 'o' || lc == 'u';
   }

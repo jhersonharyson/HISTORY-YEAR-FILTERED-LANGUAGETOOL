@@ -18,6 +18,7 @@
  */
 package org.languagetool.rules.de;
 
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.languagetool.AnalyzedSentence;
 import org.languagetool.AnalyzedTokenReadings;
@@ -30,9 +31,10 @@ import org.languagetool.rules.patterns.PatternToken;
 import org.languagetool.tagging.disambiguation.rules.DisambiguationPatternRule;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 import static java.util.Arrays.*;
-import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.token;
+import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.*;
 
 /**
  * Simple agreement checker for German noun phrases. Checks agreement in:
@@ -46,16 +48,33 @@ import static org.languagetool.rules.patterns.PatternRuleBuilderHelper.token;
 public class AgreementRule2 extends Rule {
 
   private static final List<List<PatternToken>> ANTI_PATTERNS = asList(
+    asList(csToken("Regelmäßig"), posRegex("SUB:.*PLU.*")),  // "Regelmäßig Kiwis und Ananas zu essen..."
+    asList(token("lecker"), token("Essen")),  // "Lecker Essen an Weihnachten."
+    asList(token("erneut"), posRegex("SUB:.*")),  // "Erneut Ausgangssperre beschlossen"
+    asList(token("Gesetzlich"), token("Krankenversicherte")),
+    asList(token("weitgehend"), token("Einigkeit")),      // feste Phrase
     asList(token("Ernst")),      // Vorname
     asList(token("Anders")),     // Vorname
     asList(token("wirklich")),   // "Wirklich Frieden herrscht aber noch nicht"
+    asList(token("gemeinsam")),   // "Gemeinsam Sportler anfeuern"
     asList(token("wenig")),      // "Wenig Geld - ..."
+    asList(token("weniger")),      // "Weniger Geld - ..."
     asList(token("richtig")),    // "Richtig Kaffee kochen ..."
     asList(token("weiß")),       // "Weiß Papa, dass ..."
     asList(token("speziell")),   // "Speziell Flugfähigkeit hat sich unabhängig voneinander ..."
     asList(token("halb")),       // "Halb Traum, halb Wirklichkeit"
     asList(token("hinter")),     // "Hinter Bäumen"
     asList(token("vermutlich")), // "Vermutlich Ende 1813 erkrankte..."
+    asList(token("eventuell")), // "Eventuell Ende 1813 erkrankte..."
+    asList(token("ausschließlich")),
+    asList(token("ausschliesslich")),
+    asList(token("bloß")),       // "Bloß Anhängerkupplung und solche Dinge..."
+    asList(token("einfach")),    // "Einfach Bescheid sagen ..."
+    asList(token("endlich")),    // "Endlich Mittagspause!"
+    asList(token("unbemerkt")),    // "Unbemerkt Süßigkeiten essen"
+    asList(token("Typisch"), tokenRegex("Mann|Frau")),    // "Einfach Bescheid sagen ..."
+    asList(token("Ausreichend"), tokenRegex("Bewegung")),    // "Ausreichend Bewegung ..."
+    asList(token("Genau"), token("Null")),
     asList(token("wohl")),       // "Wohl Anfang 1725 begegnete Bach ..."
     asList(token("erst")),       // "Erst X, dann ..."
     asList(token("lieber")),     // "Lieber X als Y"
@@ -66,17 +85,23 @@ public class AgreementRule2 extends Rule {
     asList(token("security")),   // engl.
     asList(token("business")),   // oft engl.
     asList(token("voll"), token("Sorge")),
-    asList(token("Personal"), token("Computer")),
+    asList(token("Total"), tokenRegex("Tankstellen?")),
     asList(token("Ganz"), token("Gentleman")),
-    asList(token("Russisch"), token("Roulette"))
+    asList(token("Golden"), token("Gate")),
+    asList(token("Russisch"), token("Roulette")),
+    asList(token("Clever"), tokenRegex("Shuttles?")), // name
+    asList(token("Personal"), tokenRegex("(Computer|Coach|Trainer|Brand).*")),
+    asList(tokenRegex("Digital|Regional|Global|Bilingual|International|National|Visual|Final|Rapid|Dual|Golden"), tokenRegex("(Initiative|Connection|Bootcamp|Leadership|Sales|Community|Service|Management|Board|Identity|City|Paper|Transfer|Transformation|Power|Shopping|Brand|Master|Gate).*")),
+    asList(token("Smart"), tokenRegex("(Service|Home|Meter|City|Hall|Shopper|Shopping).*")),
+    asList(token("GmbH"))
   );
-  private final Language language;
+  private final Supplier<List<DisambiguationPatternRule>> antiPatterns;
 
   public AgreementRule2(ResourceBundle messages, Language language) {
-    this.language = language;
     super.setCategory(Categories.GRAMMAR.getCategory(messages));
     addExamplePair(Example.wrong("<marker>Kleiner Haus</marker> am Waldrand"),
                    Example.fixed("<marker>Kleines Haus</marker> am Waldrand"));
+    antiPatterns = cacheAntiPatterns(language, ANTI_PATTERNS);
   }
 
   @Override
@@ -96,7 +121,7 @@ public class AgreementRule2 extends Rule {
 
   @Override
   public List<DisambiguationPatternRule> getAntiPatterns() {
-    return makeAntiPatterns(ANTI_PATTERNS, language);
+    return antiPatterns.get();
   }
 
   @Override
@@ -104,14 +129,15 @@ public class AgreementRule2 extends Rule {
     List<RuleMatch> ruleMatches = new ArrayList<>();
     AnalyzedTokenReadings[] tokens = getSentenceWithImmunization(sentence).getTokensWithoutWhitespace();
     for (int i = 0; i < tokens.length; i++) {
-      if (!tokens[i].isSentenceStart() && !tokens[i].getToken().matches("[\"„»«]")) {
+      String token = tokens[i].getToken();
+      if (!tokens[i].isSentenceStart() && !StringUtils.equalsAny(token, "\"", "„", "»", "«")) {
         // skip quotes, as these are not relevant
-        if (i+ 1 < tokens.length && tokens[i].hasPosTagStartingWith("ADJ:") && tokens[i+1].hasPosTagStartingWith("SUB:")) {
-          if (tokens[i].isImmunized() || tokens[i+1].isImmunized()) {
+        if (i+ 1 < tokens.length && tokens[i].hasPosTagStartingWith("ADJ") && tokens[i+1].hasPosTagStartingWith("SUB") && !tokens[i+1].hasPosTagStartingWith("EIG")) {
+          if (tokens[i].isImmunized() || tokens[i+1].isImmunized() || tokens[i].getToken().equalsIgnoreCase("unter")) {
             continue;
           }
           AnalyzedTokenReadings nextToken = i + 2 < tokens.length ? tokens[i + 2] : null;
-          if (nextToken != null && nextToken.hasPosTagStartingWith("SUB:")) {
+          if (nextToken != null && nextToken.hasPosTagStartingWith("SUB")) {
             // no alarm for e.g. "Deutscher Taschenbuch Verlag"
             break;
           }
@@ -133,7 +159,7 @@ public class AgreementRule2 extends Rule {
     Set<String> set = retainCommonCategories(token1, token2);
     RuleMatch ruleMatch = null;
     if (set.isEmpty()) {
-      String msg = "Möglicherweise fehlende grammatische Übereinstimmung zwischen Adjektiv und " +
+      String msg = "Möglicherweise fehlende grammatikalische Übereinstimmung zwischen Adjektiv und " +
             "Nomen bezüglich Kasus, Numerus oder Genus. Beispiel: 'kleiner Haus' statt 'kleines Haus'";
       String shortMsg = "Möglicherweise keine Übereinstimmung bezüglich Kasus, Numerus oder Genus";
       ruleMatch = new RuleMatch(this, sentence, token1.getStartPos(), token2.getEndPos(), msg, shortMsg);

@@ -18,43 +18,34 @@
  */
 package org.languagetool.language;
 
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.ResourceBundle;
-import java.io.IOException;
-
-import org.languagetool.GlobalConfig;
-import org.languagetool.Language;
-import org.languagetool.LanguageMaintainedState;
-import org.languagetool.UserConfig;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.languagetool.*;
 import org.languagetool.languagemodel.LanguageModel;
 import org.languagetool.rules.*;
 import org.languagetool.rules.fr.*;
-import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.FrenchSynthesizer;
+import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tagging.disambiguation.fr.FrenchHybridDisambiguator;
 import org.languagetool.tagging.fr.FrenchTagger;
 import org.languagetool.tokenizers.SRXSentenceTokenizer;
 import org.languagetool.tokenizers.SentenceTokenizer;
+import org.languagetool.tokenizers.Tokenizer;
+import org.languagetool.tokenizers.fr.FrenchWordTokenizer;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
 
 public class French extends Language implements AutoCloseable {
 
-  private SentenceTokenizer sentenceTokenizer;
-  private Synthesizer synthesizer;
-  private Tagger tagger;
-  private Disambiguator disambiguator;
   private LanguageModel languageModel;
-  
+
   @Override
-  public SentenceTokenizer getSentenceTokenizer() {
-    if (sentenceTokenizer == null) {
-      sentenceTokenizer = new SRXSentenceTokenizer(this);
-    }
-    return sentenceTokenizer;
+  public SentenceTokenizer createDefaultSentenceTokenizer() {
+    return new SRXSentenceTokenizer(this);
   }
 
   @Override
@@ -73,28 +64,26 @@ public class French extends Language implements AutoCloseable {
             "CI", "HT", "ML", "SN", "CD", "MA", "RE"};
   }
 
+  @NotNull
   @Override
-  public Tagger getTagger() {
-    if (tagger == null) {
-      tagger = new FrenchTagger();
-    }
-    return tagger;
+  public Tagger createDefaultTagger() {
+    return new FrenchTagger();
+  }
+
+  @Nullable
+  @Override
+  public Synthesizer createDefaultSynthesizer() {
+    return new FrenchSynthesizer(this);
+  }
+  
+  @Override
+  public Tokenizer createDefaultWordTokenizer() {
+    return new FrenchWordTokenizer();
   }
 
   @Override
-  public Synthesizer getSynthesizer() {
-    if (synthesizer == null) {
-      synthesizer = new FrenchSynthesizer(this);
-    }
-    return synthesizer;
-  }
-
-  @Override
-  public Disambiguator getDisambiguator() {
-    if (disambiguator == null) {
-      disambiguator = new FrenchHybridDisambiguator();
-    }
-    return disambiguator;
+  public Disambiguator createDefaultDisambiguator() {
+    return new FrenchHybridDisambiguator();
   }
 
   @Override
@@ -114,17 +103,18 @@ public class French extends Language implements AutoCloseable {
                     Arrays.asList("]", ")", "}"
                          /*"»", French dialog can contain multiple sentences. */
                          /*"’" used in "d’arm" and many other words */)),
-            // very fast, but no suggestions:
-            //new HunspellNoSuggestionRule(messages, this, Example.wrong("Le <marker>chein</marker> noir"), Example.fixed("Le <marker>chien</marker> noir")),
-            // slower than HunspellNoSuggestionRule but with suggestions:
-            new FrenchCompoundAwareHunspellRule(messages, this, userConfig, altLanguages),
+            new MorfologikFrenchSpellerRule(messages, this, userConfig, altLanguages),
             new UppercaseSentenceStartRule(messages, this),
             new MultipleWhitespaceRule(messages, this),
             new SentenceWhitespaceRule(messages),
+            new LongSentenceRule(messages, userConfig, 35, true, true),
+            new LongParagraphRule(messages, this, userConfig),
             // specific to French:
             new CompoundRule(messages),
             new QuestionWhitespaceStrictRule(messages, this),
-            new QuestionWhitespaceRule(messages, this)
+            new QuestionWhitespaceRule(messages, this),
+            new SimpleReplaceRule(messages),
+            new AnglicismReplaceRule(messages)
     );
   }
 
@@ -139,7 +129,7 @@ public class French extends Language implements AutoCloseable {
 
   /** @since 3.1 */
   @Override
-  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel) throws IOException {
+  public List<Rule> getRelevantLanguageModelRules(ResourceBundle messages, LanguageModel languageModel, UserConfig userConfig) throws IOException {
     return Arrays.asList(
             new FrenchConfusionProbabilityRule(messages, languageModel, this)
     );
@@ -150,6 +140,71 @@ public class French extends Language implements AutoCloseable {
   public synchronized LanguageModel getLanguageModel(File indexDir) throws IOException {
     languageModel = initLanguageModel(indexDir, languageModel);
     return languageModel;
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningDoubleQuote() {
+    return "«";
+  }
+
+  /** @since 5.1 */
+  @Override
+  public String getClosingDoubleQuote() {
+    return "»";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningSingleQuote() {
+    return "‘";
+  }
+
+  /** @since 5.1 */
+  @Override
+  public String getClosingSingleQuote() {
+    return "’";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public boolean isAdvancedTypographyEnabled() {
+    return true;
+  }
+  
+  @Override
+  public String toAdvancedTypography (String input) {
+    String output = super.toAdvancedTypography(input);
+  
+    // special cases: apostrophe + quotation marks
+    String beforeApostrophe = "([cjnmtsldCJNMTSLD]|qu|jusqu|lorsqu|puisqu|quoiqu|Qu|Jusqu|Lorsqu|Puisqu|Quoiqu|QU|JUSQU|LORSQU|PUISQU|QUOIQU)";
+    output = output.replaceAll("(\\b"+beforeApostrophe+")'", "$1’");
+    output = output.replaceAll("(\\b"+beforeApostrophe+")’\"", "$1’" + getOpeningDoubleQuote());
+    output = output.replaceAll("(\\b"+beforeApostrophe+")’'", "$1’" + getOpeningSingleQuote());
+    
+    // non-breaking (thin) space 
+    // according to https://fr.wikipedia.org/wiki/Espace_ins%C3%A9cable#En_France
+    output = output.replaceAll("\u00a0;", "\u202f;");
+    output = output.replaceAll("\u00a0!", "\u202f!");
+    output = output.replaceAll("\u00a0\\?", "\u202f?");
+    output = output.replaceAll(";", "\u202f;");
+    output = output.replaceAll("!", "\u202f!");
+    output = output.replaceAll("\\?", "\u202f?");
+    
+    output = output.replaceAll(":", "\u00a0:");
+    output = output.replaceAll("»", "\u00a0»");
+    output = output.replaceAll("«", "«\u00a0");
+    
+    //remove duplicate spaces
+    output = output.replaceAll("\u00a0\u00a0", "\u00a0");
+    output = output.replaceAll("\u202f\u202f", "\u202f");
+    output = output.replaceAll("  ", " ");
+    output = output.replaceAll("\u00a0 ", "\u00a0");
+    output = output.replaceAll(" \u00a0", "\u00a0");
+    output = output.replaceAll(" \u202f", "\u202f");
+    output = output.replaceAll("\u202f ", "\u202f");
+    
+    return output;
   }
 
   /**
@@ -169,13 +224,27 @@ public class French extends Language implements AutoCloseable {
   }
 
   @Override
-  public int getPriorityForId(String id) {
-    switch (id) {
-      case "FRENCH_WHITESPACE_STRICT": return 1;  // default off, but if on, it should overwrite FRENCH_WHITESPACE 
+  protected int getPriorityForId(String id) {
+    switch (id) { 
+      case "DU_DU": return 10; // greater than DU_LE
+      case "ACCORD_CHAQUE": return 10; // greater than ACCORD_NOMBRE
+      case "CEST_A_DIRE": return 10; // greater than A_A_ACCENT
+      case "ESPACE_UNITES": return 1; // needs to have higher priority than spell checker
+      case "BYTES": return 1; // needs to be higher than spell checker for 10MB style matches
+      case "Y_A": return 1; // needs to be higher than spell checker for style suggestion
+      case "A_A_ACCENT": return 1; // triggers false alarms for IL_FAUT_INF if there is no a/à correction
+      case "FRENCH_WHITESPACE_STRICT": return 1;  // default off, but if on, it should overwrite FRENCH_WHITESPACE
+      case "JE_M_APPEL": return 1;  // override NON_V
       case "FRENCH_WHITESPACE": return 0;
+      case "JE_SUI": return 1;  // needs higher priority than spell checker
+      case "TOO_LONG_PARAGRAPH": return -15;
+      case "VERB_PRONOUN": return -50; // greater than FR_SPELLING_RULE; less than ACCORD_V_QUESTION
+      case "FR_SPELLING_RULE": return -100;
+      case "ELISION": return -200; // should be lower in priority than spell checker
+      case "UPPERCASE_SENTENCE_START": return -300;
     }
     if (id.startsWith("grammalecte_")) {
-      return -1;
+      return -150;
     }
     return super.getPriorityForId(id);
   }

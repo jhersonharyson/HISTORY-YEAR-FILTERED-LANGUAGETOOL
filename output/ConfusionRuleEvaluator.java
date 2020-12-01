@@ -19,10 +19,8 @@
 package org.languagetool.dev.bigdata;
 
 import org.apache.commons.lang3.StringUtils;
-import org.languagetool.AnalyzedSentence;
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.Languages;
+import org.jetbrains.annotations.NotNull;
+import org.languagetool.*;
 import org.languagetool.chunking.Chunker;
 import org.languagetool.dev.dumpcheck.*;
 import org.languagetool.dev.eval.FMeasure;
@@ -35,9 +33,7 @@ import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.xx.DemoTagger;
 import org.languagetool.tools.StringTools;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
+import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -73,7 +69,7 @@ class ConfusionRuleEvaluator {
     this.caseSensitive = caseSensitive;
     this.bothDirections = bothDirections;
     try {
-      List<Rule> rules = language.getRelevantLanguageModelRules(JLanguageTool.getMessageBundle(), languageModel);
+      List<Rule> rules = language.getRelevantLanguageModelRules(JLanguageTool.getMessageBundle(), languageModel, null);
       if (rules == null) {
         throw new RuntimeException("Language " + language + " doesn't seem to support a language model");
       }
@@ -98,7 +94,8 @@ class ConfusionRuleEvaluator {
     this.verbose = verbose;
   }
 
-  Map<Long, RuleEvalResult> run(List<String> inputsOrDir, String token, String homophoneToken, int maxSentences, List<Long> evalFactors) throws IOException {
+  Map<Long, RuleEvalResult> run(List<String> inputsOrDir, String token, String homophoneToken, int maxSentences, List<Long> evalFactors,
+                                Map<String, Integer> sourcesForToken, Map<String, Integer> sourcesForHomophone) throws IOException {
     for (Long evalFactor : evalFactors) {
       evalValues.put(evalFactor, new RuleEvalValues());
     }
@@ -117,7 +114,7 @@ class ConfusionRuleEvaluator {
     if (bothDirections) {
       evaluate(allHomophoneSentences, true, homophoneToken, token, evalFactors);
     }
-    return printEvalResult(allTokenSentences, allHomophoneSentences, inputsOrDir, token, homophoneToken);
+    return printEvalResult(allTokenSentences, allHomophoneSentences, inputsOrDir, token, homophoneToken, sourcesForToken, sourcesForHomophone);
   }
 
   @SuppressWarnings("ConstantConditions")
@@ -158,7 +155,7 @@ class ConfusionRuleEvaluator {
   }
 
   private Map<Long, RuleEvalResult> printEvalResult(List<Sentence> allTokenSentences, List<Sentence> allHomophoneSentences, List<String> inputsOrDir,
-                                                    String token, String homophoneToken) {
+                                                    String token, String homophoneToken, Map<String, Integer> sourcesForToken, Map<String, Integer> sourcesForHomophone) {
     Map<Long, RuleEvalResult> results = new LinkedHashMap<>();
     int sentences = allTokenSentences.size() + allHomophoneSentences.size();
     System.out.println("\nEvaluation results for " + token + "/" + homophoneToken
@@ -169,6 +166,7 @@ class ConfusionRuleEvaluator {
     for (Long factor : factors) {
       RuleEvalValues evalValues = this.evalValues.get(factor);
       float precision = (float)evalValues.truePositives / (evalValues.truePositives + evalValues.falsePositives);
+      float specificity = (float)evalValues.trueNegatives / (evalValues.trueNegatives + evalValues.falsePositives);
       float recall = (float) evalValues.truePositives / (evalValues.truePositives + evalValues.falseNegatives);
       String date = new SimpleDateFormat("yyyy-MM-dd").format(new Date());
       String spaces = StringUtils.repeat(" ", 82-Long.toString(factor).length());
@@ -184,9 +182,12 @@ class ConfusionRuleEvaluator {
         }
       }
       float fMeasureBeta = 0.5f;
-      String summary = String.format(ENGLISH, "%s%s%s; %d; %s # p=%.3f, r=%.3f, f%.1f=%.3f, %d+%d, %dgrams, %s",
+      String summary = String.format(ENGLISH, "%s%s%s; %d; %s # p=%.3f, r=%.3f, f%.1f=%.3f, s=%.3f, %d+%d, %dgrams, %s, " +
+                      "fp=%d, fn=%d, tp=%d, tn=%d, %s, %s",
               word1, delimiter, word2, factor, spaces, precision, recall, fMeasureBeta, FMeasure.getFMeasure(precision, recall, fMeasureBeta),
-              allTokenSentences.size(), allHomophoneSentences.size(), rule.getNGrams(), date);
+              specificity, allTokenSentences.size(), allHomophoneSentences.size(), rule.getNGrams(), date,
+              evalValues.falsePositives, evalValues.falseNegatives, evalValues.truePositives, evalValues.trueNegatives,
+              sourcesForToken, sourcesForHomophone);
       results.put(factor, new RuleEvalResult(summary, precision, recall));
       if (verbose) {
         System.out.println();
@@ -263,7 +264,7 @@ class ConfusionRuleEvaluator {
               + " <token> <homophoneToken> <langCode> <languageModelTopDir> <wikipediaXml|tatoebaFile|plainTextFile|dir>...");
       System.err.println("   <languageModelTopDir> is a directory with sub-directories like 'en' which then again contain '1grams',");
       System.err.println("                      '2grams', and '3grams' sub directories with Lucene indexes");
-      System.err.println("                      See http://wiki.languagetool.org/finding-errors-using-n-gram-data");
+      System.err.println("                      See https://dev.languagetool.org/finding-errors-using-n-gram-data");
       System.err.println("   <wikipediaXml|tatoebaFile|plainTextFile|dir> either a Wikipedia XML dump, or a Tatoeba file, or");
       System.err.println("                      a plain text file with one sentence per line, or a directory with");
       System.err.println("                      example sentences (where <word>.txt contains only the sentences for <word>).");
@@ -291,7 +292,7 @@ class ConfusionRuleEvaluator {
     boolean bothDirections = true;
     System.out.println("NOTE: assuming pair works in both directions (A -> B and B -> A)");
     ConfusionRuleEvaluator generator = new ConfusionRuleEvaluator(lang, languageModel, CASE_SENSITIVE, bothDirections);
-    generator.run(inputsFiles, token, homophoneToken, MAX_SENTENCES, EVAL_FACTORS);
+    generator.run(inputsFiles, token, homophoneToken, MAX_SENTENCES, EVAL_FACTORS, Collections.emptyMap(), Collections.emptyMap());
     long endTime = System.currentTimeMillis();
     System.out.println("\nTime: " + (endTime-startTime)+"ms");
   }
@@ -305,17 +306,15 @@ class ConfusionRuleEvaluator {
     public String getName() {
       return "English Light";
     }
-    
+
+    @NotNull
     @Override
-    public Tagger getTagger() {
-      if (tagger == null) {
-        tagger = new DemoTagger();
-      }
-      return tagger;
+    public Tagger createDefaultTagger() {
+      return new DemoTagger();
     }
 
     @Override
-    public Chunker getChunker() {
+    public Chunker createDefaultChunker() {
       return null;
     }
   }

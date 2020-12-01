@@ -18,44 +18,24 @@
  */
 package org.languagetool.language;
 
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
-import java.util.ResourceBundle;
-import java.util.regex.Pattern;
-
-import org.languagetool.JLanguageTool;
-import org.languagetool.Language;
-import org.languagetool.LanguageMaintainedState;
-import org.languagetool.UserConfig;
-import org.languagetool.databroker.ResourceDataBroker;
-import org.languagetool.rules.CommaWhitespaceRule;
-import org.languagetool.rules.Example;
-import org.languagetool.rules.MultipleWhitespaceRule;
-import org.languagetool.rules.Rule;
-import org.languagetool.rules.UppercaseSentenceStartRule;
-import org.languagetool.rules.uk.HiddenCharacterRule;
-import org.languagetool.rules.uk.MissingHyphenRule;
-import org.languagetool.rules.uk.MixedAlphabetsRule;
-import org.languagetool.rules.uk.MorfologikUkrainianSpellerRule;
-import org.languagetool.rules.uk.SimpleReplaceRenamedRule;
-import org.languagetool.rules.uk.SimpleReplaceRule;
-import org.languagetool.rules.uk.SimpleReplaceSoftRule;
-import org.languagetool.rules.uk.SimpleReplaceSpelling1992Rule;
-import org.languagetool.rules.uk.TokenAgreementAdjNounRule;
-import org.languagetool.rules.uk.TokenAgreementNounVerbRule;
-import org.languagetool.rules.uk.TokenAgreementPrepNounRule;
-import org.languagetool.rules.uk.UkrainianWordRepeatRule;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.languagetool.*;
+import org.languagetool.broker.ResourceDataBroker;
+import org.languagetool.rules.*;
+import org.languagetool.rules.uk.*;
 import org.languagetool.synthesis.Synthesizer;
 import org.languagetool.synthesis.uk.UkrainianSynthesizer;
 import org.languagetool.tagging.Tagger;
 import org.languagetool.tagging.disambiguation.Disambiguator;
 import org.languagetool.tagging.disambiguation.uk.UkrainianHybridDisambiguator;
 import org.languagetool.tagging.uk.UkrainianTagger;
-import org.languagetool.tokenizers.SRXSentenceTokenizer;
-import org.languagetool.tokenizers.Tokenizer;
+import org.languagetool.tokenizers.*;
 import org.languagetool.tokenizers.uk.UkrainianWordTokenizer;
+
+import java.io.IOException;
+import java.util.*;
+import java.util.regex.Pattern;
 
 public class Ukrainian extends Language {
   private static final List<String> RULE_FILES = Arrays.asList(
@@ -67,12 +47,6 @@ public class Ukrainian extends Language {
       );
 
   public static final Ukrainian DEFAULT_VARIANT = new Ukrainian();
-  private Tagger tagger;
-  private SRXSentenceTokenizer sentenceTokenizer;
-  private Tokenizer wordTokenizer;
-  private Synthesizer synthesizer;
-  private Disambiguator disambiguator;
-
 
   public Ukrainian() {
   }
@@ -112,44 +86,32 @@ public class Ukrainian extends Language {
 //    return DEFAULT_VARIANT;
 //  }
 
+
+  @NotNull
   @Override
-  public Tagger getTagger() {
-    if (tagger == null) {
-      tagger = new UkrainianTagger();
-    }
-    return tagger;
+  public Tagger createDefaultTagger() {
+    return new UkrainianTagger();
+  }
+
+  @Nullable
+  @Override
+  public Synthesizer createDefaultSynthesizer() {
+    return new UkrainianSynthesizer(this);
   }
 
   @Override
-  public Synthesizer getSynthesizer() {
-    if (synthesizer == null) {
-      synthesizer = new UkrainianSynthesizer(this);
-    }
-    return synthesizer;
+  public Disambiguator createDefaultDisambiguator() {
+    return new UkrainianHybridDisambiguator();
   }
 
   @Override
-  public Disambiguator getDisambiguator() {
-    if (disambiguator == null) {
-      disambiguator = new UkrainianHybridDisambiguator();
-    }
-    return disambiguator;
+  public Tokenizer createDefaultWordTokenizer() {
+    return new UkrainianWordTokenizer();
   }
 
   @Override
-  public Tokenizer getWordTokenizer() {
-    if (wordTokenizer == null) {
-      wordTokenizer = new UkrainianWordTokenizer();
-    }
-    return wordTokenizer;
-  }
-
-  @Override
-  public SRXSentenceTokenizer getSentenceTokenizer() {
-    if (sentenceTokenizer == null) {
-      sentenceTokenizer = new SRXSentenceTokenizer(this);
-    }
-    return sentenceTokenizer;
+  public SentenceTokenizer createDefaultSentenceTokenizer() {
+    return new SRXSentenceTokenizer(this);
   }
 
   @Override
@@ -165,6 +127,8 @@ public class Ukrainian extends Language {
     MorfologikUkrainianSpellerRule morfologikSpellerRule = new MorfologikUkrainianSpellerRule(messages, this, userConfig, altLanguages);
 
     return Arrays.asList(
+        // lower priority rules
+
         new CommaWhitespaceRule(messages,
             Example.wrong("Ми обідали борщем<marker> ,</marker> пловом і салатом."),
             Example.fixed("Ми обідали борщем<marker>,</marker> пловом і салатом")),
@@ -177,9 +141,17 @@ public class Ukrainian extends Language {
         new MultipleWhitespaceRule(messages, this),
         new UkrainianWordRepeatRule(messages, this),
 
+        new TypographyRule(messages),
+        new HiddenCharacterRule(messages),
+
+
+        // medium priority rules
+        
         // TODO: does not handle !.. and ?..
         //            new DoublePunctuationRule(messages),
         morfologikSpellerRule,
+
+        // high priority rules
 
         new MissingHyphenRule(messages, ((UkrainianTagger)getTagger()).getWordTagger()),
 
@@ -192,9 +164,7 @@ public class Ukrainian extends Language {
         new SimpleReplaceSoftRule(messages),
         new SimpleReplaceRenamedRule(messages),
         getSpellingReplacementRule(messages),
-        new SimpleReplaceRule(messages, morfologikSpellerRule),
-
-        new HiddenCharacterRule(messages)
+        new SimpleReplaceRule(messages, morfologikSpellerRule)
     );
   }
 
@@ -221,6 +191,36 @@ public class Ukrainian extends Language {
   @Override
   public List<String> getDefaultDisabledRulesForVariant() {
     return Arrays.asList("piv_before_iotized_1992", "piv_with_proper_noun_1992");
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningDoubleQuote() {
+    return "«";
+  }
+
+  /** @since 5.1 */
+  @Override
+  public String getClosingDoubleQuote() {
+    return "»";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public String getOpeningSingleQuote() {
+    return "‘";
+  }
+
+  /** @since 5.1 */
+  @Override
+  public String getClosingSingleQuote() {
+    return "’";
+  }
+  
+  /** @since 5.1 */
+  @Override
+  public boolean isAdvancedTypographyEnabled() {
+    return false;  //DISABLED!
   }
 
 }
